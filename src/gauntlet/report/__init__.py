@@ -19,6 +19,8 @@ nothing in this package performs I/O.
 from __future__ import annotations
 
 from gauntlet.report.analyze import build_report as build_report
+from gauntlet.report.html import render_html as render_html
+from gauntlet.report.html import write_html as write_html
 from gauntlet.report.schema import AxisBreakdown as AxisBreakdown
 from gauntlet.report.schema import CellBreakdown as CellBreakdown
 from gauntlet.report.schema import FailureCluster as FailureCluster
@@ -32,4 +34,6 @@ __all__ = [
     "Heatmap2D",
     "Report",
     "build_report",
+    "render_html",
+    "write_html",
 ]
