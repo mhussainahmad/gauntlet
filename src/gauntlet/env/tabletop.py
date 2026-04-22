@@ -46,7 +46,7 @@ across runs.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import gymnasium as gym
 import mujoco
@@ -58,6 +58,34 @@ __all__ = ["TabletopEnv"]
 
 
 _ASSET_PATH: Path = Path(__file__).parent / "assets" / "tabletop.xml"
+
+# Number of pre-allocated distractor slots in the MJCF.
+# DistractorCount perturbation enables the first N (0 <= N <= 10).
+N_DISTRACTOR_SLOTS: Final[int] = 10
+
+# Material names for the object_texture perturbation. Both are defined in
+# assets/tabletop.xml. The perturbation flips the cube_geom's matid
+# between these two; geom_rgba stays at the MuJoCo default (0.5,0.5,0.5,1)
+# so the material colour is what shows.
+_CUBE_MATERIAL_DEFAULT: Final[str] = "cube_mat"
+_CUBE_MATERIAL_ALT: Final[str] = "cube_alt_mat"
+
+# Set of accepted perturbation axis names. The canonical ordered tuple
+# lives in ``gauntlet.env.perturbation.AXIS_NAMES``; we duplicate the
+# membership set here as a module-local constant to keep ``set_perturbation``
+# free of any cross-module import (avoids a perturbation -> tabletop ->
+# perturbation cycle).
+_KNOWN_AXIS_NAMES: Final[frozenset[str]] = frozenset(
+    {
+        "lighting_intensity",
+        "camera_offset_x",
+        "camera_offset_y",
+        "object_texture",
+        "object_initial_pose_x",
+        "object_initial_pose_y",
+        "distractor_count",
+    }
+)
 
 # Observation / action type aliases for the gym.Env generic parameters.
 # We keep ``Any`` inside ``NDArray`` here only to match ``gauntlet.policy.base``;
@@ -141,12 +169,31 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
 
         # Cached mujoco indices (set in _cache_indices) — type: int | ndarray(int).
         self._cube_body_id: int = 0
+        self._cube_geom_id: int = 0
         self._cube_qpos_adr: int = 0
         self._cube_qvel_adr: int = 0
         self._ee_body_id: int = 0
         self._ee_mocap_id: int = 0
         self._target_site_id: int = 0
+        self._main_cam_id: int = 0
+        self._cube_material_default_id: int = 0
+        self._cube_material_alt_id: int = 0
+        self._distractor_geom_ids: tuple[int, ...] = ()
         self._cache_indices()
+
+        # Baseline snapshot of every model field a perturbation may touch.
+        # Captured BEFORE any perturbation can run; restore_baseline() copies
+        # these back into the live model. Stored as plain ndarray copies so
+        # later mutations to model arrays cannot retroactively change them.
+        self._baseline: dict[str, NDArray[np.float64]] = {}
+        self._snapshot_baseline()
+
+        # Pending per-episode perturbations. Set via set_perturbation BEFORE
+        # the next reset(); reset() restores the baseline, re-randomises from
+        # the seed, then applies these on top, then clears the dict so the
+        # next episode starts fresh. See spec §5 task 4: "applies to the env
+        # before reset()".
+        self._pending_perturbations: dict[str, float] = {}
 
         # Per-episode state.
         self._rng: np.random.Generator = np.random.default_rng()
@@ -170,9 +217,16 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
     # ------------------------------------------------------------------ setup
 
     def _cache_indices(self) -> None:
-        """Resolve name -> id lookups against the loaded model."""
+        """Resolve name -> id lookups against the loaded model.
+
+        Raises a clear error if any expected name (cube, ee, target,
+        main camera, distractor_0..distractor_9) is missing from the MJCF.
+        """
         m = self._model
         self._cube_body_id = int(mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "cube"))
+        self._cube_geom_id = int(mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_GEOM, "cube_geom"))
+        if self._cube_geom_id < 0:
+            raise RuntimeError("cube_geom not found in loaded MJCF")
         jnt_adr = int(m.body_jntadr[self._cube_body_id])
         self._cube_qpos_adr = int(m.jnt_qposadr[jnt_adr])
         self._cube_qvel_adr = int(m.jnt_dofadr[jnt_adr])
@@ -181,6 +235,150 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         if self._ee_mocap_id < 0:
             raise RuntimeError("ee body is not a mocap body in the loaded MJCF")
         self._target_site_id = int(mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_SITE, "target"))
+        self._main_cam_id = int(mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_CAMERA, "main"))
+        if self._main_cam_id < 0:
+            raise RuntimeError("camera 'main' not found in loaded MJCF")
+
+        self._cube_material_default_id = int(
+            mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_MATERIAL, _CUBE_MATERIAL_DEFAULT)
+        )
+        if self._cube_material_default_id < 0:
+            raise RuntimeError(f"cube material '{_CUBE_MATERIAL_DEFAULT}' missing from MJCF")
+        self._cube_material_alt_id = int(
+            mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_MATERIAL, _CUBE_MATERIAL_ALT)
+        )
+        if self._cube_material_alt_id < 0:
+            raise RuntimeError(f"cube material '{_CUBE_MATERIAL_ALT}' missing from MJCF")
+
+        distractor_ids: list[int] = []
+        for i in range(N_DISTRACTOR_SLOTS):
+            geom_name = f"distractor_{i}_geom"
+            gid = int(mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_GEOM, geom_name))
+            if gid < 0:
+                raise RuntimeError(f"expected distractor slot '{geom_name}' missing from MJCF")
+            distractor_ids.append(gid)
+        self._distractor_geom_ids = tuple(distractor_ids)
+
+    # -------------------------------------------------------------- baseline
+
+    def _snapshot_baseline(self) -> None:
+        """Cache the original value of every model field a perturbation can touch.
+
+        Stored as ndarray copies (not views) so subsequent in-place writes
+        to the live model can never retroactively modify the snapshot.
+        Called once from ``__init__``, before any perturbation can run.
+        """
+        m = self._model
+        cube_g = self._cube_geom_id
+        d_ids = list(self._distractor_geom_ids)
+        cam = self._main_cam_id
+        snap: dict[str, NDArray[np.float64]] = {
+            "light_diffuse_0": np.array(m.light_diffuse[0], dtype=np.float64).copy(),
+            "cam_pos_main": np.array(m.cam_pos[cam], dtype=np.float64).copy(),
+            # cube_geom_rgba is the per-geom override; with a material attached
+            # MuJoCo loads it as 0.5,0.5,0.5,1 by default. We snapshot it so
+            # restore_baseline puts it back if anyone ever overwrites it.
+            "cube_geom_rgba": np.array(m.geom_rgba[cube_g], dtype=np.float64).copy(),
+            # The actual colour switch for object_texture flips this matid.
+            "cube_geom_matid": np.array([m.geom_matid[cube_g]], dtype=np.float64).copy(),
+            "distractor_rgba": np.array([m.geom_rgba[g] for g in d_ids], dtype=np.float64).copy(),
+            "distractor_contype": np.array(
+                [m.geom_contype[g] for g in d_ids], dtype=np.float64
+            ).copy(),
+            "distractor_conaffinity": np.array(
+                [m.geom_conaffinity[g] for g in d_ids], dtype=np.float64
+            ).copy(),
+        }
+        self._baseline = snap
+
+    def restore_baseline(self) -> None:
+        """Copy every cached baseline value back into the live model.
+
+        Called from :meth:`reset` *before* re-randomising, so per-episode
+        state is clean and one episode's perturbation cannot leak into
+        the next. Does NOT clear the pending-perturbation queue; that
+        queue is the input to the next reset, not state to wipe.
+        """
+        m = self._model
+        cube_g = self._cube_geom_id
+        cam = self._main_cam_id
+        d_ids = self._distractor_geom_ids
+        m.light_diffuse[0] = self._baseline["light_diffuse_0"]
+        m.cam_pos[cam] = self._baseline["cam_pos_main"]
+        m.geom_rgba[cube_g] = self._baseline["cube_geom_rgba"]
+        m.geom_matid[cube_g] = int(self._baseline["cube_geom_matid"][0])
+        for i, gid in enumerate(d_ids):
+            m.geom_rgba[gid] = self._baseline["distractor_rgba"][i]
+            m.geom_contype[gid] = int(self._baseline["distractor_contype"][i])
+            m.geom_conaffinity[gid] = int(self._baseline["distractor_conaffinity"][i])
+
+    # ---------------------------------------------------------- perturbation
+
+    def set_perturbation(self, name: str, value: float) -> None:
+        """Queue a named scalar perturbation for the next :meth:`reset`.
+
+        Per spec §5 task 4 ("applies to the env before reset()"), every
+        axis is recorded into a pending dict and applied by ``reset`` AFTER
+        ``restore_baseline`` and AFTER the seed-driven randomisation. This
+        gives a single coherent contract for all 7 axes — pose axes
+        override the random XY, model-state axes mutate the model.
+
+        Raises:
+            ValueError: if ``name`` is not a known axis or the value is out
+                of range for an axis with a hard bound (currently only
+                ``distractor_count``).
+        """
+        if name not in _KNOWN_AXIS_NAMES:
+            raise ValueError(f"unknown perturbation axis: {name!r}")
+        if name == "distractor_count":
+            count = round(float(value))
+            if count < 0 or count > N_DISTRACTOR_SLOTS:
+                raise ValueError(
+                    f"distractor_count must be in [0, {N_DISTRACTOR_SLOTS}]; got {count}"
+                )
+        self._pending_perturbations[name] = float(value)
+
+    def _apply_pending_perturbations(self) -> None:
+        """Apply every queued perturbation on top of the just-randomised state."""
+        for name, value in self._pending_perturbations.items():
+            self._apply_one_perturbation(name, value)
+
+    def _apply_one_perturbation(self, name: str, value: float) -> None:
+        """Mutate the model / cube qpos for a single axis. Internal."""
+        m = self._model
+        if name == "lighting_intensity":
+            m.light_diffuse[0] = np.array([value, value, value], dtype=np.float64)
+        elif name == "camera_offset_x":
+            base = self._baseline["cam_pos_main"]
+            m.cam_pos[self._main_cam_id] = np.array(
+                [base[0] + value, base[1], base[2]], dtype=np.float64
+            )
+        elif name == "camera_offset_y":
+            base = self._baseline["cam_pos_main"]
+            m.cam_pos[self._main_cam_id] = np.array(
+                [base[0], base[1] + value, base[2]], dtype=np.float64
+            )
+        elif name == "object_texture":
+            choose_alt = round(float(value)) != 0
+            mat_id = self._cube_material_alt_id if choose_alt else self._cube_material_default_id
+            m.geom_matid[self._cube_geom_id] = mat_id
+        elif name == "object_initial_pose_x":
+            self._data.qpos[self._cube_qpos_adr + 0] = float(value)
+        elif name == "object_initial_pose_y":
+            self._data.qpos[self._cube_qpos_adr + 1] = float(value)
+        elif name == "distractor_count":
+            count = round(float(value))
+            for i, gid in enumerate(self._distractor_geom_ids):
+                if i < count:
+                    base_rgba = self._baseline["distractor_rgba"][i].copy()
+                    base_rgba[3] = 1.0
+                    m.geom_rgba[gid] = base_rgba
+                    m.geom_contype[gid] = 1
+                    m.geom_conaffinity[gid] = 1
+                else:
+                    m.geom_rgba[gid] = self._baseline["distractor_rgba"][i]
+                    m.geom_contype[gid] = int(self._baseline["distractor_contype"][i])
+                    m.geom_conaffinity[gid] = int(self._baseline["distractor_conaffinity"][i])
 
     # --------------------------------------------------------------- gym API
 
@@ -200,6 +398,11 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         # We manage our own RNG to avoid coupling to gymnasium's internal
         # stream ordering; the seed is the contract.
         self._rng = np.random.default_rng(seed)
+
+        # Wipe any stale model perturbations from a prior episode BEFORE
+        # we touch qpos / mocap / target. After this point the model is
+        # bit-identical to construction time.
+        self.restore_baseline()
 
         mujoco.mj_resetData(self._model, self._data)
 
@@ -243,6 +446,15 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         )
         self._data.mocap_pos[self._ee_mocap_id] = mocap_start
         self._data.mocap_quat[self._ee_mocap_id] = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64)
+
+        # Apply any per-episode perturbations queued via set_perturbation.
+        # Pose overrides clobber the random cube XY just written above.
+        # All other axes mutate model fields. Clear the queue afterwards so
+        # one episode's perturbation cannot silently re-apply on the next
+        # reset.
+        if self._pending_perturbations:
+            self._apply_pending_perturbations()
+            self._pending_perturbations = {}
 
         # Episode flags.
         self._step_count = 0
