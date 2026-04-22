@@ -1,0 +1,21 @@
+# tabletop-smoke — Phase 1 Task 10 end-to-end example suite.
+#
+# Intentionally tiny: 3 lighting intensities * 2 cube textures = 6 cells,
+# 4 episodes per cell = 24 rollouts. Demonstrates both axis shapes
+# (continuous + categorical) and produces a non-trivial 2D heatmap, while
+# fitting comfortably under ~15s on a laptop with n_workers=2.
+#
+# For the full canonical suite (4 axes, 144 cells, 1440 rollouts) point the
+# CLI at examples/suites/tabletop-basic-v1.yaml instead.
+
+name: tabletop-smoke
+env: tabletop
+seed: 0
+episodes_per_cell: 4
+axes:
+  lighting_intensity:
+    low: 0.3
+    high: 1.5
+    steps: 3
+  object_texture:
+    values: [0, 1]
