@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+{# Gauntlet failure-analysis report.
+
+Design rules from GAUNTLET_SPEC.md §6:
+* "Never aggregate away failures." The failure-clusters table leads the
+  report; the overall success rate is NEVER headlined above it. The
+  summary card's primary number is the failure rate + pass/fail dot.
+* "No wall-of-numbers reports." The per-cell table is collapsed inside
+  a <details> block — available but not in the way.
+
+Data-embed conventions:
+* `data` is ``report.model_dump(mode="json")`` with NaN → null applied
+  recursively in ``gauntlet.report.html`` (kept OUT of the template so
+  a rendered page always parses as valid JSON on the JS side).
+* ``model_dump(mode="json")`` stringifies float dict keys; JS calls
+  ``parseFloat`` on the way back out (see ``renderAxisCharts`` etc.).
+#}
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Gauntlet report — {{ report.suite_name }}</title>
+<style>
+  :root {
+    --fg: #1a1a1a;
+    --fg-muted: #555;
+    --bg: #fafafa;
+    --card-bg: #ffffff;
+    --border: #e1e1e1;
+    --pass: #2ca02c;
+    --fail: #d62728;
+    --warn: #f0ad4e;
+    --heat-good: #2ca02c;
+    --heat-bad: #d62728;
+    --heat-none: #d0d0d0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 "Helvetica Neue", Arial, sans-serif;
+    color: var(--fg);
+    background: var(--bg);
+    margin: 0;
+    padding: 24px;
+    line-height: 1.4;
+  }
+  h1, h2, h3 { margin: 0 0 8px; }
+  h1 { font-size: 1.6rem; }
+  h2 { font-size: 1.25rem; margin-top: 32px; }
+  h3 { font-size: 1.0rem; font-weight: 600; }
+  section { margin-bottom: 24px; }
+  .card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+  }
+  .summary {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 16px 24px;
+    align-items: center;
+  }
+  .summary-dot {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 2px solid rgba(0, 0, 0, 0.15);
+  }
+  .summary-dot.pass { background: var(--pass); }
+  .summary-dot.fail { background: var(--fail); }
+  .summary-dot.warn { background: var(--warn); }
+  .summary-metrics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px 32px;
+  }
+  .metric-label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--fg-muted);
+  }
+  .metric-value { font-size: 1.5rem; font-weight: 600; }
+  .metric-value.fail { color: var(--fail); }
+  .subtle { color: var(--fg-muted); font-size: 0.9rem; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.9rem;
+  }
+  th, td {
+    border-bottom: 1px solid var(--border);
+    padding: 6px 10px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { background: #f0f0f0; font-weight: 600; }
+  tbody tr:hover { background: #fafafa; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.85rem;
+  }
+  .empty-state {
+    color: var(--fg-muted);
+    font-style: italic;
+  }
+  .chart-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+  }
+  .chart-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+  }
+  .chart-card canvas { max-width: 100%; height: 220px !important; }
+  .heatmap {
+    display: inline-grid;
+    gap: 2px;
+    background: var(--border);
+    padding: 2px;
+    border-radius: 4px;
+  }
+  .heatmap-cell {
+    width: 56px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-variant-numeric: tabular-nums;
+    color: #fff;
+    text-shadow: 0 1px 1px rgba(0,0,0,0.25);
+  }
+  .heatmap-cell.empty {
+    background: var(--heat-none);
+    color: var(--fg-muted);
+    text-shadow: none;
+  }
+  .heatmap-row { display: contents; }
+  .heatmap-wrapper { overflow-x: auto; }
+  .heatmap-block { margin-bottom: 24px; }
+  .axis-labels {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 4px;
+    margin-top: 8px;
+  }
+  details { margin-top: 12px; }
+  summary {
+    cursor: pointer;
+    font-weight: 600;
+    padding: 4px 0;
+  }
+</style>
+</head>
+<body>
+
+<h1>Gauntlet report — {{ report.suite_name }}</h1>
+
+{# ─── 1. Summary card ───
+   Per §6 the failure rate is the headline. Overall success appears
+   later (in the per-axis section); it is NEVER above the failure
+   cluster table. #}
+<section>
+  <div class="card summary">
+    <div class="summary-dot {{ 'pass' if report.overall_failure_rate == 0.0 else ('warn' if report.overall_failure_rate < 0.2 else 'fail') }}"
+         title="pass/fail indicator"></div>
+    <div class="summary-metrics">
+      <div>
+        <div class="metric-label">Failure rate</div>
+        <div class="metric-value fail">{{ '%.1f'|format(report.overall_failure_rate * 100) }}%</div>
+      </div>
+      <div>
+        <div class="metric-label">Episodes</div>
+        <div class="metric-value">{{ report.n_episodes }}</div>
+      </div>
+      <div>
+        <div class="metric-label">Suite</div>
+        <div class="metric-value" style="font-size:1.05rem">{{ report.suite_name }}</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+{# ─── 2. Failure clusters — leads the report, per §6 ─── #}
+<section>
+  <h2>Where it failed</h2>
+  {% if report.failure_clusters %}
+  <div class="card">
+    <table>
+      <thead>
+        <tr>
+          <th>Axis combination</th>
+          <th class="num">n</th>
+          <th class="num">Failure rate</th>
+          <th class="num">Lift (×)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for cluster in report.failure_clusters %}
+        <tr>
+          <td>
+            <code>
+              {%- set pairs = [] -%}
+              {%- for axis_name, axis_value in cluster.axes.items() -%}
+                {{- '' if loop.first else ' ∧ ' -}}
+                {{- axis_name }}={{ axis_value -}}
+              {%- endfor -%}
+            </code>
+          </td>
+          <td class="num">{{ cluster.n_episodes }}</td>
+          <td class="num">{{ '%.1f'|format(cluster.failure_rate * 100) }}%</td>
+          <td class="num">{{ '%.2f'|format(cluster.lift) }}×</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="card empty-state">
+    No statistically significant failure clusters detected at this threshold.
+  </div>
+  {% endif %}
+</section>
+
+{# ─── 3. Per-axis bar charts ─── #}
+<section>
+  <h2>Per-axis success rate</h2>
+  <p class="subtle">
+    Overall pass rate: {{ '%.1f'|format(report.overall_success_rate * 100) }}%
+    ({{ report.n_success }}/{{ report.n_episodes }} episodes)
+  </p>
+  {% if report.per_axis %}
+  <div class="chart-row">
+    {% for axis in report.per_axis %}
+    <div class="chart-card">
+      <h3>{{ axis.name }}</h3>
+      <canvas id="axis-{{ axis.name }}"></canvas>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="card empty-state">No axes present in this report.</div>
+  {% endif %}
+</section>
+
+{# ─── 4. Per-cell 2D heatmaps ─── #}
+{% if report.heatmap_2d %}
+<section>
+  <h2>Axis-pair heatmaps</h2>
+  {% for key, heat in report.heatmap_2d.items() %}
+  <div class="heatmap-block card">
+    <h3>{{ heat.axis_x }} × {{ heat.axis_y }}</h3>
+    <div class="heatmap-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>{{ heat.axis_y }} \ {{ heat.axis_x }}</th>
+            {% for xv in heat.x_values %}<th class="num">{{ xv }}</th>{% endfor %}
+          </tr>
+        </thead>
+        <tbody data-heatmap-key="{{ key }}">
+          {% for yv in heat.y_values %}
+          <tr>
+            <th>{{ yv }}</th>
+            {% for xv in heat.x_values %}
+            {# Cell content + colour are filled by JS at load time —
+               see the renderHeatmaps() block below. The placeholder
+               em-dash keeps the rendered HTML readable even with JS
+               disabled. #}
+            <td class="heatmap-js-cell num">—</td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+
+{# ─── 5. Per-cell wall-of-numbers (collapsed by §6) ─── #}
+<section>
+  <details>
+    <summary>Per-cell breakdown ({{ report.per_cell|length }} cells) — expand for the full table</summary>
+    <div class="card" style="margin-top:8px">
+      <table>
+        <thead>
+          <tr>
+            <th class="num">cell</th>
+            <th>Perturbation config</th>
+            <th class="num">n</th>
+            <th class="num">Success rate</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for cell in report.per_cell %}
+          <tr>
+            <td class="num">{{ cell.cell_index }}</td>
+            <td>
+              <code>
+                {%- for k, v in cell.perturbation_config.items() -%}
+                  {{- '' if loop.first else ', ' -}}
+                  {{- k }}={{ v -}}
+                {%- endfor -%}
+              </code>
+            </td>
+            <td class="num">{{ cell.n_episodes }}</td>
+            <td class="num">{{ '%.1f'|format(cell.success_rate * 100) }}%</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+</section>
+
+{#
+  Embed the full Report as JSON. NaNs have already been replaced with
+  nulls in Python (see gauntlet.report.html._nan_to_none) so this block
+  is always valid JSON. Float dict keys become strings under
+  model_dump(mode="json"); the JS below runs parseFloat() on them.
+#}
+<script id="report-data" type="application/json">{{ data|tojson }}</script>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+(function () {
+  const raw = document.getElementById('report-data').textContent;
+  const data = JSON.parse(raw);
+
+  // Diverging green→red scale, with gray for null (no data).
+  function heatColor(rate) {
+    if (rate === null || rate === undefined) return '#d0d0d0';
+    // rate in [0,1]; 1.0 = green, 0.0 = red.
+    const r = Math.round(214 + (44 - 214) * rate);
+    const g = Math.round(39 + (160 - 39) * rate);
+    const b = Math.round(40 + (44 - 40) * rate);
+    return 'rgb(' + r + ',' + g + ',' + b + ')';
+  }
+
+  function renderAxisCharts() {
+    (data.per_axis || []).forEach(function (axis) {
+      const canvas = document.getElementById('axis-' + axis.name);
+      if (!canvas) return;
+      // Keys are strings in JSON mode; sort numerically.
+      const keys = Object.keys(axis.rates)
+        .map(function (k) { return parseFloat(k); })
+        .sort(function (a, b) { return a - b; });
+      const labels = keys.map(function (k) { return String(k); });
+      const rates = keys.map(function (k) { return axis.rates[String(k)]; });
+      const counts = keys.map(function (k) { return axis.counts[String(k)]; });
+      new Chart(canvas, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: 'Success rate',
+            data: rates,
+            backgroundColor: rates.map(function (r) { return heatColor(r); }),
+            borderWidth: 0
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: { y: { min: 0, max: 1, ticks: { callback: function (v) { return (v * 100) + '%'; } } } },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: function (ctx) {
+                  const i = ctx.dataIndex;
+                  return 'rate=' + (rates[i] * 100).toFixed(1) + '%  n=' + counts[i];
+                }
+              }
+            }
+          }
+        }
+      });
+    });
+  }
+
+  function renderHeatmaps() {
+    const heatmaps = data.heatmap_2d || {};
+    document.querySelectorAll('tbody[data-heatmap-key]').forEach(function (tbody) {
+      const key = tbody.getAttribute('data-heatmap-key');
+      const h = heatmaps[key];
+      if (!h) return;
+      const rows = tbody.querySelectorAll('tr');
+      rows.forEach(function (tr, yIdx) {
+        const cells = tr.querySelectorAll('td.heatmap-js-cell');
+        cells.forEach(function (td, xIdx) {
+          const rate = (h.success_rate[yIdx] || [])[xIdx];
+          if (rate === null || rate === undefined) {
+            td.textContent = '—';
+            td.style.background = '#d0d0d0';
+            td.style.color = '#555';
+          } else {
+            td.textContent = (rate * 100).toFixed(0) + '%';
+            td.style.background = heatColor(rate);
+            td.style.color = '#fff';
+          }
+        });
+      });
+    });
+  }
+
+  renderAxisCharts();
+  renderHeatmaps();
+})();
+</script>
+
+</body>
+</html>
