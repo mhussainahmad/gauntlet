@@ -1,0 +1,28 @@
+# tabletop-basic-v1 — the canonical Phase 1 smoke suite.
+#
+# Covers 4 of the 7 perturbation axes (see
+# gauntlet.env.perturbation.AXIS_NAMES) across continuous, categorical,
+# and integer shapes. Task 10 (end-to-end example) runs a policy against
+# this suite and produces an HTML report.
+#
+# Grid size: 4 * 3 * 2 * 6 = 144 cells, 10 episodes each = 1440 rollouts.
+
+name: tabletop-basic-v1
+env: tabletop
+seed: 42
+episodes_per_cell: 10
+axes:
+  lighting_intensity:
+    low: 0.3
+    high: 1.5
+    steps: 4
+  camera_offset_x:
+    low: -0.05
+    high: 0.05
+    steps: 3
+  object_texture:
+    values: [0, 1]
+  distractor_count:
+    low: 0
+    high: 5
+    steps: 6
