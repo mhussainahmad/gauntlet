@@ -9,14 +9,18 @@
   <asset>
     <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0"
              width="512" height="512"/>
-    <material name="table_mat"  rgba="0.7 0.5 0.3 1"/>
-    <material name="cube_mat"   rgba="0.8 0.2 0.2 1"/>
-    <material name="ee_mat"     rgba="0.2 0.6 0.9 1"/>
-    <material name="target_mat" rgba="0.2 0.9 0.2 0.5"/>
+    <material name="table_mat"    rgba="0.7 0.5 0.3 1"/>
+    <material name="cube_mat"     rgba="0.8 0.2 0.2 1"/>
+    <material name="cube_alt_mat" rgba="0.2 0.6 0.2 1"/>
+    <material name="ee_mat"       rgba="0.2 0.6 0.9 1"/>
+    <material name="target_mat"   rgba="0.2 0.9 0.2 0.5"/>
+    <material name="distractor_mat" rgba="0.4 0.4 0.8 1"/>
   </asset>
 
   <worldbody>
     <light pos="0 0 2" dir="0 0 -1" diffuse="1 1 1"/>
+
+    <camera name="main" pos="0.6 -0.6 0.8" xyaxes="1 1 0 0 0 1"/>
 
     <geom name="floor" type="plane" size="2 2 0.1" rgba="0.3 0.3 0.3 1"/>
 
@@ -37,5 +41,60 @@
 
     <site name="target" pos="0.2 0.1 0.42" size="0.05 0.05 0.001"
           type="cylinder" material="target_mat"/>
+
+    <!-- Distractor slots: 10 boxes laid out around the table edge.
+         All start invisible (alpha=0) and non-colliding (contype=0,
+         conaffinity=0). DistractorCount.set_perturbation enables the
+         first N by setting alpha=1 and restoring contype/conaffinity=1. -->
+    <body name="distractor_0" pos="0.35 0.0 0.435">
+      <geom name="distractor_0_geom" type="box" size="0.015 0.015 0.015"
+            material="distractor_mat" rgba="0.4 0.4 0.8 0"
+            contype="0" conaffinity="0"/>
+    </body>
+    <body name="distractor_1" pos="-0.35 0.0 0.435">
+      <geom name="distractor_1_geom" type="box" size="0.015 0.015 0.015"
+            material="distractor_mat" rgba="0.4 0.4 0.8 0"
+            contype="0" conaffinity="0"/>
+    </body>
+    <body name="distractor_2" pos="0.0 0.35 0.435">
+      <geom name="distractor_2_geom" type="box" size="0.015 0.015 0.015"
+            material="distractor_mat" rgba="0.4 0.4 0.8 0"
+            contype="0" conaffinity="0"/>
+    </body>
+    <body name="distractor_3" pos="0.0 -0.35 0.435">
+      <geom name="distractor_3_geom" type="box" size="0.015 0.015 0.015"
+            material="distractor_mat" rgba="0.4 0.4 0.8 0"
+            contype="0" conaffinity="0"/>
+    </body>
+    <body name="distractor_4" pos="0.3 0.3 0.435">
+      <geom name="distractor_4_geom" type="box" size="0.015 0.015 0.015"
+            material="distractor_mat" rgba="0.4 0.4 0.8 0"
+            contype="0" conaffinity="0"/>
+    </body>
+    <body name="distractor_5" pos="-0.3 0.3 0.435">
+      <geom name="distractor_5_geom" type="box" size="0.015 0.015 0.015"
+            material="distractor_mat" rgba="0.4 0.4 0.8 0"
+            contype="0" conaffinity="0"/>
+    </body>
+    <body name="distractor_6" pos="0.3 -0.3 0.435">
+      <geom name="distractor_6_geom" type="box" size="0.015 0.015 0.015"
+            material="distractor_mat" rgba="0.4 0.4 0.8 0"
+            contype="0" conaffinity="0"/>
+    </body>
+    <body name="distractor_7" pos="-0.3 -0.3 0.435">
+      <geom name="distractor_7_geom" type="box" size="0.015 0.015 0.015"
+            material="distractor_mat" rgba="0.4 0.4 0.8 0"
+            contype="0" conaffinity="0"/>
+    </body>
+    <body name="distractor_8" pos="0.42 0.15 0.435">
+      <geom name="distractor_8_geom" type="box" size="0.015 0.015 0.015"
+            material="distractor_mat" rgba="0.4 0.4 0.8 0"
+            contype="0" conaffinity="0"/>
+    </body>
+    <body name="distractor_9" pos="-0.42 -0.15 0.435">
+      <geom name="distractor_9_geom" type="box" size="0.015 0.015 0.015"
+            material="distractor_mat" rgba="0.4 0.4 0.8 0"
+            contype="0" conaffinity="0"/>
+    </body>
   </worldbody>
 </mujoco>

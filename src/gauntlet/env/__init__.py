@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
-from gauntlet.env.tabletop import TabletopEnv
+from gauntlet.env.perturbation import AXIS_NAMES, PerturbationAxis, axis_for
+from gauntlet.env.tabletop import N_DISTRACTOR_SLOTS, TabletopEnv
 
-__all__ = ["TabletopEnv"]
+__all__ = [
+    "AXIS_NAMES",
+    "N_DISTRACTOR_SLOTS",
+    "PerturbationAxis",
+    "TabletopEnv",
+    "axis_for",
+]
