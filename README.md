@@ -17,16 +17,32 @@ See [`GAUNTLET_SPEC.md`](./GAUNTLET_SPEC.md) for the full design.
 
 ## Status
 
-Pre-alpha. Phase 1 (MVP scaffold + tabletop env) is in progress. The
-public surface is unstable.
+Phase 1 MVP is feature-complete: tabletop env, perturbation axes, parallel
+runner, breakdown-first HTML report, and the `gauntlet run / report /
+compare` CLI. Phase 2 starts on real-policy adapters and runtime
+observability. The public surface is still unstable.
 
-## Quickstart (target — not all wired up yet)
+## Quickstart
+
+Three commands reproduce the end-to-end example against the bundled
+smoke suite (3 lighting intensities x 2 cube textures x 4 episodes = 24
+rollouts; finishes in seconds on a laptop):
 
 ```bash
 uv sync
-uv run gauntlet run suites/tabletop-basic-v1.yaml --policy random --out out/
-uv run gauntlet report out/results.json
+uv run gauntlet run examples/suites/tabletop-smoke.yaml --policy random --out out/
+open out/report.html  # macOS: open ; Linux: xdg-open ; Windows: start
 ```
+
+Artefacts land in `out/`: `episodes.json` (one record per rollout),
+`report.json` (analysed breakdowns), and `report.html` — a self-contained
+report leading with the failure-clusters table, then per-axis bar charts,
+then 2D heatmaps of axis combinations. The smoke suite is intentionally
+tiny; for the canonical 4-axis x 144-cell x 1440-rollout shape, swap the
+YAML path for `examples/suites/tabletop-basic-v1.yaml`. See
+[`GAUNTLET_SPEC.md`](./GAUNTLET_SPEC.md) for the full design and
+[`examples/evaluate_random_policy.py`](./examples/evaluate_random_policy.py)
+for the equivalent invocation via the public Python API.
 
 ## Development
 
