@@ -255,7 +255,7 @@ def run(
         raise _fail(f"runner failed: {exc}") from exc
 
     try:
-        report = build_report(episodes)
+        report = build_report(episodes, suite_env=suite.env)
     except ValueError as exc:
         raise _fail(f"could not build report: {exc}") from exc
 
@@ -431,10 +431,46 @@ def compare(
             min=1,
         ),
     ] = 5,
+    allow_cross_backend: Annotated[
+        bool,
+        typer.Option(
+            "--allow-cross-backend",
+            help=(
+                "Opt-in to comparing reports from different backends "
+                "(e.g. 'tabletop' vs 'tabletop-pybullet'). Cross-backend "
+                "comparison measures simulator drift, NOT policy regression "
+                "— see RFC-005 §7.4."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Diff two runs and emit compare.json (HTML companion deferred to Phase 2)."""
     report_a = _load_report_or_episodes(results_a)
     report_b = _load_report_or_episodes(results_b)
+
+    # Cross-backend guard — RFC-005 §11.3 / §12 Q2. Only fires when
+    # both reports carry a suite_env (Phase-2-written reports) and the
+    # values differ. Pre-RFC-005 reports have None and are silently
+    # accepted; mixing an old + a new report where only one has env
+    # info is also silently accepted (we have no evidence of drift).
+    if (
+        report_a.suite_env is not None
+        and report_b.suite_env is not None
+        and report_a.suite_env != report_b.suite_env
+    ):
+        if not allow_cross_backend:
+            raise _fail(
+                f"cross-backend compare: a.suite_env={report_a.suite_env!r} "
+                f"but b.suite_env={report_b.suite_env!r}. Cross-backend "
+                f"comparison measures simulator drift, NOT policy "
+                f"regression (RFC-005 §7.4). Pass --allow-cross-backend "
+                f"to override."
+            )
+        _echo_err(
+            f"warning: cross-backend compare — a.suite_env="
+            f"{report_a.suite_env!r} vs b.suite_env={report_b.suite_env!r}. "
+            f"This measures simulator drift, NOT policy regression."
+        )
 
     if report_a.suite_name != report_b.suite_name:
         _echo_err(

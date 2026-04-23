@@ -22,13 +22,14 @@ sees "extra not installed" rather than "unknown env".
 
 from __future__ import annotations
 
+import functools
 import importlib
 from pathlib import Path
 from typing import Any, cast
 
 import yaml
 
-from gauntlet.env.registry import registered_envs
+from gauntlet.env.registry import get_env_factory, registered_envs
 from gauntlet.suite.schema import BUILTIN_BACKEND_IMPORTS, Suite
 
 __all__ = [
@@ -40,6 +41,27 @@ __all__ = [
 _EXTRA_FOR_MODULE: dict[str, str] = {
     "gauntlet.env.pybullet": "pybullet",
 }
+
+
+def _visual_only_axes_of(factory: Any) -> frozenset[str]:
+    """Best-effort lookup of a backend's VISUAL_ONLY_AXES ClassVar.
+
+    Handles the two common factory shapes:
+    * a class (``register_env("tabletop", TabletopEnv)``) — read the attr
+      directly off the type.
+    * a :func:`functools.partial` over a class (the CLI's
+      ``--env-max-steps`` path) — unwrap via ``partial.func``.
+
+    Anything more exotic (a random ``Callable`` with no static hook)
+    degrades to an empty frozenset so the check becomes a no-op rather
+    than a false positive.
+    """
+    if isinstance(factory, functools.partial):
+        return _visual_only_axes_of(factory.func)
+    attr = getattr(factory, "VISUAL_ONLY_AXES", None)
+    if isinstance(attr, frozenset):
+        return cast(frozenset[str], attr)
+    return frozenset()
 
 
 def load_suite(path: Path | str) -> Suite:
@@ -89,7 +111,40 @@ def _validate(raw: Any, *, source: str) -> Suite:
     data = cast(dict[str, Any], raw)
     suite = Suite.model_validate(data)
     _ensure_backend_registered(suite.env)
+    _reject_purely_visual_suites(suite)
     return suite
+
+
+def _reject_purely_visual_suites(suite: Suite) -> None:
+    """Reject a suite whose every axis is in the backend's VISUAL_ONLY_AXES.
+
+    RFC-005 §6.2 / §12 Q1 — a state-only backend cannot produce any
+    observable change from axes that only mutate rendered scene
+    content (e.g. ``lighting_intensity``, ``object_texture`` on the
+    PyBullet first cut). Running such a sweep would emit
+    pairwise-identical cell results and silently look like a broken
+    harness; rejecting at load time is loud by design.
+
+    The check is a no-op on backends that declare an empty
+    ``VISUAL_ONLY_AXES`` (e.g. MuJoCo ``TabletopEnv`` — the renderer
+    consumes those axes through ``render_in_obs`` adapters).
+    """
+    factory = get_env_factory(suite.env)
+    visual_only = _visual_only_axes_of(factory)
+    if not visual_only:
+        return
+    declared = set(suite.axes.keys())
+    if declared and declared <= visual_only:
+        raise ValueError(
+            f"suite {suite.name!r} (env={suite.env!r}): every declared axis "
+            f"is cosmetic on a state-only backend. These axes mutate the "
+            f"PyBullet scene but do not change state-only observations, so "
+            f"every cell would report identical success rates. Declared: "
+            f"{sorted(declared)}; cosmetic (VISUAL_ONLY) on this backend: "
+            f"{sorted(visual_only)}. Add at least one state-effecting axis "
+            f"(e.g. object_initial_pose_x / _y, distractor_count) or wait "
+            f"for the image-rendering follow-up RFC."
+        )
 
 
 def _ensure_backend_registered(env_name: str) -> None:
