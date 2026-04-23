@@ -28,7 +28,11 @@ dependencies = [
     "pandas>=2.2,<3",
     "jinja2>=3.1,<4",
     "pyyaml>=6.0,<7",
-    "rich>=13.7,<15",
+    # Ceiling bumped <15 -> <16 for RFC-007 (genesis-world transitively
+    # resolves rich 15.0.0 and declares no upper bound of its own). The
+    # CLI's Rich surface — Console, Text, rich.traceback — is stable
+    # across 13.x/14.x/15.x.
+    "rich>=13.7,<16",
 ]
 
 # Optional extras — end-user-facing. Keeps core torch-free per spec §6.
@@ -70,6 +74,20 @@ monitor = [
 pybullet = [
     "pybullet>=3.2,<4",
 ]
+# Independent extra for the Genesis backend (RFC-007).
+# genesis-world is distributed as py3-none-any wheels (82.6 MB) with
+# Requires-Python <3.14,>=3.10. The 0.4.x->0.5 boundary is expected to
+# include API breaks, so the pin is tighter than the other extras
+# (RFC-007 §4.2). torch is a runtime dep that Genesis imports at
+# package scope but does NOT declare in install_requires (upstream
+# delegates to users so they can pick CPU/CUDA/ROCm wheels) — listed
+# here explicitly so ``uv sync --extra genesis`` always produces a
+# working import. torch>=2.2,<3 matches the [hf] and [monitor] floors
+# so a combined ``--extra hf --extra genesis`` resolves to one torch.
+genesis = [
+    "genesis-world>=0.4,<0.5",
+    "torch>=2.2,<3",
+]
 
 [project.scripts]
 gauntlet = "gauntlet.cli:app"
@@ -104,6 +122,11 @@ monitor-dev = [
 ]
 # CI-only group for the pybullet pytest job.
 pybullet-dev = [
+    {include-group = "dev"},
+    "pytest-mock>=3.12,<4",
+]
+# CI-only group for the genesis pytest job.
+genesis-dev = [
     {include-group = "dev"},
     "pytest-mock>=3.12,<4",
 ]
@@ -200,6 +223,13 @@ disallow_subclassing_any = false
 module = ["pybullet", "pybullet_data"]
 ignore_missing_imports = true
 
+# genesis-world ships no type stubs. Same FFI-boundary carve-out as
+# pybullet/mujoco — lets mypy import-check env/genesis/* even when the
+# [genesis] extra isn't installed.
+[[tool.mypy.overrides]]
+module = ["genesis", "genesis.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 minversion = "8.0"
 addopts = [
@@ -215,6 +245,7 @@ markers = [
     "lerobot: tests that require the [lerobot] extra (lerobot, torch, PIL)",
     "monitor: tests that require the [monitor] extra (torch, PIL)",
     "pybullet: tests that require the [pybullet] extra (pybullet>=3.2)",
+    "genesis: tests that require the [genesis] extra (genesis-world>=0.4, torch)",
 ]
 
 [tool.coverage.run]
