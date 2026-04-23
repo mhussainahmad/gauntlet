@@ -16,9 +16,10 @@ Process lifecycle (matches Pin 3 in the task brief):
   ``policy_factory()`` (also stashed in the worker globals), seeds it,
   resets the env, then drives the rollout to completion.
 
-The same :func:`_execute_one` core is also called directly by the Runner's
-in-process fast path (``n_workers == 1``), so both code paths produce
-bit-identical Episode objects from the same inputs.
+The same :func:`execute_one` core is also called directly by the Runner's
+in-process fast path (``n_workers == 1``) and by :mod:`gauntlet.replay`,
+so every code path produces bit-identical Episode objects from the
+same inputs.
 
 Determinism contract
 --------------------
@@ -58,6 +59,7 @@ from gauntlet.runner.episode import Episode
 __all__ = [
     "WorkItem",
     "WorkerInitArgs",
+    "execute_one",
     "extract_env_seed",
     "pool_initializer",
     "run_work_item",
@@ -178,13 +180,16 @@ def extract_env_seed(seq: np.random.SeedSequence) -> int:
     return int(seq.generate_state(1, dtype=np.uint32)[0])
 
 
-def _execute_one(env: TabletopEnv, policy_factory: Callable[[], Policy], item: WorkItem) -> Episode:
+def execute_one(env: TabletopEnv, policy_factory: Callable[[], Policy], item: WorkItem) -> Episode:
     """Drive one (cell, episode) rollout to completion.
 
-    Shared by the worker entrypoint :func:`run_work_item` and by the
-    Runner's in-process fast path. Both paths run the *same* lines of
-    code, so an Episode produced by ``n_workers=1`` is bit-identical to
-    one produced by ``n_workers=4`` for the same inputs.
+    Shared by the worker entrypoint :func:`run_work_item`, by the
+    Runner's in-process fast path, and by :mod:`gauntlet.replay` (which
+    reconstructs a :class:`WorkItem` from an existing Episode to
+    re-simulate it bit-identically). Every caller runs the *same* lines
+    of code, so an Episode produced by ``n_workers=1``, one produced by
+    ``n_workers=4``, and one produced by ``replay_one`` are all
+    bit-identical for the same inputs.
 
     Pipeline (mirrors Pin 3):
 
@@ -246,7 +251,7 @@ def run_work_item(item: WorkItem) -> Episode:
     """Pool entrypoint — turn one :class:`WorkItem` into one :class:`Episode`.
 
     Reads the per-worker env + policy factory cached by
-    :func:`pool_initializer` and delegates to :func:`_execute_one`.
+    :func:`pool_initializer` and delegates to :func:`execute_one`.
     Raises :class:`RuntimeError` if the initializer was skipped (which
     can only happen in tests that bypass the Pool path).
     """
@@ -260,4 +265,4 @@ def run_work_item(item: WorkItem) -> Episode:
     # The pool initializer guarantees these types; cast for mypy.
     env: TabletopEnv = env_obj
     policy_factory: Callable[[], Policy] = policy_factory_obj
-    return _execute_one(env, policy_factory, item)
+    return execute_one(env, policy_factory, item)

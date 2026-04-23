@@ -11,6 +11,10 @@ Public surface:
 * :class:`WorkItem` — the unit of cross-process work. Exposed for
   advanced users that want to plug their own executor; ordinary callers
   should not need it.
+* :func:`execute_one` — the per-episode primitive shared by the
+  in-process and pool execution paths. Phase 2's :mod:`gauntlet.replay`
+  is its second public caller; ordinary callers should continue to go
+  through :meth:`Runner.run`.
 """
 
 from __future__ import annotations
@@ -18,9 +22,11 @@ from __future__ import annotations
 from gauntlet.runner.episode import Episode as Episode
 from gauntlet.runner.runner import Runner as Runner
 from gauntlet.runner.worker import WorkItem as WorkItem
+from gauntlet.runner.worker import execute_one as execute_one
 
 __all__ = [
     "Episode",
     "Runner",
     "WorkItem",
+    "execute_one",
 ]
