@@ -40,9 +40,10 @@ results/
 *.pth
 *.safetensors
 
-# Local vector DB state (untracked tooling DB).
-tooling.vector.db
-
-# Local agent / the coding agent infrastructure (runtime state, not project code)
+# Local agent tooling (runtime state, never project code).
+# Contributors using per-developer agent tooling should prefer adding
+# these to their user-global gitignore (~/.config/git/ignore) — the
+# project does not care which tool you use.
+*.vector.db
 .swarm/
 .mcp.json

@@ -202,7 +202,8 @@ out/
 results/
 *.results.json
 
-# Local agent / the coding agent infrastructure (runtime state, not project code)
+# Local agent tooling (runtime state, never project code).
+*.vector.db
 .swarm/
 .mcp.json
 ```
