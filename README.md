@@ -44,6 +44,12 @@ YAML path for `examples/suites/tabletop-basic-v1.yaml`. See
 [`examples/evaluate_random_policy.py`](./examples/evaluate_random_policy.py)
 for the equivalent invocation via the public Python API.
 
+### Using a real VLA
+
+- Install the HF extras: `uv sync --extra hf` (pulls torch / transformers / pillow; core installs stay torch-free).
+- See [`examples/evaluate_openvla.py`](./examples/evaluate_openvla.py) for the ≤20-line OpenVLA-7B factory.
+- Image-conditioned policies need a rendered frame — construct `TabletopEnv(render_in_obs=True)` so `obs["image"]` is emitted.
+
 ## Development
 
 ```bash
