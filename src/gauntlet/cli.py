@@ -579,15 +579,9 @@ def compare(
     _write_json(out_path, payload)
 
     _echo_err(f"[ok]Wrote[/] {_fmt_path(out_path)}")
-    _echo_err(
-        f"  a: {report_a.suite_name} ({_fmt_success_rate(report_a.overall_success_rate)})"
-    )
-    _echo_err(
-        f"  b: {report_b.suite_name} ({_fmt_success_rate(report_b.overall_success_rate)})"
-    )
-    _echo_err(
-        f"  delta success_rate: {_fmt_signed_pct(payload['delta_success_rate'])}"
-    )
+    _echo_err(f"  a: {report_a.suite_name} ({_fmt_success_rate(report_a.overall_success_rate)})")
+    _echo_err(f"  b: {report_b.suite_name} ({_fmt_success_rate(report_b.overall_success_rate)})")
+    _echo_err(f"  delta success_rate: {_fmt_signed_pct(payload['delta_success_rate'])}")
     n_regressions = len(payload["regressions"])
     n_improvements = len(payload["improvements"])
     regressions_style = "delta.down" if n_regressions else "delta.zero"
