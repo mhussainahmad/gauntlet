@@ -4,10 +4,13 @@ Style mirrors ``tests/test_policy.py`` — small focused test classes with
 explicit names, no fixtures more clever than what we need.
 
 These tests must run headless (no GL): they never call ``env.render()``
-and never instantiate ``mujoco.Renderer``.
+and never instantiate ``mujoco.Renderer`` unless they are explicitly
+exercising the opt-in ``render_in_obs`` path.
 """
 
 from __future__ import annotations
+
+import os
 
 import numpy as np
 import pytest
@@ -353,5 +356,58 @@ class TestCloseAndGrasp:
             ee_z = float(obs["ee_pos"][2])
             # Snapped: cube tracks EE exactly (within float noise).
             assert cube_z == pytest.approx(ee_z, abs=1e-9)
+        finally:
+            env.close()
+
+
+# Phase 1 key set — used by the render_in_obs=False regression test. Kept
+# inline here rather than imported so a drift in the env's default obs is
+# caught by this test, not silently re-baked into a shared constant.
+_PHASE_1_OBS_KEYS = frozenset({"cube_pos", "cube_quat", "ee_pos", "gripper", "target_pos"})
+
+
+class TestRenderInObs:
+    """RFC Phase 2 Task 1 §5 — the opt-in ``render_in_obs`` kwarg is the one
+    core-side change; default behaviour must stay byte-identical.
+    """
+
+    def test_default_obs_keys_unchanged(self) -> None:
+        env = TabletopEnv()  # render_in_obs=False by default
+        try:
+            obs, _ = env.reset(seed=0)
+            assert set(obs.keys()) == _PHASE_1_OBS_KEYS
+            assert "image" not in env.observation_space.spaces
+        finally:
+            env.close()
+
+    def test_render_in_obs_emits_uint8_image(self) -> None:
+        # Offscreen rendering needs a GL backend; EGL is the one we target
+        # in CI (osmesa would work too). If neither is available the test
+        # surfaces a clear skip rather than a cryptic GL crash.
+        os.environ.setdefault("MUJOCO_GL", "egl")
+        try:
+            env = TabletopEnv(render_in_obs=True, render_size=(64, 96))
+        except Exception as exc:
+            # GL init failures wrap many underlying exception types; catching
+            # ``Exception`` surfaces them as a skip rather than a cryptic crash.
+            pytest.skip(f"offscreen GL backend unavailable ({exc!r}); set MUJOCO_GL=egl or osmesa")
+        try:
+            obs, _ = env.reset(seed=0)
+            assert "image" in obs
+            img = obs["image"]
+            assert img.dtype == np.uint8
+            assert img.shape == (64, 96, 3)
+
+            # observation_space advertises the matching Box.
+            assert "image" in env.observation_space.spaces
+            img_space = env.observation_space.spaces["image"]
+            assert isinstance(img_space, spaces.Box)
+            assert img_space.shape == (64, 96, 3)
+            assert img_space.dtype == np.uint8
+
+            # Step preserves the image contract.
+            obs_step, *_ = env.step(np.zeros(7, dtype=np.float64))
+            assert obs_step["image"].shape == (64, 96, 3)
+            assert obs_step["image"].dtype == np.uint8
         finally:
             env.close()
