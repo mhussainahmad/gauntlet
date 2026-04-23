@@ -218,7 +218,11 @@ class PyBulletTabletopEnv:
         self._success: bool = False
 
         # Cosmetic-axis scratchpads — consumed by the rendering RFC, §6.1.
+        # These are *not* observable on state-only obs (§6.2); the follow-up
+        # rendering RFC plumbs them into the getCameraImage path.
         self._light_intensity: float = 1.0
+        self._cam_eye_offset: NDArray[np.float64] = np.zeros(2, dtype=np.float64)
+        self._current_texture_id: int = -1  # populated by _build_scene
 
         self._build_scene()
 
@@ -297,6 +301,7 @@ class PyBulletTabletopEnv:
             textureUniqueId=self._tex_default_id,
             physicsClientId=cid,
         )
+        self._current_texture_id = self._tex_default_id
 
         # ---- EE kinematic mocap-analogue + fixed constraint ----
         ee_vis = p.createVisualShape(
@@ -527,6 +532,7 @@ class PyBulletTabletopEnv:
         self._build_scene()
         # Cosmetic-axis scratchpads revert to baseline values.
         self._light_intensity = 1.0
+        self._cam_eye_offset = np.zeros(2, dtype=np.float64)
 
     def close(self) -> None:
         """Release the PyBullet client. Idempotent."""
@@ -609,15 +615,121 @@ class PyBulletTabletopEnv:
     def _apply_pending_perturbations(self) -> None:
         """Dispatch each queued (name, value) to the per-axis branch.
 
-        Branches land in step 10 (RFC-005 §13 item 10). Until then,
-        any perturbation queued on a step-9 env triggers this hard
-        error — better than silently running on a baseline scene.
+        Walks RFC-005 §6 row by row. Pose overrides must run AFTER the
+        random cube XY write in :meth:`reset`, which is exactly the
+        order we already have — :meth:`reset` writes the random pose
+        first and then calls this method.
         """
-        raise NotImplementedError(
-            "PyBullet backend perturbation branches land in RFC-005 §13 "
-            "step 10. Construct TabletopEnv for MuJoCo-side perturbations, "
-            "or hold this sweep until step 10 lands."
-        )
+        for name, value in self._pending_perturbations.items():
+            self._apply_one_perturbation(name, value)
+
+    def _apply_one_perturbation(self, name: str, value: float) -> None:
+        """Per-axis branch dispatcher (RFC-005 §6 table)."""
+        cid = self._client
+
+        if name == "object_initial_pose_x":
+            # State-effecting. Override the random X write from reset.
+            _, quat = p.getBasePositionAndOrientation(
+                self._cube_id, physicsClientId=cid
+            )
+            cur_pos_tup, _ = p.getBasePositionAndOrientation(
+                self._cube_id, physicsClientId=cid
+            )
+            new_pos = [float(value), float(cur_pos_tup[1]), _CUBE_REST_Z]
+            p.resetBasePositionAndOrientation(
+                self._cube_id, new_pos, quat, physicsClientId=cid
+            )
+            p.resetBaseVelocity(
+                self._cube_id,
+                linearVelocity=[0.0, 0.0, 0.0],
+                angularVelocity=[0.0, 0.0, 0.0],
+                physicsClientId=cid,
+            )
+            return
+
+        if name == "object_initial_pose_y":
+            cur_pos_tup, quat = p.getBasePositionAndOrientation(
+                self._cube_id, physicsClientId=cid
+            )
+            new_pos = [float(cur_pos_tup[0]), float(value), _CUBE_REST_Z]
+            p.resetBasePositionAndOrientation(
+                self._cube_id, new_pos, quat, physicsClientId=cid
+            )
+            p.resetBaseVelocity(
+                self._cube_id,
+                linearVelocity=[0.0, 0.0, 0.0],
+                angularVelocity=[0.0, 0.0, 0.0],
+                physicsClientId=cid,
+            )
+            return
+
+        if name == "distractor_count":
+            # State-effecting on rollouts where a revealed distractor
+            # blocks the grasp path. set_perturbation's validator
+            # clamps to [0, 10], so round() is safe here.
+            n = round(float(value))
+            for i, body_id in enumerate(self._distractor_ids):
+                if i < n:
+                    # Reveal + enable collisions.
+                    p.changeVisualShape(
+                        body_id, -1,
+                        rgbaColor=[0.6, 0.6, 0.9, 1.0],
+                        physicsClientId=cid,
+                    )
+                    p.setCollisionFilterGroupMask(
+                        body_id, -1,
+                        collisionFilterGroup=1,
+                        collisionFilterMask=1,
+                        physicsClientId=cid,
+                    )
+                else:
+                    # Return to hidden + ghosted baseline.
+                    p.changeVisualShape(
+                        body_id, -1,
+                        rgbaColor=[0.6, 0.6, 0.9, 0.0],
+                        physicsClientId=cid,
+                    )
+                    p.setCollisionFilterGroupMask(
+                        body_id, -1,
+                        collisionFilterGroup=0,
+                        collisionFilterMask=0,
+                        physicsClientId=cid,
+                    )
+            return
+
+        if name == "object_texture":
+            # Cosmetic on state-only obs (§6.2). Swap the bound texture
+            # UID. value ~0 → default (red), value ~1 → alt (green).
+            use_alt = float(value) >= 0.5
+            tex_id = self._tex_alt_id if use_alt else self._tex_default_id
+            p.changeVisualShape(
+                self._cube_id, -1,
+                textureUniqueId=tex_id,
+                physicsClientId=cid,
+            )
+            self._current_texture_id = tex_id
+            return
+
+        if name == "lighting_intensity":
+            # Cosmetic (§6.1). Headless DIRECT mode has no runtime light
+            # API; the rendering follow-up RFC reads this in
+            # getCameraImage(lightDiffuseCoeff=...).
+            self._light_intensity = float(value)
+            return
+
+        if name == "camera_offset_x":
+            # Cosmetic — camera pose is a rendering-time concept.
+            self._cam_eye_offset = self._cam_eye_offset.copy()
+            self._cam_eye_offset[0] = float(value)
+            return
+
+        if name == "camera_offset_y":
+            self._cam_eye_offset = self._cam_eye_offset.copy()
+            self._cam_eye_offset[1] = float(value)
+            return
+
+        # Unreachable — set_perturbation validates before queueing.
+        raise ValueError(f"internal: unknown perturbation axis {name!r}")
 
     def _build_obs(self) -> dict[str, NDArray[np.float64]]:
         cube_pos_tup, cube_quat_xyzw = p.getBasePositionAndOrientation(
