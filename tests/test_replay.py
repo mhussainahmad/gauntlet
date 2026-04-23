@@ -117,12 +117,12 @@ def _distractor_suite() -> Suite:
     )
 
 
-def _run_and_pick(suite: Suite, cell_index: int, episode_index: int) -> list[Episode]:
-    """Run *suite* end-to-end and return the full Episode list.
+def _run_suite(suite: Suite) -> list[Episode]:
+    """Run *suite* end-to-end under the fast env and return every Episode.
 
-    The caller picks the target by ``(cell_index, episode_index)``.
-    We return the list so callers that want to assert structural
-    properties (length, ordering) still have it.
+    Callers pick the target by ``_find(episodes, cell_index,
+    episode_index)``; keeping the two calls separate avoids re-running
+    the suite once per parametrised test case.
     """
     runner = Runner(n_workers=1, env_factory=_make_fast_env)
     return runner.run(policy_factory=_make_scripted_policy, suite=suite)
@@ -143,7 +143,7 @@ def _find(episodes: list[Episode], cell_index: int, episode_index: int) -> Episo
 def test_zero_override_bit_identity() -> None:
     """Replay with no overrides must be bit-identical to the original."""
     suite = _two_by_three_suite()
-    episodes = _run_and_pick(suite, 2, 1)
+    episodes = _run_suite(suite)
     target = _find(episodes, 2, 1)
 
     replayed = replay_one(
@@ -180,7 +180,7 @@ def test_zero_override_every_cell(cell_index: int, episode_index: int) -> None:
             "camera_offset_x": AxisSpec(low=-0.01, high=0.01, steps=2),
         },
     )
-    episodes = _run_and_pick(suite, cell_index, episode_index)
+    episodes = _run_suite(suite)
     target = _find(episodes, cell_index, episode_index)
 
     replayed = replay_one(
@@ -201,7 +201,7 @@ def test_axis_application_order_preserved() -> None:
     """
     suite = _camera_xy_suite()
     # Pick a cell that exercises both axes with non-zero values.
-    episodes = _run_and_pick(suite, 3, 0)
+    episodes = _run_suite(suite)
     target = _find(episodes, 3, 0)
 
     replayed = replay_one(
@@ -227,7 +227,7 @@ def test_axis_application_order_preserved() -> None:
 def test_override_keeps_non_overridden_axes_from_original() -> None:
     """Overriding one axis leaves the others at their original values."""
     suite = _two_by_three_suite()
-    episodes = _run_and_pick(suite, 1, 0)
+    episodes = _run_suite(suite)
     target = _find(episodes, 1, 0)
 
     replayed = replay_one(
@@ -289,7 +289,7 @@ def test_single_override_changes_outcome() -> None:
 def test_override_value_echoed_into_replayed_config() -> None:
     """The replayed Episode's perturbation_config carries the override value."""
     suite = _two_by_three_suite()
-    episodes = _run_and_pick(suite, 0, 0)
+    episodes = _run_suite(suite)
     target = _find(episodes, 0, 0)
 
     replayed = replay_one(
@@ -309,7 +309,7 @@ def test_override_value_echoed_into_replayed_config() -> None:
 
 def test_replay_rejects_unknown_axis() -> None:
     suite = _two_by_three_suite()
-    episodes = _run_and_pick(suite, 0, 0)
+    episodes = _run_suite(suite)
     target = _find(episodes, 0, 0)
 
     with pytest.raises(OverrideError, match="not_a_real_axis"):
@@ -324,7 +324,7 @@ def test_replay_rejects_unknown_axis() -> None:
 
 def test_replay_rejects_out_of_envelope_value() -> None:
     suite = _two_by_three_suite()
-    episodes = _run_and_pick(suite, 0, 0)
+    episodes = _run_suite(suite)
     target = _find(episodes, 0, 0)
 
     # lighting_intensity envelope is [0.5, 1.0] on this suite.
@@ -340,7 +340,7 @@ def test_replay_rejects_out_of_envelope_value() -> None:
 
 def test_replay_rejects_suite_name_mismatch() -> None:
     suite = _two_by_three_suite()
-    episodes = _run_and_pick(suite, 0, 0)
+    episodes = _run_suite(suite)
     target = _find(episodes, 0, 0)
     other_suite = suite.model_copy(update={"name": "different-suite"})
 
@@ -454,7 +454,7 @@ def test_replay_legacy_episode_without_topology_metadata(
     is unchanged.
     """
     suite = _single_axis_suite()
-    episodes = _run_and_pick(suite, 0, 1)
+    episodes = _run_suite(suite)
     target = _find(episodes, 0, 1)
 
     # Strip the topology metadata to simulate a legacy Episode.
@@ -538,7 +538,7 @@ def test_replay_cli_happy_path(tmp_path: Any) -> None:
     from gauntlet.cli import app
 
     suite = _two_by_three_suite()
-    episodes = _run_and_pick(suite, 3, 1)
+    episodes = _run_suite(suite)
 
     episodes_path = tmp_path / "episodes.json"
     _write_episodes_json(episodes_path, episodes)
@@ -589,7 +589,7 @@ def test_replay_cli_zero_override_bit_identical(tmp_path: Any) -> None:
     from gauntlet.cli import app
 
     suite = _two_by_three_suite()
-    episodes = _run_and_pick(suite, 1, 0)
+    episodes = _run_suite(suite)
     target = _find(episodes, 1, 0)
 
     episodes_path = tmp_path / "episodes.json"
@@ -633,7 +633,7 @@ def test_replay_cli_rejects_unknown_episode_id(tmp_path: Any) -> None:
     from gauntlet.cli import app
 
     suite = _two_by_three_suite()
-    episodes = _run_and_pick(suite, 0, 0)
+    episodes = _run_suite(suite)
     episodes_path = tmp_path / "episodes.json"
     _write_episodes_json(episodes_path, episodes)
     suite_yaml = tmp_path / "suite.yaml"
@@ -668,7 +668,7 @@ def test_replay_cli_rejects_unknown_axis(tmp_path: Any) -> None:
     from gauntlet.cli import app
 
     suite = _two_by_three_suite()
-    episodes = _run_and_pick(suite, 0, 0)
+    episodes = _run_suite(suite)
     episodes_path = tmp_path / "episodes.json"
     _write_episodes_json(episodes_path, episodes)
     suite_yaml = tmp_path / "suite.yaml"
@@ -704,7 +704,7 @@ def test_replay_cli_rejects_out_of_envelope(tmp_path: Any) -> None:
     from gauntlet.cli import app
 
     suite = _two_by_three_suite()
-    episodes = _run_and_pick(suite, 0, 0)
+    episodes = _run_suite(suite)
     episodes_path = tmp_path / "episodes.json"
     _write_episodes_json(episodes_path, episodes)
     suite_yaml = tmp_path / "suite.yaml"
@@ -742,7 +742,7 @@ def test_replay_cli_rejects_suite_name_mismatch(tmp_path: Any) -> None:
     from gauntlet.cli import app
 
     suite = _two_by_three_suite()
-    episodes = _run_and_pick(suite, 0, 0)
+    episodes = _run_suite(suite)
     episodes_path = tmp_path / "episodes.json"
     _write_episodes_json(episodes_path, episodes)
 
@@ -796,7 +796,7 @@ def test_replay_cli_rejects_malformed_episode_id(tmp_path: Any) -> None:
     from gauntlet.cli import app
 
     suite = _two_by_three_suite()
-    episodes = _run_and_pick(suite, 0, 0)
+    episodes = _run_suite(suite)
     episodes_path = tmp_path / "episodes.json"
     _write_episodes_json(episodes_path, episodes)
     suite_yaml = tmp_path / "suite.yaml"
@@ -820,6 +820,86 @@ def test_replay_cli_rejects_malformed_episode_id(tmp_path: Any) -> None:
     )
     assert result.exit_code != 0
     assert "CELL:EPISODE" in result.stderr
+
+
+def test_replay_cli_override_order_independent_of_cli_order(tmp_path: Any) -> None:
+    """CLI ``--override`` order must NOT influence axis application order.
+
+    RFC §6: ``camera_offset_x`` and ``camera_offset_y`` are non-commutative
+    in the env (each writes the full cam_pos), so the replayed Episode
+    must apply them in the original suite's declared order regardless
+    of the order the user typed the overrides. Two CLI invocations that
+    differ only in ``--override`` order must produce byte-identical
+    replayed Episodes.
+    """
+    import json
+
+    from typer.testing import CliRunner
+
+    from gauntlet.cli import app
+
+    suite = _camera_xy_suite()
+    episodes = _run_suite(suite)
+
+    episodes_path = tmp_path / "episodes.json"
+    _write_episodes_json(episodes_path, episodes)
+    suite_yaml = tmp_path / "suite.yaml"
+    import textwrap
+
+    suite_yaml.write_text(
+        textwrap.dedent(
+            """\
+            name: replay-camxy
+            env: tabletop
+            seed: 99
+            episodes_per_cell: 1
+            axes:
+              camera_offset_x:
+                low: -0.02
+                high: 0.02
+                steps: 2
+              camera_offset_y:
+                low: -0.01
+                high: 0.01
+                steps: 2
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    def _run_cli(overrides_in_order: list[str], out_name: str) -> Episode:
+        out_path = tmp_path / out_name
+        cli = CliRunner()
+        args = [
+            "replay",
+            str(episodes_path),
+            "--suite",
+            str(suite_yaml),
+            "--policy",
+            "scripted",
+            "--episode-id",
+            "0:0",
+            "--out",
+            str(out_path),
+            "--env-max-steps",
+            "20",
+        ]
+        for ov in overrides_in_order:
+            args.extend(["--override", ov])
+        result = cli.invoke(app, args)
+        assert result.exit_code == 0, result.stderr
+        payload = json.loads(out_path.read_text(encoding="utf-8"))
+        return Episode.model_validate(payload["replayed"])
+
+    xy_first = _run_cli(
+        ["camera_offset_x=0.01", "camera_offset_y=0.005"],
+        "xy_first.json",
+    )
+    yx_first = _run_cli(
+        ["camera_offset_y=0.005", "camera_offset_x=0.01"],
+        "yx_first.json",
+    )
+    assert xy_first.model_dump() == yx_first.model_dump()
 
 
 def test_replay_cli_help_mentions_override(tmp_path: Any) -> None:
@@ -848,7 +928,7 @@ def test_reconstructed_seed_matches_runner_seed() -> None:
     from gauntlet.runner.worker import extract_env_seed
 
     suite = _two_by_three_suite()
-    episodes = _run_and_pick(suite, 0, 0)
+    episodes = _run_suite(suite)
     target = _find(episodes, 4, 1)
 
     master_seed = target.metadata["master_seed"]
