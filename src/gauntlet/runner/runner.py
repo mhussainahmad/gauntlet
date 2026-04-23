@@ -9,7 +9,7 @@ Cells are run in parallel across processes via a ``spawn``-context
 :class:`multiprocessing.pool.Pool`; for ``n_workers == 1`` we skip the
 pool and execute in-process to keep stack traces readable and to dodge
 spawn overhead on small suites. Both paths share the same per-item
-function (:func:`gauntlet.runner.worker._execute_one`), so the n=1 and
+function (:func:`gauntlet.runner.worker.execute_one`), so the n=1 and
 n=N outputs are bit-identical for the same inputs.
 
 Seed derivation
@@ -71,7 +71,7 @@ from gauntlet.runner.episode import Episode
 from gauntlet.runner.worker import (
     WorkerInitArgs,
     WorkItem,
-    _execute_one,
+    execute_one,
     pool_initializer,
     run_work_item,
 )
@@ -276,6 +276,14 @@ class Runner:
                         perturbation_values=dict(cell.values),
                         episode_seq=episode_seqs[ep_idx],
                         master_seed=master_seed_echo,
+                        # Topology echo for trajectory replay (see
+                        # docs/phase2-rfc-004-trajectory-replay.md §3).
+                        # These two integers are the minimum needed to
+                        # reconstruct the spawn tree from the Episode
+                        # alone, even if the suite YAML is edited
+                        # between run and replay.
+                        n_cells=n_cells,
+                        episodes_per_cell=eps_per_cell,
                     )
                 )
         return items
@@ -293,12 +301,12 @@ class Runner:
 
         Used when ``n_workers == 1``. Produces Episodes that are
         bit-identical to the multi-worker path for the same inputs
-        because ``_execute_one`` is the same function in both cases.
+        because ``execute_one`` is the same function in both cases.
         """
         env = self._env_factory()
         try:
             return [
-                _execute_one(env, policy_factory, item, trajectory_dir=self._trajectory_dir)
+                execute_one(env, policy_factory, item, trajectory_dir=self._trajectory_dir)
                 for item in work_items
             ]
         finally:
