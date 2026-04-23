@@ -357,3 +357,96 @@ class TestRoundTripAndIo:
         target.write_text(_VALID_YAML, encoding="utf-8")
         suite = load_suite(str(target))
         assert suite.name == "tabletop-basic-v1"
+
+
+class TestBackendLazyImport:
+    """Phase 2 Task 5 step 5 — schema-accepts-known + loader-imports-on-demand
+    paths. The schema is simulator-agnostic; the loader raises a clear,
+    user-facing install-hint error when the matching extra is missing.
+    """
+
+    _PYBULLET_YAML = """
+name: pybullet-smoke
+env: tabletop-pybullet
+episodes_per_cell: 1
+axes:
+  object_initial_pose_x:
+    low: -0.05
+    high: 0.05
+    steps: 2
+"""
+
+    def test_schema_accepts_tabletop_pybullet_even_before_backend_import(self) -> None:
+        """The validator must accept any key in BUILTIN_BACKEND_IMPORTS
+        independent of whether the subpackage has been imported yet.
+        """
+        from gauntlet.suite.schema import BUILTIN_BACKEND_IMPORTS, Suite
+
+        assert "tabletop-pybullet" in BUILTIN_BACKEND_IMPORTS
+        # Direct Suite.model_validate — no loader-side import triggered.
+        suite = Suite.model_validate(
+            {
+                "name": "x",
+                "env": "tabletop-pybullet",
+                "episodes_per_cell": 1,
+                "axes": {
+                    "object_initial_pose_x": {
+                        "low": 0.0,
+                        "high": 0.1,
+                        "steps": 2,
+                    }
+                },
+            }
+        )
+        assert suite.env == "tabletop-pybullet"
+
+    def test_loader_surfaces_install_hint_for_missing_backend(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Importing the backend subpackage at load time must be converted
+        into the documented install-hint error when it raises.
+
+        At step 5 of RFC-005, ``gauntlet.env.pybullet`` does not exist yet,
+        so ``importlib.import_module`` raises :class:`ModuleNotFoundError`
+        — the loader catches both subclasses of :class:`ImportError`.
+        """
+        import sys
+
+        # Belt-and-braces: if some earlier test imported the backend,
+        # unload it so this test sees the pre-step-7 world.
+        for mod in list(sys.modules):
+            if mod == "gauntlet.env.pybullet" or mod.startswith(
+                "gauntlet.env.pybullet."
+            ):
+                monkeypatch.delitem(sys.modules, mod, raising=False)
+
+        with pytest.raises(ValueError) as excinfo:
+            load_suite_from_string(self._PYBULLET_YAML)
+        msg = str(excinfo.value)
+        assert "tabletop-pybullet" in msg
+        assert "extra is not installed" in msg
+        assert "uv sync --extra pybullet" in msg
+        assert "pip install 'gauntlet[pybullet]'" in msg
+
+    def test_schema_rejects_unknown_env_names(self) -> None:
+        """Anything outside registered_envs() | BUILTIN_BACKEND_IMPORTS
+        must still be rejected at schema-validation time.
+        """
+        bad = """
+name: x
+env: tabletop-isaac
+episodes_per_cell: 1
+axes:
+  lighting_intensity:
+    low: 0.0
+    high: 1.0
+    steps: 2
+"""
+        with pytest.raises(ValidationError) as excinfo:
+            load_suite_from_string(bad)
+        msg = str(excinfo.value)
+        assert "tabletop-isaac" in msg
+        # Error includes the sorted list of known keys.
+        assert "tabletop" in msg
+        assert "tabletop-pybullet" in msg

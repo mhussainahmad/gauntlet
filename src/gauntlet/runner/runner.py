@@ -61,6 +61,7 @@ from collections.abc import Callable
 
 import numpy as np
 
+from gauntlet.env.registry import registered_envs
 from gauntlet.env.tabletop import TabletopEnv
 from gauntlet.policy.base import Policy
 from gauntlet.runner.episode import Episode
@@ -71,7 +72,7 @@ from gauntlet.runner.worker import (
     pool_initializer,
     run_work_item,
 )
-from gauntlet.suite.schema import SUPPORTED_ENVS, Suite
+from gauntlet.suite.schema import Suite
 
 __all__ = ["Runner"]
 
@@ -160,16 +161,22 @@ class Runner:
             ``suite.num_cells() * suite.episodes_per_cell``.
 
         Raises:
-            ValueError: If ``suite.env`` is not in
-                :data:`gauntlet.suite.schema.SUPPORTED_ENVS`.
+            ValueError: If ``suite.env`` is not registered at dispatch time.
+                The Suite loader imports backends on demand (RFC-005 §11.2);
+                any env that reaches the Runner should already be registered.
         """
         # Defensive validation. Suite.env is already validated at
         # construction time, but the Runner is the boundary between
         # config and execution — re-check so a malformed Suite produced
         # by a future loader cannot silently launch a bad run.
-        if suite.env not in SUPPORTED_ENVS:
-            supported = ", ".join(sorted(SUPPORTED_ENVS))
-            raise ValueError(f"Runner: unsupported env {suite.env!r}; supported: {{{supported}}}")
+        known = registered_envs()
+        if suite.env not in known:
+            listed = ", ".join(sorted(known))
+            raise ValueError(
+                f"Runner: unsupported env {suite.env!r}; registered envs: "
+                f"{{{listed}}}. Load the Suite via gauntlet.suite.load_suite(...) "
+                f"or import the backend subpackage before calling Runner.run()."
+            )
 
         work_items = self._build_work_items(suite)
         if self._n_workers == 1:

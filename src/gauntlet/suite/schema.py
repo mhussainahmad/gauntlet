@@ -35,18 +35,26 @@ from typing import Final
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from gauntlet.env.perturbation import AXIS_NAMES
+from gauntlet.env.registry import registered_envs
 
 __all__ = [
-    "SUPPORTED_ENVS",
+    "BUILTIN_BACKEND_IMPORTS",
     "AxisSpec",
     "Suite",
     "SuiteCell",
 ]
 
 
-# Phase 1 only ships one env. The Runner / CLI key off this set, and the
-# YAML loader rejects anything not in it with a clear message.
-SUPPORTED_ENVS: Final[frozenset[str]] = frozenset({"tabletop"})
+# Backends that register themselves on import but do NOT import at package
+# init time (because they live behind an optional extra). The Suite loader
+# imports the value when a YAML names the matching key — see
+# ``gauntlet.suite.loader._validate`` and RFC-005 §11.2. Schema validation
+# needs this mapping too: ``_env_supported`` accepts these keys before the
+# backend has been imported, and the loader converts a failed import into
+# a user-facing install-hint error.
+BUILTIN_BACKEND_IMPORTS: Final[dict[str, str]] = {
+    "tabletop-pybullet": "gauntlet.env.pybullet",
+}
 
 
 @dataclass(frozen=True)
@@ -191,8 +199,9 @@ class Suite(BaseModel):
     Attributes:
         name: Non-empty human-readable identifier (becomes part of the
             report filename and surfaces in the HTML output).
-        env: Environment slug. Phase 1 only supports ``"tabletop"``;
-            other values are rejected with a clear message.
+        env: Environment slug. Must match a registered backend or one of
+            the lazy-import built-ins (:data:`BUILTIN_BACKEND_IMPORTS`).
+            Unknown names are rejected with a list of accepted keys.
         episodes_per_cell: How many rollouts to run per grid cell. Must
             be ``>= 1``.
         seed: Optional master seed. ``None`` means "no fixed seed; the
@@ -227,10 +236,16 @@ class Suite(BaseModel):
     @field_validator("env")
     @classmethod
     def _env_supported(cls, v: str) -> str:
-        if v not in SUPPORTED_ENVS:
-            supported = ", ".join(sorted(SUPPORTED_ENVS))
+        # Registry-backed check: a name is "known" if it is either
+        # currently registered or present in the lazy-import dispatch
+        # table (the loader will import the matching subpackage on
+        # demand before dispatching to the Runner). This keeps the
+        # schema simulator-agnostic per RFC-005 §3.1.
+        known = registered_envs() | BUILTIN_BACKEND_IMPORTS.keys()
+        if v not in known:
+            listed = ", ".join(sorted(known))
             raise ValueError(
-                f"env: Phase 1 only supports {{{supported}}}; got {v!r}",
+                f"env: unknown env {v!r}; known envs are: {{{listed}}}",
             )
         return v
 
