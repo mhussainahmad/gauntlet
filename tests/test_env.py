@@ -355,3 +355,70 @@ class TestCloseAndGrasp:
             assert cube_z == pytest.approx(ee_z, abs=1e-9)
         finally:
             env.close()
+
+
+class TestProtocolConformance:
+    """Phase 2 Task 5 step 4 — TabletopEnv must satisfy the GauntletEnv Protocol
+    and register at package-import time under the name ``tabletop``.
+    """
+
+    def test_axis_names_is_classvar_frozenset_of_seven(self) -> None:
+        from gauntlet.env.tabletop import TabletopEnv as _T
+
+        assert isinstance(_T.AXIS_NAMES, frozenset)
+        assert len(_T.AXIS_NAMES) == 7
+        assert {
+            "lighting_intensity",
+            "camera_offset_x",
+            "camera_offset_y",
+            "object_texture",
+            "object_initial_pose_x",
+            "object_initial_pose_y",
+            "distractor_count",
+        } == set(_T.AXIS_NAMES)
+
+    def test_visual_only_axes_is_empty_on_mujoco_backend(self) -> None:
+        """MuJoCo consumes cosmetic axes via the render() pipeline, so the
+        VISUAL_ONLY_AXES set is empty here. PyBullet (state-only first cut)
+        will declare {lighting_intensity, object_texture}; see RFC-005 §6.2.
+        """
+        from gauntlet.env.tabletop import TabletopEnv as _T
+
+        assert len(_T.VISUAL_ONLY_AXES) == 0
+        assert isinstance(_T.VISUAL_ONLY_AXES, frozenset)
+
+    def test_tabletop_env_satisfies_gauntlet_env_protocol(self) -> None:
+        from gauntlet.env.base import GauntletEnv
+
+        env = TabletopEnv()
+        try:
+            assert isinstance(env, GauntletEnv)
+        finally:
+            env.close()
+
+    def test_tabletop_registered_at_package_import(self) -> None:
+        """Importing ``gauntlet.env`` must register the MuJoCo backend under
+        the ``"tabletop"`` key (the Suite-loader dispatch key, RFC-005 §3.4).
+        """
+        import gauntlet.env  # noqa: F401 — trigger registration side-effect
+        from gauntlet.env.registry import get_env_factory, registered_envs
+
+        assert "tabletop" in registered_envs()
+        factory = get_env_factory("tabletop")
+        # Constructing through the registry must yield a TabletopEnv.
+        env = factory()
+        try:
+            assert isinstance(env, TabletopEnv)
+        finally:
+            env.close()
+
+    def test_set_perturbation_error_still_surfaces_unknown_axis(self) -> None:
+        """Promoting _KNOWN_AXIS_NAMES to a ClassVar must not change the
+        error path — set_perturbation must still reject unknown names.
+        """
+        env = TabletopEnv()
+        try:
+            with pytest.raises(ValueError, match="unknown perturbation axis"):
+                env.set_perturbation("not_an_axis", 0.0)
+        finally:
+            env.close()
