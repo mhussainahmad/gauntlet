@@ -236,6 +236,54 @@ class TestCrossBackendShapeParity:
             pb.close()
 
 
+def _make_fast_rendering_pybullet_env() -> PyBulletTabletopEnv:
+    """Module-level factory — fast max_steps + small render for the Runner smoke.
+
+    Module-level so it pickles cleanly under the multiprocessing ``spawn``
+    start method (the in-process fast path in this test does not need it,
+    but keeping the contract aligned with ``make_fast_pybullet_env`` in
+    test_env_pybullet.py means future ``n_workers>=2`` tests can reuse it).
+    """
+    return PyBulletTabletopEnv(max_steps=10, render_in_obs=True, render_size=(64, 64))
+
+
+class TestRandomPolicyRenderingSmoke:
+    """End-to-end library smoke — RandomPolicy on a small suite with rendering on.
+
+    No CLI path (the suite.env-dispatch gap is orthogonal to RFC-006; see
+    RFC-006 §11). This exercises the full Runner + PyBullet + render_in_obs
+    pipeline via the library API, which is the same surface
+    ``examples/evaluate_smolvla_pybullet.py`` will use.
+    """
+
+    def test_runner_emits_valid_images_across_cosmetic_grid(self) -> None:
+        """A 2 x 2 cosmetic grid, 1 episode per cell → 4 rollouts, 4 terminal images."""
+        from gauntlet.runner import Runner
+        from gauntlet.runner.episode import Episode
+        from gauntlet.suite.schema import Suite
+        from tests.pybullet.test_env_pybullet import make_random_policy
+
+        suite = Suite.model_validate(
+            {
+                "name": "pybullet-render-smoke",
+                "env": "tabletop-pybullet",
+                "episodes_per_cell": 1,
+                "seed": 11,
+                "axes": {
+                    "lighting_intensity": {"low": 0.3, "high": 1.3, "steps": 2},
+                    "object_texture": {"values": [0.0, 1.0]},
+                },
+            }
+        )
+        runner = Runner(n_workers=1, env_factory=_make_fast_rendering_pybullet_env)
+        episodes = runner.run(policy_factory=make_random_policy, suite=suite)
+
+        assert len(episodes) == 4
+        for ep in episodes:
+            assert isinstance(ep, Episode)
+            Episode.model_validate(ep.model_dump())
+
+
 class TestCosmeticNoopOnStateOnly:
     def test_cosmetic_axes_are_noop_when_render_is_off(self) -> None:
         """``render_in_obs=False`` — cosmetic axes mutate state-only obs in zero bytes.
