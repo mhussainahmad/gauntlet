@@ -139,3 +139,89 @@ class TestRenderDeterminism:
         finally:
             env_a.close()
             env_b.close()
+
+
+class TestCosmeticAxisSensitivity:
+    """Each cosmetic axis must change ``obs["image"]`` when rendering is on.
+
+    This is the end-to-end wiring test — proves RFC-005 §6.2 is closed for
+    every cosmetic axis through the RFC-006 render path. Each test runs two
+    resets with the same seed but distinct axis values and asserts the
+    emitted images differ. A `np.array_equal` pass here would mean the axis
+    silently doesn't reach the renderer.
+    """
+
+    def test_lighting_intensity_changes_pixels(self) -> None:
+        """High vs low ``lighting_intensity`` → distinct rendered brightness."""
+        env = PyBulletTabletopEnv(render_in_obs=True, render_size=(64, 64))
+        try:
+            env.set_perturbation("lighting_intensity", 0.3)
+            obs_dark, _ = env.reset(seed=0)
+            env.set_perturbation("lighting_intensity", 1.5)
+            obs_bright, _ = env.reset(seed=0)
+            assert not np.array_equal(obs_dark["image"], obs_bright["image"])
+            # Higher diffuse coefficient → overall brighter mean pixel value
+            # (quick sanity; the renderer multiplies diffuse contribution by
+            # the coefficient — at 1.5 pixels should skew brighter).
+            assert obs_bright["image"].mean() > obs_dark["image"].mean()
+        finally:
+            env.close()
+
+    def test_object_texture_changes_pixels(self) -> None:
+        """Default (red) vs alt (green) cube texture → distinct pixels."""
+        env = PyBulletTabletopEnv(render_in_obs=True, render_size=(64, 64))
+        try:
+            env.set_perturbation("object_texture", 0.0)
+            obs_red, _ = env.reset(seed=0)
+            env.set_perturbation("object_texture", 1.0)
+            obs_green, _ = env.reset(seed=0)
+            assert not np.array_equal(obs_red["image"], obs_green["image"])
+        finally:
+            env.close()
+
+    def test_camera_offset_x_changes_pixels(self) -> None:
+        """Non-zero ``camera_offset_x`` pans the view → distinct pixels."""
+        env = PyBulletTabletopEnv(render_in_obs=True, render_size=(64, 64))
+        try:
+            env.set_perturbation("camera_offset_x", -0.1)
+            obs_left, _ = env.reset(seed=0)
+            env.set_perturbation("camera_offset_x", 0.1)
+            obs_right, _ = env.reset(seed=0)
+            assert not np.array_equal(obs_left["image"], obs_right["image"])
+        finally:
+            env.close()
+
+    def test_camera_offset_y_changes_pixels(self) -> None:
+        """Non-zero ``camera_offset_y`` pans the view → distinct pixels."""
+        env = PyBulletTabletopEnv(render_in_obs=True, render_size=(64, 64))
+        try:
+            env.set_perturbation("camera_offset_y", -0.1)
+            obs_back, _ = env.reset(seed=0)
+            env.set_perturbation("camera_offset_y", 0.1)
+            obs_fwd, _ = env.reset(seed=0)
+            assert not np.array_equal(obs_back["image"], obs_fwd["image"])
+        finally:
+            env.close()
+
+    def test_cosmetic_axes_are_noop_when_render_is_off(self) -> None:
+        """``render_in_obs=False`` — cosmetic axes mutate state-only obs in zero bytes.
+
+        Locks the Phase-2-Task-5 state-only contract: with rendering off,
+        cosmetic-only sweeps still produce identical observations across
+        values (RFC-005 §6.2 honesty caveat preserved on the default path).
+        """
+        env = PyBulletTabletopEnv(render_in_obs=False)
+        try:
+            env.set_perturbation("lighting_intensity", 0.3)
+            obs_dark, _ = env.reset(seed=0)
+            env.set_perturbation("lighting_intensity", 1.5)
+            obs_bright, _ = env.reset(seed=0)
+            # State-only keys match byte-for-byte; no 'image' key in either.
+            assert "image" not in obs_dark
+            assert "image" not in obs_bright
+            for k in obs_dark:
+                assert np.array_equal(obs_dark[k], obs_bright[k]), (
+                    f"state-only key {k!r} leaked cosmetic axis variation"
+                )
+        finally:
+            env.close()
