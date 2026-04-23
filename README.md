@@ -87,6 +87,26 @@ writes the sidecar. The three-step workflow is scripted end-to-end in
 [`examples/evaluate_with_drift.py`](./examples/evaluate_with_drift.py);
 `drift.json` is optional and orthogonal to `report.json`.
 
+### Debugging failures with replay
+
+Once a run has flagged an episode as failing, `gauntlet replay` re-
+simulates exactly that rollout with the same seed, optionally nudging
+one axis off the original grid:
+
+```bash
+uv run gauntlet replay out/episodes.json \
+  --suite examples/suites/tabletop-smoke.yaml \
+  --policy scripted \
+  --episode-id 3:1 \
+  --override lighting_intensity=1.2 \
+  --out out/replay.json
+```
+
+Zero-override replay is bit-identical to the original episode; any
+deviation points at a real reproducibility bug. See
+[`examples/replay_failure.py`](./examples/replay_failure.py) for the
+equivalent library call.
+
 ## Development
 
 ```bash
@@ -103,12 +123,14 @@ uv run pytest
 
 ```
 src/gauntlet/
-  policy/   # Policy adapter protocol + reference wrappers
-  env/      # Parameterized MuJoCo envs with perturbation axes
-  suite/    # YAML-defined perturbation grid suites
-  runner/   # Parallel rollout orchestration + seed management
-  report/   # Failure analysis + HTML/JSON generation
-  cli.py    # gauntlet run / report / compare
+  policy/    # Policy adapter protocol + reference wrappers (Random, Scripted, HF, LeRobot)
+  env/       # Parameterized envs — MuJoCo (core) + PyBullet ([pybullet] extra)
+  suite/     # YAML-defined perturbation grid suites
+  runner/    # Parallel rollout orchestration + seed management
+  report/    # Failure analysis + HTML/JSON generation
+  monitor/   # Runtime drift detection + action-entropy ([monitor] extra)
+  replay/    # Single-episode replay with axis overrides
+  cli.py     # gauntlet run / report / compare / monitor / replay
 ```
 
 ## License

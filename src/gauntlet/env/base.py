@@ -53,7 +53,7 @@ class GauntletEnv(Protocol):
         Makes the env **observationally** equivalent to its post-``__init__``
         state — not bit-identical internal C state (that is a MuJoCo-only
         property). Called by the Runner between episodes
-        (see ``runner/worker.py::_execute_one``). Does **not** clear the
+        (see ``runner/worker.py::execute_one``). Does **not** clear the
         queued perturbations — those are the input to the next reset.
 
     ``reset(seed=...)``
