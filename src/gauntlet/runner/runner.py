@@ -58,9 +58,11 @@ from __future__ import annotations
 
 import multiprocessing as mp
 from collections.abc import Callable
+from typing import cast
 
 import numpy as np
 
+from gauntlet.env.base import GauntletEnv
 from gauntlet.env.registry import registered_envs
 from gauntlet.env.tabletop import TabletopEnv
 from gauntlet.policy.base import Policy
@@ -77,12 +79,22 @@ from gauntlet.suite.schema import Suite
 __all__ = ["Runner"]
 
 
-def _default_env_factory() -> TabletopEnv:
+def _default_env_factory() -> GauntletEnv:
     """Default env factory: build a stock :class:`TabletopEnv`.
+
+    Returns a :class:`GauntletEnv` — the typed Protocol — because the
+    worker dispatches through the Protocol. The concrete type remains
+    :class:`TabletopEnv` so the no-extras / Phase-1 default is unchanged.
+    The ``cast`` documents the deliberate widening at the seam:
+    :class:`TabletopEnv` satisfies the Protocol structurally at runtime
+    (verified by ``tests/test_env.py::TestProtocolConformance``), but
+    mypy treats the narrower ``action_space: Box`` /
+    ``observation_space: Dict`` annotations as invariant with the
+    Protocol's ``Space[Any]`` declaration.
 
     Module-level so it pickles cleanly under the ``spawn`` start method.
     """
-    return TabletopEnv()
+    return cast(GauntletEnv, TabletopEnv())
 
 
 class Runner:
@@ -97,7 +109,7 @@ class Runner:
         self,
         *,
         n_workers: int = 1,
-        env_factory: Callable[[], TabletopEnv] | None = None,
+        env_factory: Callable[[], GauntletEnv] | None = None,
         start_method: str = "spawn",
     ) -> None:
         """Configure the runner.
@@ -106,11 +118,12 @@ class Runner:
             n_workers: Number of worker processes. ``1`` triggers the
                 in-process fast path; ``>= 2`` uses a multiprocessing
                 pool. Must be ``>= 1``.
-            env_factory: Zero-arg factory returning a :class:`TabletopEnv`.
-                Defaults to :func:`_default_env_factory`. Must be
-                pickle-friendly (module-level fn or class) when
-                ``n_workers >= 2`` because the ``spawn`` start method
-                pickles it across the process boundary.
+            env_factory: Zero-arg factory returning a :class:`GauntletEnv`.
+                Defaults to :func:`_default_env_factory` (MuJoCo
+                ``TabletopEnv``). Must be pickle-friendly (module-level
+                fn or class) when ``n_workers >= 2`` because the
+                ``spawn`` start method pickles it across the process
+                boundary.
             start_method: multiprocessing start method.
                 ``"spawn"`` is the only safe choice with MuJoCo — fork
                 is known to leak GL contexts. We refuse other values

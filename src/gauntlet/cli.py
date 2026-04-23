@@ -26,11 +26,12 @@ import json
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 import typer
 from pydantic import ValidationError
 
+from gauntlet.env.base import GauntletEnv
 from gauntlet.env.tabletop import TabletopEnv
 from gauntlet.policy.registry import PolicySpecError, resolve_policy_factory
 from gauntlet.report import Report, build_report, write_html
@@ -138,17 +139,24 @@ def _episodes_to_dicts(episodes: list[Episode]) -> list[dict[str, Any]]:
     return [ep.model_dump(mode="json") for ep in episodes]
 
 
-def _make_env_factory(env_max_steps: int | None) -> Callable[[], TabletopEnv] | None:
+def _make_env_factory(env_max_steps: int | None) -> Callable[[], GauntletEnv] | None:
     """Build an env factory honouring the hidden ``--env-max-steps`` knob.
 
     Returns ``None`` when the user didn't override max_steps so the
     Runner uses its own default. ``functools.partial`` over the class
     pickles cleanly under ``spawn`` — important even though the test
     suite only exercises ``-w 1``.
+
+    Return type is widened to ``GauntletEnv`` (the Runner's Protocol-typed
+    factory signature) via ``cast``. Subpackage-specific backends flow
+    through the same seam in later steps.
     """
     if env_max_steps is None:
         return None
-    return partial(TabletopEnv, max_steps=env_max_steps)
+    return cast(
+        "Callable[[], GauntletEnv]",
+        partial(TabletopEnv, max_steps=env_max_steps),
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────

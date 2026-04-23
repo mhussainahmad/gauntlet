@@ -432,3 +432,111 @@ def _check_factory_pickles(factory: Callable[[], Policy]) -> None:
 # disables spawn.
 def test_spawn_start_method_available() -> None:
     assert "spawn" in mp.get_all_start_methods()
+
+
+# ----------------------------------------------------------------------------
+# Phase 2 Task 5 step 6 — protect the GauntletEnv Protocol seam: a fake
+# backend that does NOT subclass gym.Env or import MuJoCo must drive the
+# Runner end-to-end. If the Runner's or worker's dispatch ever accidentally
+# narrows to TabletopEnv, this test fails.
+# ----------------------------------------------------------------------------
+
+
+class _FakeProtocolEnv:
+    """Minimal stand-in for a non-MuJoCo backend.
+
+    Satisfies :class:`gauntlet.env.base.GauntletEnv` structurally without
+    inheriting from ``gymnasium.Env``. Deterministic outputs (constant
+    observation, constant reward, success-on-first-step) keep the test
+    short and assertion-shaped.
+    """
+
+    AXIS_NAMES = frozenset({"distractor_count"})
+    VISUAL_ONLY_AXES: frozenset[str] = frozenset()
+
+    def __init__(self) -> None:
+        from gymnasium import spaces
+
+        self.observation_space = spaces.Dict(
+            {"cube_pos": spaces.Box(low=-1.0, high=1.0, shape=(3,), dtype=np.float64)}
+        )
+        self.action_space = spaces.Box(
+            low=-1.0, high=1.0, shape=(_ACTION_DIM,), dtype=np.float64
+        )
+        self._pending: dict[str, float] = {}
+        self._step_count = 0
+
+    def reset(
+        self,
+        *,
+        seed: int | None = None,
+        options: dict[str, Any] | None = None,
+    ) -> tuple[dict[str, np.ndarray[Any, Any]], dict[str, Any]]:
+        self._step_count = 0
+        self._pending.clear()
+        return (
+            {"cube_pos": np.zeros(3, dtype=np.float64)},
+            {"seed_echo": seed},
+        )
+
+    def step(
+        self,
+        action: np.ndarray[Any, Any],
+    ) -> tuple[dict[str, np.ndarray[Any, Any]], float, bool, bool, dict[str, Any]]:
+        self._step_count += 1
+        terminated = True  # Succeed on step 1; Runner records it as a success.
+        return (
+            {"cube_pos": np.zeros(3, dtype=np.float64)},
+            1.0,
+            terminated,
+            False,
+            {"success": True, "step_count": self._step_count},
+        )
+
+    def set_perturbation(self, name: str, value: float) -> None:
+        if name not in type(self).AXIS_NAMES:
+            raise ValueError(f"unknown perturbation axis: {name!r}")
+        self._pending[name] = value
+
+    def restore_baseline(self) -> None:
+        self._pending.clear()
+        self._step_count = 0
+
+    def close(self) -> None:
+        return None
+
+
+def _fake_env_factory() -> Any:
+    """Module-level so it pickles under spawn (the Protocol seam still
+    works under the pool path even though this test only exercises -w 1)."""
+    return _FakeProtocolEnv()
+
+
+def test_runner_accepts_non_tabletop_gauntlet_env_protocol_impl() -> None:
+    """Step-6 regression test: a fake backend satisfying GauntletEnv
+    structurally must drive the Runner end-to-end. If the Runner ever
+    accidentally narrows to TabletopEnv again, this fails.
+    """
+    from gauntlet.env.base import GauntletEnv
+
+    # Sanity — the fake actually satisfies the Protocol at runtime.
+    fake = _FakeProtocolEnv()
+    assert isinstance(fake, GauntletEnv)
+    fake.close()
+
+    suite = _make_suite(
+        name="fake-protocol-suite",
+        seed=13,
+        episodes_per_cell=1,
+        axes={"distractor_count": AxisSpec(values=[0.0, 1.0])},
+    )
+
+    runner = Runner(n_workers=1, env_factory=_fake_env_factory)
+    episodes = runner.run(policy_factory=make_scripted_policy, suite=suite)
+
+    # 2 cells * 1 episode = 2 episodes, all successful per the fake's contract.
+    assert len(episodes) == 2
+    assert all(ep.success for ep in episodes)
+    # The distractor_count axis values are preserved on the Episode.
+    values = sorted(ep.perturbation_config["distractor_count"] for ep in episodes)
+    assert values == [0.0, 1.0]

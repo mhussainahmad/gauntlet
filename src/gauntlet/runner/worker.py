@@ -25,7 +25,7 @@ Determinism contract
 * ``WorkItem.episode_seq`` is a :class:`numpy.random.SeedSequence` —
   picklable, deterministic, derived from the master seed via
   ``master.spawn(n_cells)[cell_idx].spawn(episodes_per_cell)[ep_idx]``.
-* The env seed handed to :meth:`TabletopEnv.reset` is
+* The env seed handed to :meth:`GauntletEnv.reset` is
   ``int(episode_seq.generate_state(1, dtype=np.uint32)[0])`` — a stable
   uint32 unique to (master, cell_idx, ep_idx). This is also recorded as
   :attr:`Episode.seed` so the rollout can be reproduced.
@@ -51,7 +51,7 @@ from typing import Any
 
 import numpy as np
 
-from gauntlet.env.tabletop import TabletopEnv
+from gauntlet.env.base import GauntletEnv
 from gauntlet.policy.base import Policy, ResettablePolicy
 from gauntlet.runner.episode import Episode
 
@@ -83,7 +83,7 @@ class WorkItem:
         episode_index: Zero-based episode within the cell.
         perturbation_values: ``{axis_name: scalar}`` — frozen view of the
             cell's values; will be applied via
-            :meth:`TabletopEnv.set_perturbation`.
+            :meth:`GauntletEnv.set_perturbation`.
         episode_seq: SeedSequence node for this episode. The worker
             derives both the env seed (uint32) and the policy RNG from
             this single node so both streams are reproducible.
@@ -117,15 +117,18 @@ class WorkerInitArgs:
 
     Both fields are zero-arg callables to side-step the pickle boundary:
 
-    * ``env_factory`` — builds a :class:`TabletopEnv`. The MjModel inside
-      is not picklable, so the env must be born inside the worker.
+    * ``env_factory`` — builds any :class:`GauntletEnv` implementation
+      (MuJoCo ``TabletopEnv``, PyBullet ``PyBulletTabletopEnv``, or a
+      third-party registered backend). Per-backend invariants (e.g.
+      MuJoCo's non-picklable MjModel) still push construction into the
+      worker; the Protocol does not constrain them further.
     * ``policy_factory`` — builds a fresh :class:`Policy` per episode.
       Stashed once and called per-item; future torch/GPU policies that
       cannot be pickled (e.g. HuggingFacePolicy) can therefore live
       entirely inside the worker.
     """
 
-    env_factory: Callable[[], TabletopEnv]
+    env_factory: Callable[[], GauntletEnv]
     policy_factory: Callable[[], Policy]
 
 
@@ -139,9 +142,12 @@ _WORKER_STATE: dict[str, Any] = {}
 def pool_initializer(args: WorkerInitArgs) -> None:
     """Run once per worker process at pool startup.
 
-    Loads the MJCF (one MjModel per worker) and caches the policy
-    factory. Subsequent items reuse the env via
-    :meth:`TabletopEnv.restore_baseline`; the model is never re-loaded.
+    Constructs one env per worker (whatever concrete
+    :class:`GauntletEnv` the ``env_factory`` returns) and caches the
+    policy factory. Subsequent items reuse the env via
+    :meth:`GauntletEnv.restore_baseline` — Protocol contract guarantees
+    the backend returns to a ``__init__``-equivalent state between
+    episodes without reconstructing the scene.
     """
     env = args.env_factory()
     _WORKER_STATE["env"] = env
@@ -165,7 +171,7 @@ def extract_env_seed(seq: np.random.SeedSequence) -> int:
     return int(seq.generate_state(1, dtype=np.uint32)[0])
 
 
-def _execute_one(env: TabletopEnv, policy_factory: Callable[[], Policy], item: WorkItem) -> Episode:
+def _execute_one(env: GauntletEnv, policy_factory: Callable[[], Policy], item: WorkItem) -> Episode:
     """Drive one (cell, episode) rollout to completion.
 
     Shared by the worker entrypoint :func:`run_work_item` and by the
@@ -178,7 +184,7 @@ def _execute_one(env: TabletopEnv, policy_factory: Callable[[], Policy], item: W
     1. ``env.restore_baseline()`` wipes any model mutation from the
        previous episode handled by this worker.
     2. Apply every queued ``perturbation_value`` via
-       :meth:`TabletopEnv.set_perturbation`.
+       :meth:`GauntletEnv.set_perturbation`.
     3. Build a fresh ``policy`` via ``policy_factory()``.
     4. Build the policy RNG from ``item.episode_seq`` (decorrelated from
        the env stream but reproducible from the same SeedSequence node).
@@ -241,6 +247,6 @@ def run_work_item(item: WorkItem) -> Episode:
             "This is a Runner bug — file an issue with the reproduction."
         )
     # The pool initializer guarantees these types; cast for mypy.
-    env: TabletopEnv = env_obj
+    env: GauntletEnv = env_obj
     policy_factory: Callable[[], Policy] = policy_factory_obj
     return _execute_one(env, policy_factory, item)
