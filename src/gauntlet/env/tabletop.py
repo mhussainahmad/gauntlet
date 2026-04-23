@@ -46,7 +46,7 @@ across runs.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, ClassVar, Final
 
 import gymnasium as gym
 import mujoco
@@ -69,23 +69,6 @@ N_DISTRACTOR_SLOTS: Final[int] = 10
 # so the material colour is what shows.
 _CUBE_MATERIAL_DEFAULT: Final[str] = "cube_mat"
 _CUBE_MATERIAL_ALT: Final[str] = "cube_alt_mat"
-
-# Set of accepted perturbation axis names. The canonical ordered tuple
-# lives in ``gauntlet.env.perturbation.AXIS_NAMES``; we duplicate the
-# membership set here as a module-local constant to keep ``set_perturbation``
-# free of any cross-module import (avoids a perturbation -> tabletop ->
-# perturbation cycle).
-_KNOWN_AXIS_NAMES: Final[frozenset[str]] = frozenset(
-    {
-        "lighting_intensity",
-        "camera_offset_x",
-        "camera_offset_y",
-        "object_texture",
-        "object_initial_pose_x",
-        "object_initial_pose_y",
-        "distractor_count",
-    }
-)
 
 # Observation / action type aliases for the gym.Env generic parameters.
 # We keep ``Any`` inside ``NDArray`` here only to match ``gauntlet.policy.base``;
@@ -124,6 +107,26 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
     # gymnasium declares `metadata` as an instance attribute on Env; subclasses
     # override at class-scope by convention, so the RUF012 warning does not apply.
     metadata: dict[str, Any] = {"render_modes": ["rgb_array"]}  # noqa: RUF012
+
+    # Phase 2 Task 5 step 4 — GauntletEnv Protocol introspection points.
+    # AXIS_NAMES is the canonical membership set previously held in a module
+    # local ``_KNOWN_AXIS_NAMES``; promoted to ClassVar so the Suite loader
+    # can query backend-specific axis support without constructing the env.
+    # VISUAL_ONLY_AXES is empty on MuJoCo because the renderer consumes the
+    # cosmetic axes via ``render()`` (see RFC-005 §6.2); state-only backends
+    # (first-cut PyBullet) declare the cosmetic subset instead.
+    AXIS_NAMES: ClassVar[frozenset[str]] = frozenset(
+        {
+            "lighting_intensity",
+            "camera_offset_x",
+            "camera_offset_y",
+            "object_texture",
+            "object_initial_pose_x",
+            "object_initial_pose_y",
+            "distractor_count",
+        }
+    )
+    VISUAL_ONLY_AXES: ClassVar[frozenset[str]] = frozenset()
 
     # Per-step action scaling.
     MAX_LINEAR_STEP: float = 0.05  # metres per unit action
@@ -328,7 +331,7 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
                 of range for an axis with a hard bound (currently only
                 ``distractor_count``).
         """
-        if name not in _KNOWN_AXIS_NAMES:
+        if name not in type(self).AXIS_NAMES:
             raise ValueError(f"unknown perturbation axis: {name!r}")
         if name == "distractor_count":
             count = round(float(value))
