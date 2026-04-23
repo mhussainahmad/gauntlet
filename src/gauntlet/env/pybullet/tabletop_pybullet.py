@@ -141,7 +141,13 @@ class PyBulletTabletopEnv:
             "distractor_count",
         }
     )
-    VISUAL_ONLY_AXES: ClassVar[frozenset[str]] = frozenset({"lighting_intensity", "object_texture"})
+    # Empty once image rendering exists (RFC-006 §3.5): every cosmetic axis
+    # is now observable on ``obs["image"]`` when ``render_in_obs=True``.
+    # Aligns PyBullet with MuJoCo's TabletopEnv, which has always declared
+    # ``frozenset()`` for the same reason. A user running a cosmetic-only
+    # sweep with ``render_in_obs=False`` will still see pairwise-identical
+    # state-only cells — documented, not a bug, and matches MuJoCo.
+    VISUAL_ONLY_AXES: ClassVar[frozenset[str]] = frozenset()
 
     MAX_LINEAR_STEP: float = 0.05
     MAX_ANGULAR_STEP: float = 0.1

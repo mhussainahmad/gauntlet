@@ -63,17 +63,19 @@ def test_pybullet_backend_satisfies_gauntlet_env_protocol() -> None:
 
 
 def test_pybullet_backend_declares_visual_only_axes() -> None:
-    """Pins the step-5 loader-rejection contract (RFC-005 §6.2).
+    """Pins the RFC-006-updated contract: VISUAL_ONLY_AXES is empty.
 
-    The PyBullet backend's ``VISUAL_ONLY_AXES`` must be exactly
-    ``{"lighting_intensity", "object_texture"}`` — these two axes
-    mutate the scene but cannot change a state-only observation, so
-    the Suite loader rejects suites that vary only these axes at
-    load-time (step 12 wires the check in).
+    Before RFC-006 (state-only release) this set carried
+    ``{"lighting_intensity", "object_texture"}`` and the Suite loader
+    rejected cosmetic-only sweeps as pairwise-identical-by-construction.
+    RFC-006 adds an image-observation path that makes every cosmetic
+    axis observable on ``obs["image"]`` — aligning PyBullet with
+    ``TabletopEnv.VISUAL_ONLY_AXES == frozenset()``. The loader's
+    cosmetic-only rejection becomes a no-op on PyBullet; see
+    ``tests/pybullet/test_loader_pybullet.py`` for the relaxed contract.
     """
     from gauntlet.env.pybullet.tabletop_pybullet import PyBulletTabletopEnv
 
-    expected_visual = frozenset({"lighting_intensity", "object_texture"})
     expected_all = frozenset(
         {
             "lighting_intensity",
@@ -85,7 +87,7 @@ def test_pybullet_backend_declares_visual_only_axes() -> None:
             "distractor_count",
         }
     )
-    assert expected_visual == PyBulletTabletopEnv.VISUAL_ONLY_AXES
+    assert frozenset() == PyBulletTabletopEnv.VISUAL_ONLY_AXES
     assert expected_all == PyBulletTabletopEnv.AXIS_NAMES
 
 
