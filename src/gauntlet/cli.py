@@ -30,6 +30,8 @@ from typing import Annotated, Any, cast
 
 import typer
 from pydantic import ValidationError
+from rich.console import Console
+from rich.theme import Theme
 
 from gauntlet.env.base import GauntletEnv
 from gauntlet.env.tabletop import TabletopEnv
@@ -54,17 +56,77 @@ app = typer.Typer(
 # ──────────────────────────────────────────────────────────────────────
 # Internal helpers (kept module-level so they pickle under spawn).
 # ──────────────────────────────────────────────────────────────────────
+#
+# Status output goes through a rich ``Console`` on stderr. When stderr
+# is not a TTY (CI, CliRunner, ``2>file``) rich auto-strips ANSI so the
+# plain-text substrings tests assert against survive unchanged; on a
+# real terminal you get colored prefixes, success-rate bands, and signed
+# deltas. ``NO_COLOR=1`` (standard) also disables styling.
+
+_THEME = Theme(
+    {
+        "err": "bold red",
+        "warn": "bold yellow",
+        "ok": "bold green",
+        "path": "cyan",
+        "pct.good": "green",
+        "pct.mid": "yellow",
+        "pct.bad": "red",
+        "delta.up": "green",
+        "delta.down": "red",
+        "delta.zero": "dim",
+    }
+)
+
+# ``soft_wrap=True`` so rich does not hard-wrap long lines to width and
+# split tokens like ``tabletop-pybullet`` that stderr substring tests
+# assert on. ``highlight=False`` suppresses rich's default auto-
+# highlighting of numbers / paths (we apply explicit styles below).
+_console = Console(stderr=True, theme=_THEME, highlight=False, soft_wrap=True)
 
 
 def _echo_err(msg: str) -> None:
-    """Write *msg* to stderr; thin wrapper to keep call sites short."""
-    typer.echo(msg, err=True)
+    """Write *msg* to stderr through the shared rich Console.
+
+    ``msg`` may contain rich markup (e.g. ``"[ok]done[/]"``); markup is
+    parsed and styled on a TTY and stripped to plain text otherwise.
+    """
+    _console.print(msg)
 
 
 def _fail(msg: str, *, code: int = 1) -> typer.Exit:
     """Emit an error message and return a ``typer.Exit`` to raise."""
-    _echo_err(f"error: {msg}")
+    _echo_err(f"[err]error:[/] {msg}")
     return typer.Exit(code=code)
+
+
+def _fmt_success_rate(rate: float) -> str:
+    """Colour a fractional success rate (0-1) by band for stderr summaries."""
+    pct = rate * 100.0
+    if pct >= 80.0:
+        style = "pct.good"
+    elif pct >= 50.0:
+        style = "pct.mid"
+    else:
+        style = "pct.bad"
+    return f"[{style}]{pct:.1f}%[/]"
+
+
+def _fmt_signed_pct(delta: float) -> str:
+    """Colour a signed fractional delta by direction (green up / red down)."""
+    pct = delta * 100.0
+    if delta > 0:
+        style = "delta.up"
+    elif delta < 0:
+        style = "delta.down"
+    else:
+        style = "delta.zero"
+    return f"[{style}]{pct:+.1f}%[/]"
+
+
+def _fmt_path(path: Path) -> str:
+    """Style a filesystem path so it stands out in stderr summaries."""
+    return f"[path]{path}[/]"
 
 
 def _read_json(path: Path) -> Any:
@@ -287,8 +349,8 @@ def run(
         write_html(report, report_html_path)
 
     summary = (
-        f"Wrote {len(episodes)} episodes / {len(report.per_cell)} cells "
-        f"-> {out} (success: {report.overall_success_rate * 100:.1f}%)"
+        f"[ok]Wrote[/] {len(episodes)} episodes / {len(report.per_cell)} cells "
+        f"-> {_fmt_path(out)} (success: {_fmt_success_rate(report.overall_success_rate)})"
     )
     _echo_err(summary)
 
@@ -328,7 +390,7 @@ def report(
             out_path.parent.mkdir(parents=True, exist_ok=True)
 
     write_html(rep, out_path)
-    _echo_err(f"Wrote {out_path}")
+    _echo_err(f"[ok]Wrote[/] {_fmt_path(out_path)}")
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -484,14 +546,14 @@ def compare(
                 f"to override."
             )
         _echo_err(
-            f"warning: cross-backend compare — a.suite_env="
+            f"[warn]warning:[/] cross-backend compare — a.suite_env="
             f"{report_a.suite_env!r} vs b.suite_env={report_b.suite_env!r}. "
             f"This measures simulator drift, NOT policy regression."
         )
 
     if report_a.suite_name != report_b.suite_name:
         _echo_err(
-            f"warning: comparing across suites — a={report_a.suite_name!r} vs "
+            f"[warn]warning:[/] comparing across suites — a={report_a.suite_name!r} vs "
             f"b={report_b.suite_name!r}"
         )
 
@@ -507,14 +569,23 @@ def compare(
         out_path.parent.mkdir(parents=True, exist_ok=True)
     _write_json(out_path, payload)
 
-    delta_pct = payload["delta_success_rate"] * 100
-    _echo_err(f"Wrote {out_path}")
-    _echo_err(f"  a: {report_a.suite_name} ({report_a.overall_success_rate * 100:.1f}%)")
-    _echo_err(f"  b: {report_b.suite_name} ({report_b.overall_success_rate * 100:.1f}%)")
-    _echo_err(f"  delta success_rate: {delta_pct:+.1f}%")
+    _echo_err(f"[ok]Wrote[/] {_fmt_path(out_path)}")
     _echo_err(
-        f"  regressions: {len(payload['regressions'])}  "
-        f"improvements: {len(payload['improvements'])}"
+        f"  a: {report_a.suite_name} ({_fmt_success_rate(report_a.overall_success_rate)})"
+    )
+    _echo_err(
+        f"  b: {report_b.suite_name} ({_fmt_success_rate(report_b.overall_success_rate)})"
+    )
+    _echo_err(
+        f"  delta success_rate: {_fmt_signed_pct(payload['delta_success_rate'])}"
+    )
+    n_regressions = len(payload["regressions"])
+    n_improvements = len(payload["improvements"])
+    regressions_style = "delta.down" if n_regressions else "delta.zero"
+    improvements_style = "delta.up" if n_improvements else "delta.zero"
+    _echo_err(
+        f"  regressions: [{regressions_style}]{n_regressions}[/]  "
+        f"improvements: [{improvements_style}]{n_improvements}[/]"
     )
 
 
@@ -612,7 +683,7 @@ def monitor_train(
     except (ValueError, KeyError, FileNotFoundError) as exc:
         raise _fail(f"monitor train failed: {exc}") from exc
 
-    _echo_err(f"Wrote AE checkpoint -> {out}")
+    _echo_err(f"[ok]Wrote[/] AE checkpoint -> {_fmt_path(out)}")
 
 
 @monitor_app.command("score")
@@ -674,11 +745,15 @@ def monitor_score(
     if out.parent and not out.parent.exists():
         out.parent.mkdir(parents=True, exist_ok=True)
     _write_json(out, drift.model_dump(mode="json"))
+    cand = drift.candidate_reconstruction_error_mean
+    ref = drift.reference_reconstruction_error_mean
+    # Higher reconstruction error on the candidate = more drift.
+    cand_style = "delta.down" if cand > ref else ("delta.up" if cand < ref else "delta.zero")
     _echo_err(
-        f"Wrote drift.json -> {out} "
+        f"[ok]Wrote[/] drift.json -> {_fmt_path(out)} "
         f"(n_episodes={drift.n_episodes}, "
-        f"candidate mean={drift.candidate_reconstruction_error_mean:.4f} "
-        f"vs reference mean={drift.reference_reconstruction_error_mean:.4f})"
+        f"candidate mean=[{cand_style}]{cand:.4f}[/] "
+        f"vs reference mean={ref:.4f})"
     )
 
 
@@ -863,17 +938,26 @@ def replay(
     _write_json(out_path, payload)
 
     delta_reward = replayed.total_reward - target.total_reward
-    _echo_err(f"Wrote {out_path}")
+    original_style = "delta.up" if target.success else "delta.down"
+    replayed_style = "delta.up" if replayed.success else "delta.down"
+    if delta_reward > 0:
+        reward_delta_style = "delta.up"
+    elif delta_reward < 0:
+        reward_delta_style = "delta.down"
+    else:
+        reward_delta_style = "delta.zero"
+    _echo_err(f"[ok]Wrote[/] {_fmt_path(out_path)}")
     _echo_err(
         f"  episode {cell_index}:{episode_index}  overrides: {overrides if overrides else '{}'}"
     )
     _echo_err(
-        f"  original: success={target.success} steps={target.step_count} "
-        f"reward={target.total_reward:.4f}"
+        f"  original: success=[{original_style}]{target.success}[/] "
+        f"steps={target.step_count} reward={target.total_reward:.4f}"
     )
     _echo_err(
-        f"  replayed: success={replayed.success} steps={replayed.step_count} "
-        f"reward={replayed.total_reward:.4f} (delta {delta_reward:+.4f})"
+        f"  replayed: success=[{replayed_style}]{replayed.success}[/] "
+        f"steps={replayed.step_count} reward={replayed.total_reward:.4f} "
+        f"(delta [{reward_delta_style}]{delta_reward:+.4f}[/])"
     )
 
 
