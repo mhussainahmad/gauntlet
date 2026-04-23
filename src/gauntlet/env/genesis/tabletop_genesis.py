@@ -657,6 +657,14 @@ class GenesisTabletopEnv:
         self._cam_offset = np.zeros(2, dtype=np.float64)
         self._texture_choice = 0
 
+        # Render-side baselines — push the neutral shadow values into
+        # the pyrender context + camera pose so the next render sees
+        # the unperturbed scene. Guarded on ``render_in_obs`` so
+        # state-only envs never touch the private ``_context`` hop.
+        if self._render_in_obs:
+            self._apply_light_intensity()
+            self._apply_camera_pose()
+
     def _apply_pending_perturbations(self) -> None:
         """Apply ``self._pending_perturbations`` to the scene.
 
@@ -670,15 +678,57 @@ class GenesisTabletopEnv:
         for name, value in self._pending_perturbations.items():
             self._apply_one_perturbation(name, value)
 
+    def _apply_camera_pose(self) -> None:
+        """Apply ``self._cam_offset`` to the render camera.
+
+        No-op when ``render_in_obs=False`` (no camera attached). The
+        offset adds to ``_CAM_EYE_BASELINE``; the target and up vector
+        stay fixed — pan, not orbit.
+        """
+        assert self._camera is not None, (
+            "_apply_camera_pose requires render_in_obs=True — the "
+            "caller must gate on self._render_in_obs"
+        )
+        eye = (
+            _CAM_EYE_BASELINE[0] + float(self._cam_offset[0]),
+            _CAM_EYE_BASELINE[1] + float(self._cam_offset[1]),
+            _CAM_EYE_BASELINE[2],
+        )
+        self._camera.set_pose(pos=eye, lookat=_CAM_TARGET, up=_CAM_UP)
+
+    def _apply_light_intensity(self) -> None:
+        """Scale the default directional light's intensity.
+
+        Private-API hop on ``scene.visualizer.rasterizer._context._scene.light_nodes[0].light``
+        — Genesis 0.4.x does not expose a public post-build setter
+        (exploration §4, RFC-008 §4.1). Pinned by
+        ``genesis-world>=0.4,<0.5`` in ``pyproject.toml``. If 0.5
+        rearranges the internals, this site raises ``AttributeError``
+        loudly.
+        """
+        if not self._render_in_obs:
+            return
+        pyscene = self._scene.visualizer.rasterizer._context._scene
+        # pyrender's scene exposes ``directional_light_nodes`` as an
+        # iterable (a set on 0.4.x); Genesis's default ``VisOptions.lights``
+        # seeds exactly one directional light — take it by position in
+        # iteration order.
+        light_node = next(iter(pyscene.directional_light_nodes))
+        light_node.light.intensity = _BASELINE_LIGHT_INTENSITY * self._light_intensity
+
     def _apply_one_perturbation(self, name: str, value: float) -> None:
         if name == "lighting_intensity":
-            # Cosmetic (VISUAL_ONLY_AXES) — state obs unchanged.
-            # Stored so RFC-008 can read it without rewiring dispatch.
             self._light_intensity = float(value)
+            if self._render_in_obs:
+                self._apply_light_intensity()
         elif name == "camera_offset_x":
             self._cam_offset[0] = float(value)
+            if self._render_in_obs:
+                self._apply_camera_pose()
         elif name == "camera_offset_y":
             self._cam_offset[1] = float(value)
+            if self._render_in_obs:
+                self._apply_camera_pose()
         elif name == "object_texture":
             new_choice = 1 if round(float(value)) != 0 else 0
             if new_choice != self._texture_choice:

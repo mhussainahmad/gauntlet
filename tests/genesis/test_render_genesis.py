@@ -129,6 +129,62 @@ def test_reset_seed_produces_byte_identical_image() -> None:
 # ------------------------------------------------- cross-backend shape parity
 
 
+# ------------------------------------------------- axis sensitivity (four cases)
+
+
+def _image_under_axis(axis: str, value: float, seed: int = 42) -> np.ndarray:
+    """Fresh env, queue the axis at the given value, reset at ``seed``,
+    return the rendered image. Small-resolution to keep the test cheap.
+    """
+    from gauntlet.env.genesis import GenesisTabletopEnv
+
+    e = GenesisTabletopEnv(render_in_obs=True, render_size=(64, 64))
+    try:
+        e.set_perturbation(axis, value)
+        obs, _ = e.reset(seed=seed)
+        return np.asarray(obs["image"], dtype=np.uint8)
+    finally:
+        e.close()
+
+
+def test_lighting_intensity_changes_pixels() -> None:
+    """RFC-008 §7 case 5a — ``lighting_intensity=0.3`` vs ``=1.5``
+    produce distinct images under identical seed + scene state.
+    """
+    low = _image_under_axis("lighting_intensity", 0.3)
+    high = _image_under_axis("lighting_intensity", 1.5)
+    assert not np.array_equal(low, high), (
+        "lighting_intensity did not affect the render — pyrender light "
+        "intensity mutation (RFC-008 §4) may not be hooked up"
+    )
+
+
+def test_object_texture_changes_pixels() -> None:
+    """RFC-008 §7 case 5b — texture choice 0 (red) vs 1 (green) swap
+    the active cube and therefore the rendered colour.
+    """
+    red = _image_under_axis("object_texture", 0.0)
+    green = _image_under_axis("object_texture", 1.0)
+    assert not np.array_equal(red, green), (
+        "object_texture swap did not affect the render — check the "
+        "dual-cube teleport in _apply_one_perturbation"
+    )
+
+
+def test_camera_offset_x_changes_pixels() -> None:
+    """RFC-008 §7 case 5c — camera pans along X."""
+    left = _image_under_axis("camera_offset_x", -0.05)
+    right = _image_under_axis("camera_offset_x", 0.05)
+    assert not np.array_equal(left, right)
+
+
+def test_camera_offset_y_changes_pixels() -> None:
+    """RFC-008 §7 case 5d — camera pans along Y."""
+    back = _image_under_axis("camera_offset_y", -0.05)
+    front = _image_under_axis("camera_offset_y", 0.05)
+    assert not np.array_equal(back, front)
+
+
 def test_image_space_matches_mujoco() -> None:
     """RFC-008 §7 case 2 — ``observation_space["image"]`` Box is equal
     under ``gym.spaces.Box.__eq__`` to ``TabletopEnv``'s. Pixel values
