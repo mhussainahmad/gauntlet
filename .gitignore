@@ -32,6 +32,17 @@ out/
 results/
 *.results.json
 
+# Drift-detector artefacts (trajectory dumps, AE weights).
+# Test runs produce these under tmp paths but also land in ad-hoc local
+# directories when users follow the quickstart; never commit them.
+*.npz
+*.pt
+*.pth
+*.safetensors
+
+# Local vector DB state (untracked tooling DB).
+tooling.vector.db
+
 # Local agent / the coding agent infrastructure (runtime state, not project code)
 .swarm/
 .mcp.json
