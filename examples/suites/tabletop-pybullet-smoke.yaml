@@ -1,0 +1,20 @@
+# tabletop-pybullet-smoke — PyBullet backend analogue of tabletop-smoke.
+#
+# 3 lighting intensities x 2 cube textures = 6 cells, 4 episodes per cell =
+# 24 rollouts. The cosmetic-only axis list is legal on tabletop-pybullet
+# (RFC-006 §3.5 — VISUAL_ONLY_AXES dropped once rendering exists); pairwise-
+# identical cells only if the env factory runs with render_in_obs=False.
+# Use examples/evaluate_smolvla_pybullet.py to drive this suite with
+# render_in_obs=True so cosmetic axes produce observable pixel differences.
+
+name: tabletop-pybullet-smoke
+env: tabletop-pybullet
+seed: 0
+episodes_per_cell: 4
+axes:
+  lighting_intensity:
+    low: 0.3
+    high: 1.5
+    steps: 3
+  object_texture:
+    values: [0, 1]

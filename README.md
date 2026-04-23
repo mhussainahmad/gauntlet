@@ -32,7 +32,7 @@ optional extra.
 | `env:` slug          | Simulator | Install                                  | Observations |
 |----------------------|-----------|------------------------------------------|--------------|
 | `tabletop`           | MuJoCo    | `uv sync` (core)                         | State + render-on-demand |
-| `tabletop-pybullet`  | PyBullet  | `uv sync --extra pybullet`               | State-only (§6.2) |
+| `tabletop-pybullet`  | PyBullet  | `uv sync --extra pybullet`               | State + render-on-demand |
 
 The two backends share action/observation spaces byte-for-byte and the
 canonical 7 perturbation axes. They are **not** numerically identical:
@@ -41,8 +41,19 @@ semantically similar but numerically different trajectories. Running
 `gauntlet compare` across backends measures simulator drift, not
 policy regression; the CLI requires `--allow-cross-backend` to proceed.
 
+Image observations are available on either backend via
+`render_in_obs=True` / `render_size=(H, W)` on the env constructor
+(`TabletopEnv` or `PyBulletTabletopEnv`). PyBullet uses a headless,
+deterministic TINY rasteriser; the emitted `obs["image"]` Box has
+shape / dtype / bounds byte-identical to MuJoCo's, so VLA adapters
+(OpenVLA, SmolVLA) work on either backend by swapping only the env
+factory. Pixel values explicitly differ (different rasterisers —
+semantic parity only).
+
 See [`docs/phase2-rfc-005-pybullet-adapter.md`](./docs/phase2-rfc-005-pybullet-adapter.md)
-for the full PyBullet backend design.
+for the full PyBullet backend design, and
+[`docs/phase2-rfc-006-pybullet-rendering.md`](./docs/phase2-rfc-006-pybullet-rendering.md)
+for the image-observation follow-up.
 
 ## Quickstart
 
@@ -71,7 +82,7 @@ for the equivalent invocation via the public Python API.
 - Install the HF extras: `uv sync --extra hf` (pulls torch / transformers / pillow; core installs stay torch-free).
 - See [`examples/evaluate_openvla.py`](./examples/evaluate_openvla.py) for the ≤20-line OpenVLA-7B factory.
 - Image-conditioned policies need a rendered frame — construct `TabletopEnv(render_in_obs=True)` so `obs["image"]` is emitted.
-- SmolVLA: `uv sync --extra lerobot`; see [`examples/evaluate_smolvla.py`](./examples/evaluate_smolvla.py).
+- SmolVLA: `uv sync --extra lerobot`; see [`examples/evaluate_smolvla.py`](./examples/evaluate_smolvla.py). For the PyBullet-backed equivalent, `uv sync --extra lerobot --extra pybullet` and run [`examples/evaluate_smolvla_pybullet.py`](./examples/evaluate_smolvla_pybullet.py).
 - SmolVLA-base is pretrained on SO-100 (6-D joint) whereas TabletopEnv is 7-D EE-twist+gripper — zero-shot success is ~0% by embodiment mismatch; fine-tune on TabletopEnv-compatible data for meaningful evaluation.
 
 ### Runtime drift detection
