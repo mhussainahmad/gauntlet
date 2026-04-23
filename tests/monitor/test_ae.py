@@ -330,7 +330,7 @@ def test_score_drift_end_to_end(tmp_path: Path) -> None:
     assert errors == sorted(errors, reverse=True)
     # Candidate is materially more OOD than reference.
     assert (
-        drift.candidate_reconstruction_error_mean > 1.5 * drift.reference_reconstruction_error_mean
+        drift.candidate_reconstruction_error_mean > 2.0 * drift.reference_reconstruction_error_mean
     )
 
 
