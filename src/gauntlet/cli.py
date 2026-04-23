@@ -206,6 +206,18 @@ def run(
             help="Skip rendering report.html; emit JSON artefacts only.",
         ),
     ] = False,
+    record_trajectories: Annotated[
+        Path | None,
+        typer.Option(
+            "--record-trajectories",
+            help=(
+                "Directory to dump per-episode NPZ trajectories into. "
+                "Defaults to OFF — when unset the Runner is byte-identical "
+                "to Phase 1. Feed the directory into ``gauntlet monitor "
+                "train`` / ``gauntlet monitor score``."
+            ),
+        ),
+    ] = None,
     env_max_steps: Annotated[
         int | None,
         typer.Option(
@@ -239,7 +251,11 @@ def run(
     out.mkdir(parents=True, exist_ok=True)
 
     env_factory = _make_env_factory(env_max_steps)
-    runner = Runner(n_workers=n_workers, env_factory=env_factory)
+    runner = Runner(
+        n_workers=n_workers,
+        env_factory=env_factory,
+        trajectory_dir=record_trajectories,
+    )
 
     try:
         episodes = runner.run(policy_factory=policy_factory, suite=suite)
@@ -454,6 +470,194 @@ def compare(
     _echo_err(
         f"  regressions: {len(payload['regressions'])}  "
         f"improvements: {len(payload['improvements'])}"
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# `monitor` subcommand group — drift detector (torch-backed).
+# ──────────────────────────────────────────────────────────────────────
+#
+# The subcommands call into ``gauntlet.monitor.train`` /
+# ``gauntlet.monitor.score``. Both lazily import torch at module scope
+# and raise an ``ImportError`` with an install hint when the extra is
+# missing — we surface that as a clean CLI error so users get the hint
+# on the same line, not after a traceback.
+
+
+monitor_app = typer.Typer(
+    name="monitor",
+    help="Runtime drift detector (requires the 'monitor' extra).",
+    no_args_is_help=True,
+    add_completion=False,
+)
+app.add_typer(monitor_app)
+
+
+def _fail_monitor_extra(exc: ImportError) -> typer.Exit:
+    """Turn the install-hint ``ImportError`` into a clean CLI error.
+
+    The monitor modules already compose a helpful message; we just
+    surface it through the standard ``error: ...`` envelope so the user
+    gets a single-line hint instead of a Python traceback.
+    """
+    return _fail(str(exc))
+
+
+@monitor_app.command("train")
+def monitor_train(
+    trajectory_dir: Annotated[
+        Path,
+        typer.Argument(
+            help="Reference trajectory directory (from ``gauntlet run --record-trajectories``).",
+            exists=False,
+            file_okay=False,
+            dir_okay=True,
+        ),
+    ],
+    out: Annotated[
+        Path,
+        typer.Option(
+            "--out",
+            "-o",
+            help="AE checkpoint directory; created if missing.",
+        ),
+    ],
+    epochs: Annotated[
+        int,
+        typer.Option(
+            "--epochs",
+            min=1,
+            help="Training epochs over the reference set.",
+        ),
+    ] = 50,
+    latent_dim: Annotated[
+        int,
+        typer.Option(
+            "--latent-dim",
+            min=1,
+            help="AE bottleneck dimension.",
+        ),
+    ] = 8,
+    batch_size: Annotated[
+        int,
+        typer.Option(
+            "--batch-size",
+            min=1,
+            help="Minibatch size.",
+        ),
+    ] = 256,
+    lr: Annotated[
+        float,
+        typer.Option("--lr", help="Adam learning rate."),
+    ] = 1e-3,
+    seed: Annotated[
+        int,
+        typer.Option(
+            "--seed",
+            help="Torch RNG seed for bit-identical reruns.",
+        ),
+    ] = 0,
+    reference_suite: Annotated[
+        str | None,
+        typer.Option(
+            "--reference-suite",
+            help="Optional suite name echoed into the checkpoint's config.json.",
+        ),
+    ] = None,
+) -> None:
+    """Fit a :class:`StateAutoencoder` on the reference trajectories."""
+    if not trajectory_dir.is_dir():
+        raise _fail(f"trajectory dir not found: {trajectory_dir}")
+    try:
+        from gauntlet.monitor.train import train_ae
+    except ImportError as exc:
+        raise _fail_monitor_extra(exc) from exc
+
+    try:
+        train_ae(
+            trajectory_dir,
+            out_dir=out,
+            reference_suite=reference_suite,
+            latent_dim=latent_dim,
+            epochs=epochs,
+            batch_size=batch_size,
+            lr=lr,
+            seed=seed,
+        )
+    except (ValueError, KeyError, FileNotFoundError) as exc:
+        raise _fail(f"monitor train failed: {exc}") from exc
+
+    _echo_err(f"Wrote AE checkpoint -> {out}")
+
+
+@monitor_app.command("score")
+def monitor_score(
+    episodes_path: Annotated[
+        Path,
+        typer.Argument(
+            help="Path to the candidate sweep's episodes.json.",
+            dir_okay=False,
+            file_okay=True,
+        ),
+    ],
+    trajectory_dir: Annotated[
+        Path,
+        typer.Argument(
+            help="Candidate trajectory directory (matching the episodes.json above).",
+            dir_okay=True,
+            file_okay=False,
+        ),
+    ],
+    ae: Annotated[
+        Path,
+        typer.Option(
+            "--ae",
+            help="AE checkpoint directory from ``gauntlet monitor train``.",
+        ),
+    ],
+    out: Annotated[
+        Path,
+        typer.Option(
+            "--out",
+            "-o",
+            help="Output drift.json path.",
+        ),
+    ],
+    top_k: Annotated[
+        int,
+        typer.Option(
+            "--top-k",
+            min=0,
+            help="How many most-OOD episode indices to list in top_ood_episodes.",
+        ),
+    ] = 10,
+) -> None:
+    """Score a candidate sweep against a trained AE and emit drift.json."""
+    if not episodes_path.is_file():
+        raise _fail(f"episodes file not found: {episodes_path}")
+    if not trajectory_dir.is_dir():
+        raise _fail(f"trajectory dir not found: {trajectory_dir}")
+    if not ae.is_dir():
+        raise _fail(f"AE checkpoint dir not found: {ae}")
+
+    try:
+        from gauntlet.monitor.score import score_drift
+    except ImportError as exc:
+        raise _fail_monitor_extra(exc) from exc
+
+    try:
+        drift = score_drift(episodes_path, trajectory_dir, ae, top_k=top_k)
+    except (ValueError, FileNotFoundError, KeyError) as exc:
+        raise _fail(f"monitor score failed: {exc}") from exc
+
+    if out.parent and not out.parent.exists():
+        out.parent.mkdir(parents=True, exist_ok=True)
+    _write_json(out, drift.model_dump(mode="json"))
+    _echo_err(
+        f"Wrote drift.json -> {out} "
+        f"(n_episodes={drift.n_episodes}, "
+        f"candidate mean={drift.candidate_reconstruction_error_mean:.4f} "
+        f"vs reference mean={drift.reference_reconstruction_error_mean:.4f})"
     )
 
 
