@@ -605,3 +605,130 @@ def test_compare_threshold_filters_small_deltas(runner: CliRunner, tmp_path: Pat
     assert r_high.exit_code == 0, r_high.stderr
     payload_high = json.loads(out_high.read_text(encoding="utf-8"))
     assert payload_high["regressions"] == []
+
+
+# ──────────────────────────────────────────────────────────────────────
+# 15 — Phase 2 Task 5: `compare` cross-backend guard (RFC-005 §11.3 / §12 Q2).
+# ──────────────────────────────────────────────────────────────────────
+
+
+def _write_report_json_with_env(
+    path: Path,
+    *,
+    suite_name: str,
+    suite_env: str | None,
+) -> None:
+    """Write a minimal report.json with a specific ``suite_env`` field.
+
+    The compare CLI accepts either a report dict or an episode list;
+    we write a report directly so the ``suite_env`` is preserved
+    through the load path (building from episodes currently passes
+    ``suite_env=None``).
+    """
+    from gauntlet.report import build_report
+
+    ep = _ep(
+        suite_name=suite_name,
+        cell_index=0,
+        episode_index=0,
+        success=True,
+        config={"lighting_intensity": 0.5},
+    )
+    report = build_report([ep], suite_env=suite_env)
+    path.write_text(
+        json.dumps(report.model_dump(mode="json"), indent=2),
+        encoding="utf-8",
+    )
+
+
+def test_compare_rejects_cross_backend_without_opt_in(
+    runner: CliRunner, tmp_path: Path
+) -> None:
+    """Cross-backend compare without ``--allow-cross-backend`` must exit
+    non-zero and mention the drift-vs-regression distinction from §7.4.
+    """
+    a_path = tmp_path / "report_a.json"
+    b_path = tmp_path / "report_b.json"
+    _write_report_json_with_env(a_path, suite_name="s", suite_env="tabletop")
+    _write_report_json_with_env(
+        b_path, suite_name="s", suite_env="tabletop-pybullet"
+    )
+
+    result = runner.invoke(
+        app,
+        ["compare", str(a_path), str(b_path), "--out", str(tmp_path / "c.json")],
+    )
+    assert result.exit_code != 0
+    assert "cross-backend" in result.stderr.lower()
+    assert "tabletop-pybullet" in result.stderr
+    assert "--allow-cross-backend" in result.stderr
+
+
+def test_compare_allow_cross_backend_emits_warning_and_succeeds(
+    runner: CliRunner, tmp_path: Path
+) -> None:
+    """With ``--allow-cross-backend`` the command proceeds but prints a
+    loud warning about simulator drift.
+    """
+    a_path = tmp_path / "report_a.json"
+    b_path = tmp_path / "report_b.json"
+    _write_report_json_with_env(a_path, suite_name="s", suite_env="tabletop")
+    _write_report_json_with_env(
+        b_path, suite_name="s", suite_env="tabletop-pybullet"
+    )
+    out = tmp_path / "c.json"
+
+    result = runner.invoke(
+        app,
+        [
+            "compare",
+            str(a_path),
+            str(b_path),
+            "--out",
+            str(out),
+            "--allow-cross-backend",
+        ],
+    )
+    assert result.exit_code == 0, result.stderr
+    assert "warning" in result.stderr.lower()
+    assert "cross-backend" in result.stderr.lower()
+    assert "tabletop" in result.stderr
+    assert out.is_file()
+
+
+def test_compare_same_backend_no_cross_warning(
+    runner: CliRunner, tmp_path: Path
+) -> None:
+    """When both reports share a suite_env, the cross-backend guard is
+    silent.
+    """
+    a_path = tmp_path / "report_a.json"
+    b_path = tmp_path / "report_b.json"
+    _write_report_json_with_env(a_path, suite_name="s", suite_env="tabletop")
+    _write_report_json_with_env(b_path, suite_name="s", suite_env="tabletop")
+
+    result = runner.invoke(
+        app,
+        ["compare", str(a_path), str(b_path), "--out", str(tmp_path / "c.json")],
+    )
+    assert result.exit_code == 0, result.stderr
+    assert "cross-backend" not in result.stderr.lower()
+
+
+def test_compare_legacy_reports_without_suite_env_still_work(
+    runner: CliRunner, tmp_path: Path
+) -> None:
+    """Phase-1 reports have no ``suite_env`` field; they must still
+    compare cleanly without triggering the cross-backend guard.
+    """
+    a_path = tmp_path / "report_a.json"
+    b_path = tmp_path / "report_b.json"
+    _write_report_json_with_env(a_path, suite_name="s", suite_env=None)
+    _write_report_json_with_env(b_path, suite_name="s", suite_env=None)
+
+    result = runner.invoke(
+        app,
+        ["compare", str(a_path), str(b_path), "--out", str(tmp_path / "c.json")],
+    )
+    assert result.exit_code == 0, result.stderr
+    assert "cross-backend" not in result.stderr.lower()

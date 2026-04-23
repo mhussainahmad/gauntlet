@@ -265,6 +265,7 @@ def build_report(
     *,
     cluster_multiple: float = 2.0,
     min_cluster_size: int = 3,
+    suite_env: str | None = None,
 ) -> Report:
     """Aggregate a list of :class:`Episode` into a :class:`Report`.
 
@@ -323,6 +324,7 @@ def build_report(
 
     return Report(
         suite_name=suite_name,
+        suite_env=suite_env,
         n_episodes=n_episodes,
         n_success=n_success,
         per_axis=per_axis,
