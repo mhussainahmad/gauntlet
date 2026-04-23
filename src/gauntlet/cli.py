@@ -33,6 +33,7 @@ from pydantic import ValidationError
 
 from gauntlet.env.tabletop import TabletopEnv
 from gauntlet.policy.registry import PolicySpecError, resolve_policy_factory
+from gauntlet.replay import OverrideError, parse_override, replay_one
 from gauntlet.report import Report, build_report, write_html
 from gauntlet.report.html import _nan_to_none
 from gauntlet.runner import Episode, Runner
@@ -454,6 +455,210 @@ def compare(
     _echo_err(
         f"  regressions: {len(payload['regressions'])}  "
         f"improvements: {len(payload['improvements'])}"
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# `replay` subcommand — see ``docs/phase2-rfc-004-trajectory-replay.md``.
+# ──────────────────────────────────────────────────────────────────────
+
+
+def _parse_episode_id(spec: str) -> tuple[int, int]:
+    """Parse a ``"cell:episode"`` id into a ``(cell_index, episode_index)``.
+
+    The format mirrors RFC §3 ("topology-free, trivially copy-pasteable
+    and stable under jq filtering"). We reject anything with other than
+    exactly one colon, or with non-integer halves.
+    """
+    if spec.count(":") != 1:
+        raise _fail(
+            f"--episode-id {spec!r}: expected 'CELL:EPISODE' with exactly one ':'"
+        )
+    left, right = spec.split(":", 1)
+    try:
+        cell_index = int(left)
+        episode_index = int(right)
+    except ValueError as exc:
+        raise _fail(
+            f"--episode-id {spec!r}: both halves must be integers"
+        ) from exc
+    if cell_index < 0 or episode_index < 0:
+        raise _fail(
+            f"--episode-id {spec!r}: both halves must be non-negative"
+        )
+    return cell_index, episode_index
+
+
+def _available_ids_preview(episodes: list[Episode], limit: int = 10) -> str:
+    """Render a terse list of available ``(cell:episode)`` pairs."""
+    pairs = sorted({(ep.cell_index, ep.episode_index) for ep in episodes})
+    head = pairs[:limit]
+    rendered = ", ".join(f"{c}:{e}" for c, e in head)
+    if len(pairs) > limit:
+        rendered += f", ... ({len(pairs) - limit} more)"
+    return rendered
+
+
+@app.command("replay")
+def replay(
+    episodes_path: Annotated[
+        Path,
+        typer.Argument(
+            help="Path to an episodes.json emitted by a prior 'gauntlet run'.",
+            dir_okay=False,
+            file_okay=True,
+        ),
+    ],
+    suite_path: Annotated[
+        Path,
+        typer.Option(
+            "--suite",
+            help="Path to the suite YAML the run used.",
+            dir_okay=False,
+            file_okay=True,
+        ),
+    ],
+    policy: Annotated[
+        str,
+        typer.Option(
+            "--policy",
+            "-p",
+            help="Policy spec: 'random', 'scripted', or 'module.path:attr'.",
+        ),
+    ],
+    episode_id: Annotated[
+        str,
+        typer.Option(
+            "--episode-id",
+            help="Target episode as 'CELL:EPISODE' (e.g. '12:3').",
+        ),
+    ],
+    override: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--override",
+            help=(
+                "Repeatable axis override 'AXIS=VALUE'. "
+                "AXIS must be declared in the suite; VALUE must lie within "
+                "the declared axis envelope. Off-grid values are allowed."
+            ),
+        ),
+    ] = None,
+    out: Annotated[
+        Path | None,
+        typer.Option(
+            "--out",
+            "-o",
+            help="Output JSON path; defaults to 'replay.json' next to EPISODES_JSON.",
+        ),
+    ] = None,
+    env_max_steps: Annotated[
+        int | None,
+        typer.Option(
+            "--env-max-steps",
+            help="(Hidden / test hook) Override TabletopEnv max_steps for fast tests.",
+            hidden=True,
+            min=1,
+        ),
+    ] = None,
+) -> None:
+    """Re-simulate one Episode, optionally with axis overrides."""
+    cell_index, episode_index = _parse_episode_id(episode_id)
+
+    raw = _read_json(episodes_path)
+    if not isinstance(raw, list):
+        raise _fail(
+            f"{episodes_path}: expected a list of Episode objects "
+            f"(got {type(raw).__name__})"
+        )
+    episodes = _episodes_from_dicts(raw, source=episodes_path)
+
+    target: Episode | None = None
+    for ep in episodes:
+        if ep.cell_index == cell_index and ep.episode_index == episode_index:
+            target = ep
+            break
+    if target is None:
+        raise _fail(
+            f"--episode-id {episode_id!r}: no matching episode in {episodes_path}; "
+            f"available: {_available_ids_preview(episodes)}"
+        )
+
+    if not suite_path.is_file():
+        raise _fail(f"suite file not found: {suite_path}")
+    try:
+        suite = load_suite(suite_path)
+    except (ValidationError, ValueError) as exc:
+        raise _fail(f"{suite_path}: invalid suite YAML: {exc}") from exc
+    except OSError as exc:
+        raise _fail(f"{suite_path}: could not read file: {exc}") from exc
+
+    if suite.name != target.suite_name:
+        raise _fail(
+            f"suite name mismatch: episode.suite_name={target.suite_name!r} vs "
+            f"suite.name={suite.name!r} ({suite_path})"
+        )
+
+    overrides: dict[str, float] = {}
+    for raw_override in override or []:
+        try:
+            axis_name, value = parse_override(raw_override)
+        except OverrideError as exc:
+            raise _fail(str(exc)) from exc
+        if axis_name in overrides:
+            raise _fail(
+                f"--override {axis_name!r} passed more than once; "
+                "overrides must be unique per axis"
+            )
+        overrides[axis_name] = value
+
+    try:
+        policy_factory = resolve_policy_factory(policy)
+    except PolicySpecError as exc:
+        raise _fail(str(exc)) from exc
+
+    env_factory = _make_env_factory(env_max_steps)
+
+    try:
+        replayed = replay_one(
+            target=target,
+            suite=suite,
+            policy_factory=policy_factory,
+            overrides=overrides,
+            env_factory=env_factory,
+        )
+    except OverrideError as exc:
+        raise _fail(str(exc)) from exc
+    except ValueError as exc:
+        raise _fail(f"replay failed: {exc}") from exc
+
+    out_path = out if out is not None else episodes_path.parent / "replay.json"
+    if out_path.parent and not out_path.parent.exists():
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    payload: dict[str, Any] = {
+        "episode_id": f"{cell_index}:{episode_index}",
+        "suite_name": target.suite_name,
+        "policy": policy,
+        "overrides": overrides,
+        "original": target.model_dump(mode="json"),
+        "replayed": replayed.model_dump(mode="json"),
+    }
+    _write_json(out_path, payload)
+
+    delta_reward = replayed.total_reward - target.total_reward
+    _echo_err(f"Wrote {out_path}")
+    _echo_err(
+        f"  episode {cell_index}:{episode_index}  "
+        f"overrides: {overrides if overrides else '{}'}"
+    )
+    _echo_err(
+        f"  original: success={target.success} steps={target.step_count} "
+        f"reward={target.total_reward:.4f}"
+    )
+    _echo_err(
+        f"  replayed: success={replayed.success} steps={replayed.step_count} "
+        f"reward={replayed.total_reward:.4f} (delta {delta_reward:+.4f})"
     )
 
 

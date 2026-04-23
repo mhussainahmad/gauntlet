@@ -488,6 +488,353 @@ def test_replay_legacy_episode_without_topology_metadata(
 # ----------------------------------------------------------------------------
 
 
+def _write_episodes_json(path: Any, episodes: list[Episode]) -> None:
+    """Serialise *episodes* to *path* mirroring the CLI's own emission."""
+    import json
+
+    payload = [ep.model_dump(mode="json") for ep in episodes]
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def _write_two_by_three_yaml(path: Any) -> None:
+    """Write a YAML suite that matches :func:`_two_by_three_suite` exactly."""
+    import textwrap
+
+    yaml_text = textwrap.dedent(
+        """\
+        name: replay-2x3
+        env: tabletop
+        seed: 2024
+        episodes_per_cell: 2
+        axes:
+          lighting_intensity:
+            low: 0.3
+            high: 1.5
+            steps: 2
+          camera_offset_x:
+            low: -0.05
+            high: 0.05
+            steps: 3
+        """
+    )
+    path.write_text(yaml_text, encoding="utf-8")
+
+
+# ----------------------------------------------------------------------------
+# CLI tests. Drive the replay subcommand via typer's CliRunner. The
+# Runner / env / policy layers are NOT mocked — these are end-to-end
+# checks that the subcommand wires the library primitive correctly.
+# ----------------------------------------------------------------------------
+
+
+def test_replay_cli_happy_path(tmp_path: Any) -> None:
+    """Run a tiny suite, then replay episode 3:1 with a lighting override.
+
+    The emitted replay.json parses cleanly, carries both original and
+    replayed Episodes as full objects, and echoes the override.
+    """
+    from typer.testing import CliRunner
+
+    from gauntlet.cli import app
+
+    suite = _two_by_three_suite()
+    episodes = _run_and_pick(suite, 3, 1)
+
+    episodes_path = tmp_path / "episodes.json"
+    _write_episodes_json(episodes_path, episodes)
+    suite_yaml = tmp_path / "suite.yaml"
+    _write_two_by_three_yaml(suite_yaml)
+
+    out_path = tmp_path / "replay.json"
+    cli = CliRunner()
+    result = cli.invoke(
+        app,
+        [
+            "replay",
+            str(episodes_path),
+            "--suite",
+            str(suite_yaml),
+            "--policy",
+            "scripted",
+            "--episode-id",
+            "3:1",
+            "--override",
+            "lighting_intensity=1.1",
+            "--out",
+            str(out_path),
+            "--env-max-steps",
+            "20",
+        ],
+    )
+    assert result.exit_code == 0, result.stderr
+
+    import json
+
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
+    assert payload["episode_id"] == "3:1"
+    assert payload["suite_name"] == "replay-2x3"
+    assert payload["policy"] == "scripted"
+    assert payload["overrides"] == {"lighting_intensity": 1.1}
+    # Both original and replayed are full Episodes (model_validate works).
+    Episode.model_validate(payload["original"])
+    replayed = Episode.model_validate(payload["replayed"])
+    assert replayed.perturbation_config["lighting_intensity"] == 1.1
+
+
+def test_replay_cli_zero_override_bit_identical(tmp_path: Any) -> None:
+    """CLI round-trip with no overrides emits a replayed Episode that
+    matches the original field-for-field."""
+    from typer.testing import CliRunner
+
+    from gauntlet.cli import app
+
+    suite = _two_by_three_suite()
+    episodes = _run_and_pick(suite, 1, 0)
+    target = _find(episodes, 1, 0)
+
+    episodes_path = tmp_path / "episodes.json"
+    _write_episodes_json(episodes_path, episodes)
+    suite_yaml = tmp_path / "suite.yaml"
+    _write_two_by_three_yaml(suite_yaml)
+    out_path = tmp_path / "replay.json"
+
+    cli = CliRunner()
+    result = cli.invoke(
+        app,
+        [
+            "replay",
+            str(episodes_path),
+            "--suite",
+            str(suite_yaml),
+            "--policy",
+            "scripted",
+            "--episode-id",
+            "1:0",
+            "--out",
+            str(out_path),
+            "--env-max-steps",
+            "20",
+        ],
+    )
+    assert result.exit_code == 0, result.stderr
+
+    import json
+
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
+    replayed = Episode.model_validate(payload["replayed"])
+    assert replayed.model_dump() == target.model_dump()
+
+
+def test_replay_cli_rejects_unknown_episode_id(tmp_path: Any) -> None:
+    """Unknown ``--episode-id`` exits non-zero with a preview of the
+    available pairs."""
+    from typer.testing import CliRunner
+
+    from gauntlet.cli import app
+
+    suite = _two_by_three_suite()
+    episodes = _run_and_pick(suite, 0, 0)
+    episodes_path = tmp_path / "episodes.json"
+    _write_episodes_json(episodes_path, episodes)
+    suite_yaml = tmp_path / "suite.yaml"
+    _write_two_by_three_yaml(suite_yaml)
+
+    cli = CliRunner()
+    result = cli.invoke(
+        app,
+        [
+            "replay",
+            str(episodes_path),
+            "--suite",
+            str(suite_yaml),
+            "--policy",
+            "scripted",
+            "--episode-id",
+            "99:99",
+            "--env-max-steps",
+            "20",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "99:99" in result.stderr
+    assert "available:" in result.stderr
+
+
+def test_replay_cli_rejects_unknown_axis(tmp_path: Any) -> None:
+    """A typoed ``--override AXIS=VALUE`` exits non-zero with a list of
+    the declared axes."""
+    from typer.testing import CliRunner
+
+    from gauntlet.cli import app
+
+    suite = _two_by_three_suite()
+    episodes = _run_and_pick(suite, 0, 0)
+    episodes_path = tmp_path / "episodes.json"
+    _write_episodes_json(episodes_path, episodes)
+    suite_yaml = tmp_path / "suite.yaml"
+    _write_two_by_three_yaml(suite_yaml)
+
+    cli = CliRunner()
+    result = cli.invoke(
+        app,
+        [
+            "replay",
+            str(episodes_path),
+            "--suite",
+            str(suite_yaml),
+            "--policy",
+            "scripted",
+            "--episode-id",
+            "0:0",
+            "--override",
+            "not_an_axis=1.0",
+            "--env-max-steps",
+            "20",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "not_an_axis" in result.stderr
+    assert "legal axes:" in result.stderr
+
+
+def test_replay_cli_rejects_out_of_envelope(tmp_path: Any) -> None:
+    """An out-of-envelope override exits non-zero with the envelope."""
+    from typer.testing import CliRunner
+
+    from gauntlet.cli import app
+
+    suite = _two_by_three_suite()
+    episodes = _run_and_pick(suite, 0, 0)
+    episodes_path = tmp_path / "episodes.json"
+    _write_episodes_json(episodes_path, episodes)
+    suite_yaml = tmp_path / "suite.yaml"
+    _write_two_by_three_yaml(suite_yaml)
+
+    cli = CliRunner()
+    result = cli.invoke(
+        app,
+        [
+            "replay",
+            str(episodes_path),
+            "--suite",
+            str(suite_yaml),
+            "--policy",
+            "scripted",
+            "--episode-id",
+            "0:0",
+            "--override",
+            "lighting_intensity=99.9",
+            "--env-max-steps",
+            "20",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "outside the suite's declared envelope" in result.stderr
+
+
+def test_replay_cli_rejects_suite_name_mismatch(tmp_path: Any) -> None:
+    """If the suite YAML's name disagrees with the Episode's
+    suite_name, the CLI exits before touching the env."""
+    import textwrap
+
+    from typer.testing import CliRunner
+
+    from gauntlet.cli import app
+
+    suite = _two_by_three_suite()
+    episodes = _run_and_pick(suite, 0, 0)
+    episodes_path = tmp_path / "episodes.json"
+    _write_episodes_json(episodes_path, episodes)
+
+    # Suite YAML with a different name.
+    mismatch_yaml = tmp_path / "mismatch.yaml"
+    mismatch_yaml.write_text(
+        textwrap.dedent(
+            """\
+            name: not-the-same-suite
+            env: tabletop
+            seed: 2024
+            episodes_per_cell: 2
+            axes:
+              lighting_intensity:
+                low: 0.3
+                high: 1.5
+                steps: 2
+              camera_offset_x:
+                low: -0.05
+                high: 0.05
+                steps: 3
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    cli = CliRunner()
+    result = cli.invoke(
+        app,
+        [
+            "replay",
+            str(episodes_path),
+            "--suite",
+            str(mismatch_yaml),
+            "--policy",
+            "scripted",
+            "--episode-id",
+            "0:0",
+            "--env-max-steps",
+            "20",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "suite name mismatch" in result.stderr
+
+
+def test_replay_cli_rejects_malformed_episode_id(tmp_path: Any) -> None:
+    """An ``--episode-id`` without a colon exits with a helpful message."""
+    from typer.testing import CliRunner
+
+    from gauntlet.cli import app
+
+    suite = _two_by_three_suite()
+    episodes = _run_and_pick(suite, 0, 0)
+    episodes_path = tmp_path / "episodes.json"
+    _write_episodes_json(episodes_path, episodes)
+    suite_yaml = tmp_path / "suite.yaml"
+    _write_two_by_three_yaml(suite_yaml)
+
+    cli = CliRunner()
+    result = cli.invoke(
+        app,
+        [
+            "replay",
+            str(episodes_path),
+            "--suite",
+            str(suite_yaml),
+            "--policy",
+            "scripted",
+            "--episode-id",
+            "not-a-pair",
+            "--env-max-steps",
+            "20",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "CELL:EPISODE" in result.stderr
+
+
+def test_replay_cli_help_mentions_override(tmp_path: Any) -> None:
+    """``gauntlet replay --help`` renders and documents --override."""
+    from typer.testing import CliRunner
+
+    from gauntlet.cli import app
+
+    cli = CliRunner()
+    result = cli.invoke(app, ["replay", "--help"])
+    assert result.exit_code == 0
+    for token in ("--suite", "--policy", "--episode-id", "--override", "--out"):
+        assert token in result.stdout
+
+
 def test_reconstructed_seed_matches_runner_seed() -> None:
     """End-to-end check of the two-level spawn reconstruction.
 
