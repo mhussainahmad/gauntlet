@@ -372,6 +372,24 @@ def test_lambdas_fail_loudly_under_spawn() -> None:
 # ----------------------------------------------------------------------------
 
 
+def test_episode_metadata_echoes_run_topology() -> None:
+    """Every Episode records ``n_cells`` and ``episodes_per_cell`` so the
+    replay tool can reconstruct the SeedSequence spawn tree even if the
+    suite YAML is edited between run and replay.
+
+    See ``docs/phase2-rfc-004-trajectory-replay.md`` §3.
+    """
+    suite = _make_suite(seed=321, episodes_per_cell=3)
+    runner = Runner(n_workers=1, env_factory=make_fast_env)
+    episodes = runner.run(policy_factory=make_scripted_policy, suite=suite)
+
+    expected_n_cells = suite.num_cells()
+    expected_eps_per_cell = suite.episodes_per_cell
+    for ep in episodes:
+        assert ep.metadata["n_cells"] == expected_n_cells
+        assert ep.metadata["episodes_per_cell"] == expected_eps_per_cell
+
+
 def test_extract_env_seed_is_deterministic_per_node() -> None:
     """Same SeedSequence node -> same env seed; siblings -> different seeds."""
     parent = np.random.SeedSequence(42)
@@ -395,6 +413,8 @@ def test_work_item_round_trips_through_pickle() -> None:
         perturbation_values={"lighting_intensity": 1.0},
         episode_seq=seq,
         master_seed=123,
+        n_cells=1,
+        episodes_per_cell=1,
     )
     restored = pickle.loads(pickle.dumps(item))
     assert restored.suite_name == "x"

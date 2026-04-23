@@ -91,6 +91,17 @@ class WorkItem:
             entropy when no seed was supplied). Recorded in the resulting
             Episode's ``metadata["master_seed"]`` so even None-seeded
             runs can be reproduced from the report.
+        n_cells: Total number of cells in the originating suite at run
+            time. Recorded in :attr:`Episode.metadata["n_cells"]` so the
+            replay tool can reconstruct the exact ``SeedSequence.spawn``
+            tree the worker used, even if the suite YAML is edited
+            between run and replay.
+        episodes_per_cell: Echo of :attr:`gauntlet.suite.Suite.episodes_per_cell`
+            at run time. Recorded in
+            :attr:`Episode.metadata["episodes_per_cell"]` for the same
+            reason as ``n_cells`` — the replay spawn tree is path-
+            dependent on ``(n_cells, episodes_per_cell)`` and must be
+            reconstructable from the Episode alone.
     """
 
     suite_name: str
@@ -99,6 +110,8 @@ class WorkItem:
     perturbation_values: dict[str, float]
     episode_seq: np.random.SeedSequence
     master_seed: int
+    n_cells: int
+    episodes_per_cell: int
 
 
 # ----------------------------------------------------------------------------
@@ -221,7 +234,11 @@ def _execute_one(env: TabletopEnv, policy_factory: Callable[[], Policy], item: W
         truncated=bool(truncated),
         step_count=int(step_count),
         total_reward=float(total_reward),
-        metadata={"master_seed": int(item.master_seed)},
+        metadata={
+            "master_seed": int(item.master_seed),
+            "n_cells": int(item.n_cells),
+            "episodes_per_cell": int(item.episodes_per_cell),
+        },
     )
 
 
