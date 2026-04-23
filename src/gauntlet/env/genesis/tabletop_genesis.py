@@ -719,13 +719,23 @@ class GenesisTabletopEnv:
         """
         if not self._render_in_obs:
             return
-        pyscene = self._scene.visualizer.rasterizer._context._scene
-        # pyrender's scene exposes ``directional_light_nodes`` as an
-        # iterable (a set on 0.4.x); Genesis's default ``VisOptions.lights``
-        # seeds exactly one directional light — take it by position in
-        # iteration order.
-        light_node = next(iter(pyscene.directional_light_nodes))
-        light_node.light.intensity = _BASELINE_LIGHT_INTENSITY * self._light_intensity
+        try:
+            pyscene = self._scene.visualizer.rasterizer._context._scene
+            # pyrender's scene exposes ``directional_light_nodes`` as
+            # an iterable (a set on 0.4.x); Genesis's default
+            # ``VisOptions.lights`` seeds exactly one directional
+            # light — take it by iteration order.
+            light_node = next(iter(pyscene.directional_light_nodes))
+            light_node.light.intensity = _BASELINE_LIGHT_INTENSITY * self._light_intensity
+        except (AttributeError, StopIteration) as e:  # pragma: no cover
+            # Genesis 0.5 may rearrange the private ``_context`` hop
+            # or alter the default light stack. Surface the breakage
+            # loudly with the pin to fix rather than the raw traceback.
+            raise RuntimeError(
+                "Genesis private light-mutation API changed — pin "
+                "'genesis-world<0.5' in your environment or file an "
+                "issue to re-wire this adapter. RFC-008 §10 Q8."
+            ) from e
 
     def _apply_one_perturbation(self, name: str, value: float) -> None:
         if name == "lighting_intensity":

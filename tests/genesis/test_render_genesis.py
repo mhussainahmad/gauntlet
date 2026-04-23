@@ -126,6 +126,58 @@ def test_reset_seed_produces_byte_identical_image() -> None:
         b.close()
 
 
+def test_post_step_determinism_across_instances() -> None:
+    """RFC-008 §7 case 4 — same seed + same fixed action sequence on
+    two independent envs -> ``obs["image"]`` matches byte-for-byte at
+    every stepped frame. Composes Rasterizer determinism (back-to-back
+    renders are bit-equal) with the existing physics-side within-run
+    determinism.
+    """
+    from gauntlet.env.genesis import GenesisTabletopEnv
+
+    a = GenesisTabletopEnv(render_in_obs=True, render_size=(64, 64), max_steps=10)
+    b = GenesisTabletopEnv(render_in_obs=True, render_size=(64, 64), max_steps=10)
+    try:
+        a.reset(seed=42)
+        b.reset(seed=42)
+        rng = np.random.default_rng(0)
+        action = rng.uniform(-1.0, 1.0, size=(7,)).astype(np.float64)
+        for step_index in range(10):
+            obs_a, *_ = a.step(action)
+            obs_b, *_ = b.step(action)
+            assert np.array_equal(obs_a["image"], obs_b["image"]), (
+                f"image diverged across instances at step {step_index}"
+            )
+    finally:
+        a.close()
+        b.close()
+
+
+def test_every_step_image_is_valid_uint8() -> None:
+    """RFC-008 §7 case 8 — every per-step ``obs["image"]`` is a
+    contiguous uint8 ``(64, 64, 3)`` array under rollout. Direct env
+    step loop (not Runner-mediated) so the assertion hits every
+    frame, not just episode boundaries.
+    """
+    from gauntlet.env.genesis import GenesisTabletopEnv
+
+    e = GenesisTabletopEnv(render_in_obs=True, render_size=(64, 64), max_steps=5)
+    try:
+        e.reset(seed=7)
+        rng = np.random.default_rng(0)
+        for _ in range(5):
+            action = rng.uniform(-1.0, 1.0, size=(7,)).astype(np.float64)
+            obs, *_ = e.step(action)
+            img = obs["image"]
+            assert img.shape == (64, 64, 3)
+            assert img.dtype == np.uint8
+            assert img.flags["C_CONTIGUOUS"]
+            assert int(img.min()) >= 0
+            assert int(img.max()) <= 255
+    finally:
+        e.close()
+
+
 # ------------------------------------------------- cross-backend shape parity
 
 
