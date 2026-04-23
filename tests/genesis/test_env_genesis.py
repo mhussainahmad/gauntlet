@@ -315,6 +315,40 @@ def test_cosmetic_axes_store_on_shadows_and_leave_obs_unchanged(env: GenesisTabl
     assert env._texture_choice == 1
 
 
+# --------------------------------------------- render_in_obs / render_size surface
+
+
+def test_render_in_obs_extends_observation_space_and_validates_size() -> None:
+    """RFC-008 §3.1/§3.2 — ``render_in_obs=True`` adds an ``"image"``
+    key to ``observation_space`` with the declared shape, and a
+    non-positive ``render_size`` raises ``ValueError`` with the same
+    message ``TabletopEnv`` uses.
+
+    Asymmetric ``render_size=(64, 96)`` catches H/W transposition bugs
+    against Genesis's ``add_camera(res=(W, H))`` convention.
+    """
+    from gymnasium.spaces import Box, Dict
+
+    from gauntlet.env.genesis import GenesisTabletopEnv
+
+    e = GenesisTabletopEnv(render_in_obs=True, render_size=(64, 96))
+    try:
+        obs_space = e.observation_space
+        assert isinstance(obs_space, Dict)
+        img_space = obs_space.spaces["image"]
+        assert isinstance(img_space, Box)
+        assert img_space.shape == (64, 96, 3)
+        assert img_space.dtype == np.uint8
+        assert int(img_space.low.min()) == 0
+        assert int(img_space.high.max()) == 255
+    finally:
+        e.close()
+
+    # Validation error: same string as TabletopEnv / PyBulletTabletopEnv.
+    with pytest.raises(ValueError, match="render_size must be"):
+        GenesisTabletopEnv(render_in_obs=True, render_size=(0, 224))
+
+
 # --------------------------------------------------- restore_baseline idempotence
 
 
