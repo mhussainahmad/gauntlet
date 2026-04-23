@@ -45,6 +45,7 @@ across runs.
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 from typing import Any, Final
 
@@ -153,15 +154,29 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         *,
         max_steps: int = 200,
         n_substeps: int = 5,
+        render_in_obs: bool = False,
+        render_size: tuple[int, int] = (224, 224),
     ) -> None:
         super().__init__()
         if max_steps <= 0:
             raise ValueError(f"max_steps must be positive; got {max_steps}")
         if n_substeps <= 0:
             raise ValueError(f"n_substeps must be positive; got {n_substeps}")
+        if render_in_obs:
+            h, w = render_size
+            if h <= 0 or w <= 0:
+                raise ValueError(
+                    f"render_size must be a (height, width) of positive ints; got {render_size}"
+                )
 
         self._max_steps = max_steps
         self._n_substeps = n_substeps
+        self._render_in_obs = render_in_obs
+        self._render_size: tuple[int, int] = (int(render_size[0]), int(render_size[1]))
+        # Cached offscreen renderer, built lazily on first reset so import /
+        # construction stays headless-safe. Reused for the env lifetime;
+        # released in ``close``. See RFC Phase 2 Task 1 §5.
+        self._obs_renderer: Any | None = None
 
         # Load model once; reset uses mj_resetData + our own randomisation.
         self._model: Any = mujoco.MjModel.from_xml_path(str(_ASSET_PATH))
@@ -204,15 +219,20 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         self._success: bool = False
 
         self.action_space: spaces.Box = spaces.Box(low=-1.0, high=1.0, shape=(7,), dtype=np.float64)
-        self.observation_space: spaces.Dict = spaces.Dict(
-            {
-                "cube_pos": spaces.Box(low=-np.inf, high=np.inf, shape=(3,), dtype=np.float64),
-                "cube_quat": spaces.Box(low=-1.0, high=1.0, shape=(4,), dtype=np.float64),
-                "ee_pos": spaces.Box(low=-np.inf, high=np.inf, shape=(3,), dtype=np.float64),
-                "gripper": spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float64),
-                "target_pos": spaces.Box(low=-np.inf, high=np.inf, shape=(3,), dtype=np.float64),
-            }
-        )
+        obs_spaces: dict[str, spaces.Space[Any]] = {
+            "cube_pos": spaces.Box(low=-np.inf, high=np.inf, shape=(3,), dtype=np.float64),
+            "cube_quat": spaces.Box(low=-1.0, high=1.0, shape=(4,), dtype=np.float64),
+            "ee_pos": spaces.Box(low=-np.inf, high=np.inf, shape=(3,), dtype=np.float64),
+            "gripper": spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float64),
+            "target_pos": spaces.Box(low=-np.inf, high=np.inf, shape=(3,), dtype=np.float64),
+        }
+        if self._render_in_obs:
+            h, w = self._render_size
+            # uint8 RGB image from the cached offscreen renderer. Only present
+            # when render_in_obs=True so the default path stays byte-identical
+            # to Phase 1.
+            obs_spaces["image"] = spaces.Box(low=0, high=255, shape=(h, w, 3), dtype=np.uint8)
+        self.observation_space: spaces.Dict = spaces.Dict(obs_spaces)
 
     # ------------------------------------------------------------------ setup
 
@@ -387,7 +407,7 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         *,
         seed: int | None = None,
         options: dict[str, Any] | None = None,
-    ) -> tuple[dict[str, NDArray[np.float64]], dict[str, Any]]:
+    ) -> tuple[dict[str, NDArray[Any]], dict[str, Any]]:
         """Deterministic reset.
 
         ``seed`` is the *only* entropy source. Calling ``reset(seed=s)``
@@ -470,7 +490,7 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
     def step(
         self,
         action: NDArray[np.float64],
-    ) -> tuple[dict[str, NDArray[np.float64]], float, bool, bool, dict[str, Any]]:
+    ) -> tuple[dict[str, NDArray[Any]], float, bool, bool, dict[str, Any]]:
         """Advance one control step.
 
         Pipeline: clip → update mocap pose → update grasp state → ``mj_step``
@@ -527,8 +547,17 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         """Drop references to the MuJoCo model / data.
 
         MuJoCo's Python bindings are GC-managed; dropping the last
-        reference releases the underlying C structs.
+        reference releases the underlying C structs. The cached obs
+        renderer is explicitly closed first so its GL context is freed
+        on the worker thread that built it (leaking would bite when the
+        runner spins up ``n_workers >= 2``).
         """
+        if self._obs_renderer is not None:
+            # Renderer teardown is best-effort; GL contexts can whine on close
+            # but we're tearing everything down anyway.
+            with contextlib.suppress(Exception):
+                self._obs_renderer.close()
+            self._obs_renderer = None
         self._data = None
         self._model = None
 
@@ -589,18 +618,36 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         for k in range(6):
             qvel[self._cube_qvel_adr + k] = 0.0
 
-    def _build_obs(self) -> dict[str, NDArray[np.float64]]:
+    def _build_obs(self) -> dict[str, NDArray[Any]]:
         cube_pos = np.array(self._data.xpos[self._cube_body_id], dtype=np.float64)
         cube_quat = np.array(self._data.xquat[self._cube_body_id], dtype=np.float64)
         ee_pos = np.array(self._data.mocap_pos[self._ee_mocap_id], dtype=np.float64)
         gripper = np.array([self._gripper_state], dtype=np.float64)
-        return {
+        obs: dict[str, NDArray[Any]] = {
             "cube_pos": cube_pos,
             "cube_quat": cube_quat,
             "ee_pos": ee_pos,
             "gripper": gripper,
             "target_pos": self._target_pos.copy(),
         }
+        if self._render_in_obs:
+            obs["image"] = self._render_obs_image()
+        return obs
+
+    def _render_obs_image(self) -> NDArray[np.uint8]:
+        """Render the main camera into a uint8 (H, W, 3) array.
+
+        The offscreen ``mujoco.Renderer`` is constructed on first call and
+        cached on the instance; opening a GL context is expensive and many
+        callers will build the env purely to query observation shapes. Uses
+        the existing ``"main"`` camera — no new camera is introduced.
+        """
+        if self._obs_renderer is None:
+            h, w = self._render_size
+            self._obs_renderer = mujoco.Renderer(self._model, height=h, width=w)
+        self._obs_renderer.update_scene(self._data, camera=self._main_cam_id)
+        pixels = self._obs_renderer.render()
+        return np.asarray(pixels, dtype=np.uint8)
 
     def _build_info(self) -> dict[str, Any]:
         return {
