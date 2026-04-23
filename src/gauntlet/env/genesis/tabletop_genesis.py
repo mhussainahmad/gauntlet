@@ -232,14 +232,24 @@ class GenesisTabletopEnv:
         *,
         max_steps: int = 200,
         n_substeps: int = 5,
+        render_in_obs: bool = False,
+        render_size: tuple[int, int] = _DEFAULT_RENDER_SIZE,
     ) -> None:
         if max_steps <= 0:
             raise ValueError(f"max_steps must be positive; got {max_steps}")
         if n_substeps <= 0:
             raise ValueError(f"n_substeps must be positive; got {n_substeps}")
+        if render_in_obs:
+            h, w = render_size
+            if h <= 0 or w <= 0:
+                raise ValueError(
+                    f"render_size must be a (height, width) of positive ints; got {render_size}"
+                )
 
         self._max_steps = max_steps
         self._n_substeps = n_substeps
+        self._render_in_obs = bool(render_in_obs)
+        self._render_size: tuple[int, int] = (int(render_size[0]), int(render_size[1]))
 
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(7,), dtype=np.float64)
         obs_spaces: dict[str, gym.spaces.Space[Any]] = {
@@ -249,6 +259,9 @@ class GenesisTabletopEnv:
             "gripper": spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float64),
             "target_pos": spaces.Box(low=-np.inf, high=np.inf, shape=(3,), dtype=np.float64),
         }
+        if self._render_in_obs:
+            h, w = self._render_size
+            obs_spaces["image"] = spaces.Box(low=0, high=255, shape=(h, w, 3), dtype=np.uint8)
         self.observation_space = spaces.Dict(obs_spaces)
 
         # ---- per-process Genesis global init (idempotent) ----
