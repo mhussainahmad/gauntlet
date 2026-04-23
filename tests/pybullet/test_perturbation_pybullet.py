@@ -13,7 +13,13 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-import pybullet as p
+# Skip the whole module at collection time when the [pybullet] extra is
+# not installed. Without this guard, the bare ``import pybullet as p``
+# below raises ModuleNotFoundError during pytest COLLECTION — which
+# happens before marker filtering, so the default job (-m "not pybullet")
+# would still fail. ``importorskip`` matches the pattern
+# ``tests/monitor/test_ae.py`` uses for torch.
+p = pytest.importorskip("pybullet")
 
 if TYPE_CHECKING:
     from gauntlet.env.pybullet.tabletop_pybullet import PyBulletTabletopEnv
