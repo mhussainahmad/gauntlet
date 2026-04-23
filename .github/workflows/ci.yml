@@ -31,8 +31,11 @@ jobs:
       - name: Set up Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}
 
-      - name: Sync dependencies
-        run: uv sync --all-extras --dev --python ${{ matrix.python-version }}
+      # Default job stays torch-free — this is the continuous enforcement of
+      # spec §6's "no torch in the core" rule. See
+      # docs/phase2-rfc-001-huggingface-policy.md §3.
+      - name: Sync dependencies (no hf extra)
+        run: uv sync --dev --python ${{ matrix.python-version }}
 
       - name: Lint (ruff)
         run: uv run ruff check .
@@ -43,5 +46,33 @@ jobs:
       - name: Type check (mypy --strict)
         run: uv run mypy
 
-      - name: Run tests with coverage
-        run: uv run pytest
+      - name: Run tests with coverage (no hf marker)
+        run: uv run pytest -m "not hf"
+
+  hf-tests:
+    name: hf tests (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Sync dependencies (with hf extra + hf-dev group)
+        run: uv sync --extra hf --group hf-dev --python ${{ matrix.python-version }}
+
+      # hf-tests mock at the transformers ``from_pretrained`` seam — no
+      # real weights downloaded, no GPU needed. See RFC §6.
+      - name: Run hf tests
+        run: uv run pytest -m hf
