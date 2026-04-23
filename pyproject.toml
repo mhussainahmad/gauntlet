@@ -37,6 +37,16 @@ gauntlet = "gauntlet.cli:app"
 Homepage = "https://github.com/gauntlet-eval/gauntlet"
 Issues = "https://github.com/gauntlet-eval/gauntlet/issues"
 
+# Independent extra for the PyBullet backend (Phase 2 RFC-005).
+# pybullet is a pure-Python/C++ package on PyPI, CPU-only, no CUDA needed,
+# wheels on manylinux/macOS/Windows. The 3.2 floor matches the first release
+# with the stable physics-engine parameters this RFC depends on for
+# bit-determinism. Ceiling one major above to catch surprise upstream breakage.
+[project.optional-dependencies]
+pybullet = [
+    "pybullet>=3.2,<4",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.2,<9",
@@ -45,6 +55,10 @@ dev = [
     "mypy>=1.11,<2",
     "types-pyyaml>=6.0,<7",
     "pandas-stubs>=2.2,<3",
+]
+pybullet-dev = [
+    {include-group = "dev"},
+    "pytest-mock>=3.12,<4",
 ]
 
 [build-system]
@@ -98,6 +112,13 @@ ignore_missing_imports = true
 module = ["gymnasium", "gymnasium.*"]
 ignore_missing_imports = true
 
+# pybullet ships no type stubs. Per spec §6, Any is permitted at FFI boundaries;
+# this override lets mypy import-check env/pybullet/* even when the
+# [pybullet] extra isn't installed.
+[[tool.mypy.overrides]]
+module = ["pybullet", "pybullet_data"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 minversion = "8.0"
 addopts = [
@@ -108,6 +129,9 @@ addopts = [
     "--cov-report=term-missing",
 ]
 testpaths = ["tests"]
+markers = [
+    "pybullet: tests that require the [pybullet] extra (pybullet>=3.2)",
+]
 
 [tool.coverage.run]
 source = ["gauntlet"]
