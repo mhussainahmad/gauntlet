@@ -31,8 +31,12 @@ jobs:
       - name: Set up Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}
 
-      - name: Sync dependencies
-        run: uv sync --all-extras --dev --python ${{ matrix.python-version }}
+      # Default job runs WITHOUT optional extras so it exercises the
+      # "core install, no [pybullet]" path on every PR. The pybullet
+      # marker is de-selected via -m; the pybullet-tests job below
+      # covers those tests with the extra installed.
+      - name: Sync dependencies (core + dev)
+        run: uv sync --dev --python ${{ matrix.python-version }}
 
       - name: Lint (ruff)
         run: uv run ruff check .
@@ -43,5 +47,35 @@ jobs:
       - name: Type check (mypy --strict)
         run: uv run mypy
 
-      - name: Run tests with coverage
-        run: uv run pytest
+      - name: Run tests (default — no pybullet extra)
+        run: uv run pytest -m "not pybullet"
+
+  pybullet-tests:
+    name: pybullet backend tests (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Sync dependencies (pybullet extra + pybullet-dev group)
+        run: >-
+          uv sync
+          --extra pybullet
+          --group pybullet-dev
+          --python ${{ matrix.python-version }}
+
+      - name: Run pybullet-marked tests
+        run: uv run pytest -m pybullet -q

@@ -460,9 +460,7 @@ class _FakeProtocolEnv:
         self.observation_space = spaces.Dict(
             {"cube_pos": spaces.Box(low=-1.0, high=1.0, shape=(3,), dtype=np.float64)}
         )
-        self.action_space = spaces.Box(
-            low=-1.0, high=1.0, shape=(_ACTION_DIM,), dtype=np.float64
-        )
+        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(_ACTION_DIM,), dtype=np.float64)
         self._pending: dict[str, float] = {}
         self._step_count = 0
 

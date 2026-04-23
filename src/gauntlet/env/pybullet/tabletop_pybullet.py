@@ -67,9 +67,16 @@ _DISTRACTOR_HALF: float = 0.02
 _DISTRACTOR_BASELINE_XY = np.array(
     [
         # A small ring around the workspace — only revealed by distractor_count.
-        (0.30, 0.30), (-0.30, 0.30), (0.30, -0.30), (-0.30, -0.30),
-        (0.35, 0.00), (-0.35, 0.00), (0.00, 0.35), (0.00, -0.35),
-        (0.25, 0.10), (-0.25, -0.10),
+        (0.30, 0.30),
+        (-0.30, 0.30),
+        (0.30, -0.30),
+        (-0.30, -0.30),
+        (0.35, 0.00),
+        (-0.35, 0.00),
+        (0.00, 0.35),
+        (0.00, -0.35),
+        (0.25, 0.10),
+        (-0.25, -0.10),
     ],
     dtype=np.float64,
 )
@@ -120,9 +127,7 @@ class PyBulletTabletopEnv:
             "distractor_count",
         }
     )
-    VISUAL_ONLY_AXES: ClassVar[frozenset[str]] = frozenset(
-        {"lighting_intensity", "object_texture"}
-    )
+    VISUAL_ONLY_AXES: ClassVar[frozenset[str]] = frozenset({"lighting_intensity", "object_texture"})
 
     MAX_LINEAR_STEP: float = 0.05
     MAX_ANGULAR_STEP: float = 0.1
@@ -149,34 +154,20 @@ class PyBulletTabletopEnv:
         self._n_substeps = n_substeps
 
         # ---- spaces (identical to TabletopEnv) ----
-        self.action_space = spaces.Box(
-            low=-1.0, high=1.0, shape=(7,), dtype=np.float64
-        )
+        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(7,), dtype=np.float64)
         self.observation_space = spaces.Dict(
             {
-                "cube_pos": spaces.Box(
-                    low=-np.inf, high=np.inf, shape=(3,), dtype=np.float64
-                ),
-                "cube_quat": spaces.Box(
-                    low=-1.0, high=1.0, shape=(4,), dtype=np.float64
-                ),
-                "ee_pos": spaces.Box(
-                    low=-np.inf, high=np.inf, shape=(3,), dtype=np.float64
-                ),
-                "gripper": spaces.Box(
-                    low=-1.0, high=1.0, shape=(1,), dtype=np.float64
-                ),
-                "target_pos": spaces.Box(
-                    low=-np.inf, high=np.inf, shape=(3,), dtype=np.float64
-                ),
+                "cube_pos": spaces.Box(low=-np.inf, high=np.inf, shape=(3,), dtype=np.float64),
+                "cube_quat": spaces.Box(low=-1.0, high=1.0, shape=(4,), dtype=np.float64),
+                "ee_pos": spaces.Box(low=-np.inf, high=np.inf, shape=(3,), dtype=np.float64),
+                "gripper": spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float64),
+                "target_pos": spaces.Box(low=-np.inf, high=np.inf, shape=(3,), dtype=np.float64),
             }
         )
 
         # ---- per-session PyBullet client ----
         self._client: int = p.connect(p.DIRECT)
-        p.setAdditionalSearchPath(
-            pybullet_data.getDataPath(), physicsClientId=self._client
-        )
+        p.setAdditionalSearchPath(pybullet_data.getDataPath(), physicsClientId=self._client)
 
         # ---- cached construction-time state that survives resetSimulation ----
         # Texture paths must be absolute so PyBullet can re-loadTexture after
@@ -293,11 +284,10 @@ class PyBulletTabletopEnv:
             baseOrientation=[0.0, 0.0, 0.0, 1.0],  # xyzw identity
             physicsClientId=cid,
         )
-        p.changeDynamics(
-            self._cube_id, -1, lateralFriction=1.0, physicsClientId=cid
-        )
+        p.changeDynamics(self._cube_id, -1, lateralFriction=1.0, physicsClientId=cid)
         p.changeVisualShape(
-            self._cube_id, -1,
+            self._cube_id,
+            -1,
             textureUniqueId=self._tex_default_id,
             physicsClientId=cid,
         )
@@ -354,7 +344,10 @@ class PyBulletTabletopEnv:
             )
             # Ghost at baseline — no collision participation.
             p.setCollisionFilterGroupMask(
-                body_id, -1, collisionFilterGroup=0, collisionFilterMask=0,
+                body_id,
+                -1,
+                collisionFilterGroup=0,
+                collisionFilterMask=0,
                 physicsClientId=cid,
             )
             self._distractor_ids.append(body_id)
@@ -419,9 +412,7 @@ class PyBulletTabletopEnv:
             high=_TARGET_HALFRANGE,
             size=2,
         ).astype(np.float64)
-        self._target_pos = np.array(
-            [target_xy[0], target_xy[1], _TABLE_TOP_Z], dtype=np.float64
-        )
+        self._target_pos = np.array([target_xy[0], target_xy[1], _TABLE_TOP_Z], dtype=np.float64)
         p.resetBasePositionAndOrientation(
             self._target_id,
             [float(target_xy[0]), float(target_xy[1]), _TABLE_TOP_Z + 0.001],
@@ -467,9 +458,7 @@ class PyBulletTabletopEnv:
     def step(
         self,
         action: NDArray[np.float64],
-    ) -> tuple[
-        dict[str, NDArray[np.float64]], float, bool, bool, dict[str, Any]
-    ]:
+    ) -> tuple[dict[str, NDArray[np.float64]], float, bool, bool, dict[str, Any]]:
         """Advance one control step (parity with MuJoCo TabletopEnv pipeline)."""
         a = np.asarray(action, dtype=np.float64).reshape(-1)
         if a.shape != (7,):
@@ -477,9 +466,7 @@ class PyBulletTabletopEnv:
         a = np.clip(a, -1.0, 1.0).astype(np.float64, copy=False)
 
         self._apply_ee_command(a[0:3], a[3:6])
-        self._gripper_state = (
-            self.GRIPPER_OPEN if a[6] > 0.0 else self.GRIPPER_CLOSED
-        )
+        self._gripper_state = self.GRIPPER_OPEN if a[6] > 0.0 else self.GRIPPER_CLOSED
         self._update_grasp_state()
 
         # Physics substeps.
@@ -515,8 +502,7 @@ class PyBulletTabletopEnv:
             count = round(float(value))
             if count < 0 or count > _N_DISTRACTOR_SLOTS:
                 raise ValueError(
-                    f"distractor_count must be in [0, {_N_DISTRACTOR_SLOTS}]; "
-                    f"got {count}"
+                    f"distractor_count must be in [0, {_N_DISTRACTOR_SLOTS}]; got {count}"
                 )
         self._pending_perturbations[name] = float(value)
 
@@ -629,16 +615,10 @@ class PyBulletTabletopEnv:
 
         if name == "object_initial_pose_x":
             # State-effecting. Override the random X write from reset.
-            _, quat = p.getBasePositionAndOrientation(
-                self._cube_id, physicsClientId=cid
-            )
-            cur_pos_tup, _ = p.getBasePositionAndOrientation(
-                self._cube_id, physicsClientId=cid
-            )
+            _, quat = p.getBasePositionAndOrientation(self._cube_id, physicsClientId=cid)
+            cur_pos_tup, _ = p.getBasePositionAndOrientation(self._cube_id, physicsClientId=cid)
             new_pos = [float(value), float(cur_pos_tup[1]), _CUBE_REST_Z]
-            p.resetBasePositionAndOrientation(
-                self._cube_id, new_pos, quat, physicsClientId=cid
-            )
+            p.resetBasePositionAndOrientation(self._cube_id, new_pos, quat, physicsClientId=cid)
             p.resetBaseVelocity(
                 self._cube_id,
                 linearVelocity=[0.0, 0.0, 0.0],
@@ -648,13 +628,9 @@ class PyBulletTabletopEnv:
             return
 
         if name == "object_initial_pose_y":
-            cur_pos_tup, quat = p.getBasePositionAndOrientation(
-                self._cube_id, physicsClientId=cid
-            )
+            cur_pos_tup, quat = p.getBasePositionAndOrientation(self._cube_id, physicsClientId=cid)
             new_pos = [float(cur_pos_tup[0]), float(value), _CUBE_REST_Z]
-            p.resetBasePositionAndOrientation(
-                self._cube_id, new_pos, quat, physicsClientId=cid
-            )
+            p.resetBasePositionAndOrientation(self._cube_id, new_pos, quat, physicsClientId=cid)
             p.resetBaseVelocity(
                 self._cube_id,
                 linearVelocity=[0.0, 0.0, 0.0],
@@ -672,12 +648,14 @@ class PyBulletTabletopEnv:
                 if i < n:
                     # Reveal + enable collisions.
                     p.changeVisualShape(
-                        body_id, -1,
+                        body_id,
+                        -1,
                         rgbaColor=[0.6, 0.6, 0.9, 1.0],
                         physicsClientId=cid,
                     )
                     p.setCollisionFilterGroupMask(
-                        body_id, -1,
+                        body_id,
+                        -1,
                         collisionFilterGroup=1,
                         collisionFilterMask=1,
                         physicsClientId=cid,
@@ -685,12 +663,14 @@ class PyBulletTabletopEnv:
                 else:
                     # Return to hidden + ghosted baseline.
                     p.changeVisualShape(
-                        body_id, -1,
+                        body_id,
+                        -1,
                         rgbaColor=[0.6, 0.6, 0.9, 0.0],
                         physicsClientId=cid,
                     )
                     p.setCollisionFilterGroupMask(
-                        body_id, -1,
+                        body_id,
+                        -1,
                         collisionFilterGroup=0,
                         collisionFilterMask=0,
                         physicsClientId=cid,
@@ -703,7 +683,8 @@ class PyBulletTabletopEnv:
             use_alt = float(value) >= 0.5
             tex_id = self._tex_alt_id if use_alt else self._tex_default_id
             p.changeVisualShape(
-                self._cube_id, -1,
+                self._cube_id,
+                -1,
                 textureUniqueId=tex_id,
                 physicsClientId=cid,
             )
@@ -759,9 +740,7 @@ class PyBulletTabletopEnv:
         return float(np.linalg.norm(a[:2] - b[:2]))
 
 
-def _quat_mul_wxyz(
-    a: NDArray[np.float64], b: NDArray[np.float64]
-) -> NDArray[np.float64]:
+def _quat_mul_wxyz(a: NDArray[np.float64], b: NDArray[np.float64]) -> NDArray[np.float64]:
     """Hamilton product ``a * b`` in wxyz order."""
     aw, ax, ay, az = a
     bw, bx, by, bz = b

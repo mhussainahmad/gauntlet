@@ -43,9 +43,7 @@ def _factory(**_: Any) -> _StubEnv:
 # The registry stores ``Callable[..., GauntletEnv]`` at its type boundary, but
 # the stub only needs to round-trip through the dict — never satisfies the
 # full Protocol. ``cast`` documents the deliberate laxity at the test seam.
-_stub_factory: Callable[..., GauntletEnv] = cast(
-    Callable[..., GauntletEnv], _factory
-)
+_stub_factory: Callable[..., GauntletEnv] = cast(Callable[..., GauntletEnv], _factory)
 
 
 def test_register_then_retrieve_round_trips() -> None:

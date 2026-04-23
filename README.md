@@ -22,6 +22,28 @@ runner, breakdown-first HTML report, and the `gauntlet run / report /
 compare` CLI. Phase 2 starts on real-policy adapters and runtime
 observability. The public surface is still unstable.
 
+## Backends
+
+Gauntlet ships two simulator backends. The Suite YAML's `env:` key is
+the dispatch: `tabletop` uses MuJoCo (default, ships in the core
+install); `tabletop-pybullet` uses PyBullet and lives behind an
+optional extra.
+
+| `env:` slug          | Simulator | Install                                  | Observations |
+|----------------------|-----------|------------------------------------------|--------------|
+| `tabletop`           | MuJoCo    | `uv sync` (core)                         | State + render-on-demand |
+| `tabletop-pybullet`  | PyBullet  | `uv sync --extra pybullet`               | State-only (§6.2) |
+
+The two backends share action/observation spaces byte-for-byte and the
+canonical 7 perturbation axes. They are **not** numerically identical:
+same policy + same seed on `tabletop` vs `tabletop-pybullet` produces
+semantically similar but numerically different trajectories. Running
+`gauntlet compare` across backends measures simulator drift, not
+policy regression; the CLI requires `--allow-cross-backend` to proceed.
+
+See [`docs/phase2-rfc-005-pybullet-adapter.md`](./docs/phase2-rfc-005-pybullet-adapter.md)
+for the full PyBullet backend design.
+
 ## Quickstart
 
 Three commands reproduce the end-to-end example against the bundled

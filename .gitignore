@@ -35,3 +35,4 @@ results/
 # Local agent / the coding agent infrastructure (runtime state, not project code)
 .swarm/
 .mcp.json
+tooling.vector.db

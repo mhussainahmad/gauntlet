@@ -83,10 +83,7 @@ def test_step_sequence_bit_identical_for_same_seed() -> None:
                 action = rng.uniform(-1.0, 1.0, size=(7,))
                 obs, _, _, _, _ = env.step(action)
                 snapshots.append(
-                    {
-                        k: np.asarray(v, dtype=np.float64).copy()
-                        for k, v in obs.items()
-                    }
+                    {k: np.asarray(v, dtype=np.float64).copy() for k, v in obs.items()}
                 )
             return snapshots
         finally:
@@ -127,9 +124,7 @@ def test_action_and_observation_space_parity_with_mujoco_tabletop() -> None:
         # Observation space: Dict with identical keys.
         assert isinstance(pb.observation_space, spaces.Dict)
         assert isinstance(mj.observation_space, spaces.Dict)
-        assert set(pb.observation_space.spaces) == set(
-            mj.observation_space.spaces
-        )
+        assert set(pb.observation_space.spaces) == set(mj.observation_space.spaces)
         for key in mj.observation_space.spaces:
             pb_sub = pb.observation_space.spaces[key]
             mj_sub = mj.observation_space.spaces[key]
