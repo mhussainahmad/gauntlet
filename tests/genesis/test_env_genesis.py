@@ -287,6 +287,44 @@ def test_distractor_count_teleport_semantics(env: GenesisTabletopEnv) -> None:
 # ----------------------------------------------- cosmetic axes: shadow storage
 
 
+def test_object_texture_swap_preserves_cube_xy() -> None:
+    """RFC-008 §3.7 — the ``object_texture`` swap must inherit the
+    active cube's XY; otherwise the axis silently teleports the cube
+    to the origin and the per-seed state diverges from the no-texture
+    baseline.
+
+    Two fresh envs with the same seed and the same ``render_in_obs=False``:
+    one with ``object_texture=1`` queued, one without. ``cube_pos[:2]``
+    must match to within float tolerance.
+    """
+    from gauntlet.env.genesis import GenesisTabletopEnv
+
+    a = GenesisTabletopEnv()
+    b = GenesisTabletopEnv()
+    try:
+        obs_a, _ = a.reset(seed=42)
+        b.set_perturbation("object_texture", 1.0)
+        obs_b, _ = b.reset(seed=42)
+
+        # Swap happened.
+        assert b._cube is b._cube_green
+        assert a._cube is a._cube_red
+        # XY survived the swap.
+        assert np.allclose(obs_a["cube_pos"][:2], obs_b["cube_pos"][:2], atol=1e-6), (
+            f"object_texture swap lost cube XY: no-swap={obs_a['cube_pos'][:2]} "
+            f"swap={obs_b['cube_pos'][:2]}"
+        )
+
+        # A follow-up reset with no pending perturbation unswaps back
+        # to the red cube at the seed-random XY.
+        obs_c, _ = b.reset(seed=42)
+        assert b._cube is b._cube_red
+        assert np.allclose(obs_a["cube_pos"][:2], obs_c["cube_pos"][:2], atol=1e-6)
+    finally:
+        a.close()
+        b.close()
+
+
 def test_cosmetic_axes_store_on_shadows_and_leave_obs_unchanged(env: GenesisTabletopEnv) -> None:
     """The four VISUAL_ONLY axes do not touch state obs — they set
     the shadow attributes the rendering RFC (RFC-008) will consume.

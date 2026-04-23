@@ -299,12 +299,48 @@ class GenesisTabletopEnv:
             ),
             material=gs.materials.Rigid(gravity_compensation=1.0),
         )
-        self._cube: Any = self._scene.add_entity(
+        # Two cubes — red (default texture) and green (alt texture) —
+        # pre-allocated at build time because Genesis 0.4.x cannot swap
+        # surface colours post-build (exploration §5). The active cube
+        # is teleported to the rest pose; the inactive one lives at
+        # ``_DISTRACTOR_HIDDEN_Z`` — same teleport-away pattern
+        # ``distractor_count`` uses (RFC-007 §6.5).
+        #
+        # BOTH cubes carry ``gravity_compensation=1.0`` so the inactive
+        # cube stays parked at ``z=-10`` across an episode. This is a
+        # deliberate deviation from the single-cube state-only
+        # predecessor (which let the cube fall and rest on the table)
+        # — the audit in RFC-008 §3.5 confirms no existing test
+        # exercises free-fall dynamics; success is XY-only and
+        # ``_snap_cube_to_ee`` overrides cube pose during grasp anyway.
+        # Documented here so a future reader doesn't "simplify" it away.
+        self._cube_red: Any = self._scene.add_entity(
             gs.morphs.Box(
                 pos=(0.0, 0.0, _CUBE_REST_Z),
                 size=(2.0 * _CUBE_HALF, 2.0 * _CUBE_HALF, 2.0 * _CUBE_HALF),
             ),
+            surface=gs.surfaces.Default(
+                diffuse_texture=gs.surfaces.ColorTexture(color=(1.0, 0.2, 0.2)),
+            ),
+            material=gs.materials.Rigid(gravity_compensation=1.0),
         )
+        self._cube_green: Any = self._scene.add_entity(
+            gs.morphs.Box(
+                pos=(0.0, 0.0, _DISTRACTOR_HIDDEN_Z),
+                size=(2.0 * _CUBE_HALF, 2.0 * _CUBE_HALF, 2.0 * _CUBE_HALF),
+            ),
+            surface=gs.surfaces.Default(
+                diffuse_texture=gs.surfaces.ColorTexture(color=(0.2, 1.0, 0.2)),
+            ),
+            material=gs.materials.Rigid(gravity_compensation=1.0),
+        )
+        # ``self._cube`` is the authoritative handle for every downstream
+        # operation (``_cube_pos``, ``_cube_quat``, ``_snap_cube_to_ee``,
+        # reset's XY teleport). ``self._cube_alt`` aliases the hidden
+        # cube. Both pointers are swapped atomically in
+        # ``_apply_one_perturbation("object_texture", ...)``.
+        self._cube: Any = self._cube_red
+        self._cube_alt: Any = self._cube_green
         # EE body — gravity-compensated dynamic rigid, driven by
         # ``set_pos`` / ``set_quat`` each step. Collision kept on so the
         # EE-cube proximity check in ``_update_grasp_state`` sees a
@@ -606,6 +642,15 @@ class GenesisTabletopEnv:
             xy = _DISTRACTOR_BASELINE_XY[i]
             d.set_pos((float(xy[0]), float(xy[1]), _DISTRACTOR_HIDDEN_Z))
 
+        # Unswap the cube pointer if a prior episode flipped it. The
+        # now-hidden green cube is explicitly re-parked at
+        # ``(0, 0, _DISTRACTOR_HIDDEN_Z)`` so it doesn't drift into the
+        # next episode's frustum. Red stays wherever it was — reset's
+        # XY teleport overwrites its position a moment later.
+        if self._cube is not self._cube_red:
+            self._cube_green.set_pos((0.0, 0.0, _DISTRACTOR_HIDDEN_Z))
+            self._cube, self._cube_alt = self._cube_red, self._cube_green
+
         # Visual-axis shadows — restore to their neutral defaults so a
         # prior episode's cosmetic perturbation doesn't leak.
         self._light_intensity = 1.0
@@ -635,7 +680,25 @@ class GenesisTabletopEnv:
         elif name == "camera_offset_y":
             self._cam_offset[1] = float(value)
         elif name == "object_texture":
-            self._texture_choice = 1 if round(float(value)) != 0 else 0
+            new_choice = 1 if round(float(value)) != 0 else 0
+            if new_choice != self._texture_choice:
+                # Capture the active cube's XY before the swap so the
+                # new active cube inherits the seed-randomised (or
+                # ``object_initial_pose_*``-overridden) position —
+                # otherwise the axis would silently teleport the cube
+                # to the origin, corrupting per-seed state (caught in
+                # RFC-008 pre-implementation review).
+                old_xy = self._cube_pos()
+                self._cube.set_pos((0.0, 0.0, _DISTRACTOR_HIDDEN_Z))
+                self._cube, self._cube_alt = self._cube_alt, self._cube
+                self._cube.set_pos((float(old_xy[0]), float(old_xy[1]), _CUBE_REST_Z))
+                # Identity quat on the new active cube — reset's quat
+                # write earlier hit the old (now hidden) active cube,
+                # so without this line the new active cube inherits
+                # whatever quat it had last time it was active (likely
+                # post-grasp from the previous episode it was live).
+                self._cube.set_quat((1.0, 0.0, 0.0, 0.0))
+            self._texture_choice = new_choice
         elif name == "object_initial_pose_x":
             # State-affecting: overrides the random cube X from the
             # seed-driven randomisation (matches MuJoCo qpos-write
