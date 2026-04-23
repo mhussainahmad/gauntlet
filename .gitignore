@@ -40,12 +40,10 @@ results/
 *.pth
 *.safetensors
 
-# Local ruvector / AgentDB state (untracked tooling DB).
-ruvector.db
-
-# Local agent / Claude Code infrastructure (runtime state, not project code)
-.claude/
-.claude-flow/
+# Local agent tooling (runtime state, never project code).
+# Contributors using per-developer agent tooling should prefer adding
+# these to their user-global gitignore (~/.config/git/ignore) — the
+# project does not care which tool you use.
+*.vector.db
 .swarm/
 .mcp.json
-CLAUDE.md

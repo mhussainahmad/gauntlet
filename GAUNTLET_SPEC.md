@@ -111,7 +111,7 @@ Each task should land as its own PR-sized chunk with tests.
 
 ## 6. Design principles
 
-These are hard rules for this codebase. Claude Code should enforce them on every change.
+These are hard rules for this codebase and should be enforced on every change.
 
 - **Type everything.** `mypy --strict` must pass. No `Any` except at FFI boundaries with MuJoCo.
 - **Reproducibility is non-negotiable.** Every rollout must be reproducible from `(suite_name, axis_config, seed)`. If you can't reproduce a failure, the system is broken.
@@ -141,7 +141,7 @@ These are hard rules for this codebase. Claude Code should enforce them on every
 
 ## 8. References
 
-Context for the design — Claude Code doesn't need to read these to build MVP, but they inform the direction:
+Context for the design — not required reading to build the MVP, but they inform the direction:
 
 - a16z, *The physical AI deployment gap* (Jan 2026) — https://www.a16z.news/p/the-physical-ai-deployment-gap
 - Silicon Valley Robotics Center, *State of Robotics 2026* — https://www.roboticscenter.ai/state-of-robotics-2026
@@ -152,8 +152,8 @@ Context for the design — Claude Code doesn't need to read these to build MVP, 
 
 ---
 
-## 9. Kickoff prompt for Claude Code
+## 9. Kickoff prompt
 
-When handing this to Claude Code, use this opening:
+When handing this spec to a contributor (human or agent), use this opening:
 
 > Read `GAUNTLET_SPEC.md`. Start with Phase 1 task 1 (project scaffold). After it's complete and tests pass, pause and summarize what you built. Then proceed to task 2. Do not skip ahead or bundle tasks. Before each task, restate the task number and goal; after each task, show what files changed and confirm all tests + lint + mypy pass.

@@ -202,12 +202,10 @@ out/
 results/
 *.results.json
 
-# Local agent / Claude Code infrastructure (runtime state, not project code)
-.claude/
-.claude-flow/
+# Local agent tooling (runtime state, never project code).
+*.vector.db
 .swarm/
 .mcp.json
-CLAUDE.md
 ```
 
 **Proposal to add:**
