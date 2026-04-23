@@ -1,10 +1,10 @@
-"""Genesis tabletop backend — state-only first cut (RFC-007 §5-§7).
+"""Genesis tabletop backend — state + image obs (RFC-007 + RFC-008).
 
 Parity with :class:`gauntlet.env.tabletop.TabletopEnv` and
 :class:`gauntlet.env.pybullet.tabletop_pybullet.PyBulletTabletopEnv` at
 the observation / action / perturbation-axis interface level
-(RFC-007 §3, §6), with the deliberate differences RFC-007 §7
-documents:
+(RFC-007 §3 + §6, RFC-008 §3), with the deliberate differences
+RFC-007 §7 documents:
 
 * **Numerical non-parity across backends** (§7.3). Same seed + same
   policy -> numerically different trajectories on MuJoCo vs PyBullet
@@ -13,15 +13,19 @@ documents:
 * **Same-process bit-determinism** (§7.1). Two ``env.reset(seed=s)``
   + 20 ``env.step`` calls in the same process produce bit-identical
   obs. Verified empirically in the exploration pass.
-* **Visual-only axes** (§6). ``lighting_intensity``, ``object_texture``,
-  ``camera_offset_{x,y}`` queue + validate but do not mutate the
-  state-only observation. Declared in :attr:`VISUAL_ONLY_AXES`. The
-  follow-up rendering RFC (RFC-008) empties that set.
+* **Post-RFC-008 cosmetic-axis parity** — ``lighting_intensity``,
+  ``object_texture``, ``camera_offset_{x,y}`` now mutate
+  ``obs["image"]`` when ``render_in_obs=True``. :attr:`VISUAL_ONLY_AXES`
+  is empty; the Suite loader's cosmetic-only rejection is a no-op on
+  this backend.
 
-Scene layout (RFC-007 §5): everything is built from Genesis primitives
-(``gs.morphs.Box``, ``gs.morphs.Plane``, ``gs.morphs.Cylinder``) -
-no URDF, no MJCF. Keeps ``scene.build()`` at the ~5 s minimum and
-ships no Genesis-specific asset in the repo.
+Scene layout (RFC-007 §5 + RFC-008 §3.5): everything is built from
+Genesis primitives (``gs.morphs.Box``, ``gs.morphs.Plane``,
+``gs.morphs.Cylinder``) - no URDF, no MJCF. Two cubes pre-allocated
+at build time (``_cube_red`` / ``_cube_green``) so ``object_texture``
+can teleport-swap without a scene rebuild; ``self._cube`` always
+aliases the active one. Keeps ``scene.build()`` at the ~5 s minimum
+and ships no Genesis-specific asset in the repo.
 
 Kinematic-EE pattern (RFC-007 §5): no ``createConstraint`` analogue
 in Genesis, so the EE body is a gravity-compensated dynamic rigid
@@ -29,13 +33,15 @@ whose pose is overwritten via ``entity.set_pos()`` + ``entity.set_quat()``
 every control step. Same-behaviour as PyBullet's ``p.changeConstraint``
 loop.
 
-Per-axis branches (RFC-007 §6): three state-affecting axes
-(``object_initial_pose_{x,y}``, ``distractor_count``) mutate cube /
-distractor state on reset; four cosmetic axes (``lighting_intensity``,
-``camera_offset_{x,y}``, ``object_texture``) queue + validate and are
-stored on ``self._light_intensity`` / ``self._cam_offset`` /
-``self._texture_choice`` for the follow-up rendering RFC to consume,
-same staging RFC-005 used for PyBullet pre-RFC-006.
+Rendering path (RFC-008): optional pinhole camera added at
+``__init__`` when ``render_in_obs=True``. ``_render_obs_image`` flushes
+pending rigid transforms via the private
+``scene.visualizer.rasterizer._context.update_rigid()`` hop — without
+it, post-``reset`` renders would see stale poses because no
+``scene.step()`` has run since the teleport (exploration §2.4). The
+``lighting_intensity`` axis reaches the default directional light via
+``_context._scene.directional_light_nodes[0].light.intensity``; pinned
+by ``genesis-world<0.5``.
 """
 
 from __future__ import annotations
@@ -208,14 +214,19 @@ class GenesisTabletopEnv:
             "distractor_count",
         }
     )
-    VISUAL_ONLY_AXES: ClassVar[frozenset[str]] = frozenset(
-        {
-            "lighting_intensity",
-            "camera_offset_x",
-            "camera_offset_y",
-            "object_texture",
-        }
-    )
+    # Post-RFC-008: all four cosmetic axes are observable via
+    # ``obs["image"]`` when ``render_in_obs=True``, so the honesty
+    # carve-out from RFC-007 §6 closes and the Suite loader's
+    # ``_reject_purely_visual_suites`` becomes a no-op on
+    # ``tabletop-genesis``. Exact parity with ``TabletopEnv`` and
+    # (post-RFC-006) ``PyBulletTabletopEnv``.
+    #
+    # Honesty caveat: a user running a cosmetic-only sweep with
+    # ``render_in_obs=False`` still gets pairwise-identical state
+    # observations across cells — not a bug, same property MuJoCo and
+    # PyBullet share. The axes still store on their shadow attributes
+    # and reach the render path only when rendering is on.
+    VISUAL_ONLY_AXES: ClassVar[frozenset[str]] = frozenset()
 
     MAX_LINEAR_STEP: float = 0.05
     MAX_ANGULAR_STEP: float = 0.1
