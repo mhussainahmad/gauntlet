@@ -44,6 +44,19 @@ YAML path for `examples/suites/tabletop-basic-v1.yaml`. See
 [`examples/evaluate_random_policy.py`](./examples/evaluate_random_policy.py)
 for the equivalent invocation via the public Python API.
 
+## Runtime drift detection
+
+Optional Phase 2 add-on (`[monitor]` extra). Given a reference sweep of a
+known-good policy, fit a small observation autoencoder and score a
+candidate sweep's trajectories against it — per-episode reconstruction
+error + per-dim action-std surface OOD rollouts. `gauntlet run
+--record-trajectories <dir>` dumps per-episode NPZ sidecars;
+`gauntlet monitor train <dir> --out <ae_dir>` fits the AE; `gauntlet
+monitor score <episodes.json> <dir> --ae <ae_dir> --out drift.json`
+writes the sidecar. The three-step workflow is scripted end-to-end in
+[`examples/evaluate_with_drift.py`](./examples/evaluate_with_drift.py);
+`drift.json` is optional and orthogonal to `report.json`.
+
 ## Development
 
 ```bash
