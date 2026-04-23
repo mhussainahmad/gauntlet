@@ -1,14 +1,21 @@
-"""PyBullet-aware loader tests — RFC-005 §6.2 / §9.1 case 11 / §12 Q1.
+"""PyBullet-aware loader tests — RFC-005 §6.2 / §9.1 case 11 / §12 Q1
+(updated by RFC-006 §3.5).
 
-The Suite loader rejects a YAML whose every declared axis is in the
-backend's :attr:`~gauntlet.env.base.GauntletEnv.VISUAL_ONLY_AXES` —
-those axes mutate the PyBullet scene but cannot change a state-only
-observation dict, so the run would report pairwise-identical cell
-success rates and look like a broken harness.
+RFC-005 shipped the backend state-only, which meant cosmetic axes
+(``lighting_intensity`` / ``object_texture``) produced byte-identical
+state obs. The Suite loader rejected any YAML whose every axis was in
+``VISUAL_ONLY_AXES`` so the run could not silently look like a broken
+harness.
 
-Tests marked ``@pytest.mark.pybullet`` because the rejection only
-fires once ``gauntlet.env.pybullet`` has registered and declared a
-non-empty ``VISUAL_ONLY_AXES`` set.
+RFC-006 adds the image-observation path. With the renderer online the
+cosmetic axes are observable on ``obs["image"]`` — so
+``PyBulletTabletopEnv.VISUAL_ONLY_AXES`` drops to ``frozenset()`` and
+the loader's rejection becomes a no-op on the PyBullet backend (same
+shape MuJoCo has always had). These tests pin the relaxed contract.
+
+Tests marked ``@pytest.mark.pybullet`` because they still exercise the
+PyBullet-registration import path; they no longer depend on a
+non-empty ``VISUAL_ONLY_AXES``.
 """
 
 from __future__ import annotations
@@ -76,15 +83,20 @@ axes:
 """
 
 
-def test_rejects_suite_whose_every_axis_is_visual_only() -> None:
-    """Both declared axes are in PyBullet VISUAL_ONLY_AXES → reject."""
-    with pytest.raises(ValueError) as excinfo:
-        load_suite_from_string(_VISUAL_ONLY_YAML)
-    msg = str(excinfo.value)
-    assert "cosmetic on a state-only backend" in msg
-    # The error names the declared axes and the cosmetic set.
-    assert "lighting_intensity" in msg
-    assert "object_texture" in msg
+def test_accepts_cosmetic_only_suite_once_rendering_exists() -> None:
+    """RFC-006 §3.5: cosmetic-only sweeps load on PyBullet once rendering is on.
+
+    Was ``test_rejects_suite_whose_every_axis_is_visual_only`` under the
+    state-only contract. Rendering (RFC-006) makes every cosmetic axis
+    observable on ``obs["image"]``, so ``VISUAL_ONLY_AXES`` is empty and
+    the rejection becomes a no-op. A user running a cosmetic-only sweep
+    with ``render_in_obs=False`` still gets pairwise-identical state-only
+    cells — documented on the env class, same property MuJoCo has always
+    had, not a harness bug.
+    """
+    suite = load_suite_from_string(_VISUAL_ONLY_YAML)
+    assert suite.env == "tabletop-pybullet"
+    assert set(suite.axes.keys()) == {"lighting_intensity", "object_texture"}
 
 
 def test_accepts_mix_of_visual_and_state_effecting_axes() -> None:

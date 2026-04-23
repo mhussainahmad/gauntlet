@@ -83,6 +83,20 @@ _DISTRACTOR_BASELINE_XY = np.array(
 
 _LARGE_CONSTRAINT_FORCE: float = 1000.0
 
+# Camera + light constants for the headless render path (RFC-006 §3.4).
+# Semantic (not pixel) parity with the MuJoCo ``main`` camera in
+# ``assets/tabletop.xml`` — same eye position, same target region, same
+# light direction / ambient coefficient. Cross-backend numerical pixel
+# parity is explicitly NOT a goal (RFC-005 §7.4).
+_CAM_EYE_BASELINE: tuple[float, float, float] = (0.6, -0.6, 0.8)
+_CAM_TARGET: tuple[float, float, float] = (0.0, 0.0, _TABLE_TOP_Z)
+_CAM_UP: tuple[float, float, float] = (0.0, 0.0, 1.0)
+_CAM_FOV: float = 45.0
+_CAM_NEAR: float = 0.01
+_CAM_FAR: float = 5.0
+_CAM_LIGHT_AMBIENT: float = 0.3  # matches MuJoCo headlight ambient
+_DEFAULT_RENDER_SIZE: tuple[int, int] = (224, 224)  # matches TabletopEnv
+
 
 def _xyzw_to_wxyz(q: tuple[float, float, float, float]) -> NDArray[np.float64]:
     """PyBullet native (x, y, z, w) → MuJoCo (w, x, y, z) order. See §7.3."""
@@ -127,7 +141,13 @@ class PyBulletTabletopEnv:
             "distractor_count",
         }
     )
-    VISUAL_ONLY_AXES: ClassVar[frozenset[str]] = frozenset({"lighting_intensity", "object_texture"})
+    # Empty once image rendering exists (RFC-006 §3.5): every cosmetic axis
+    # is now observable on ``obs["image"]`` when ``render_in_obs=True``.
+    # Aligns PyBullet with MuJoCo's TabletopEnv, which has always declared
+    # ``frozenset()`` for the same reason. A user running a cosmetic-only
+    # sweep with ``render_in_obs=False`` will still see pairwise-identical
+    # state-only cells — documented, not a bug, and matches MuJoCo.
+    VISUAL_ONLY_AXES: ClassVar[frozenset[str]] = frozenset()
 
     MAX_LINEAR_STEP: float = 0.05
     MAX_ANGULAR_STEP: float = 0.1
@@ -139,31 +159,68 @@ class PyBulletTabletopEnv:
     observation_space: gym.spaces.Space[Any]
     action_space: gym.spaces.Space[Any]
 
+    # ``render_in_obs`` interaction with the Runner's trajectory recorder
+    # (``trajectory_dir``, RFC-004): works, but the recorder currently casts
+    # every obs value to float64 before stacking (see
+    # ``src/gauntlet/runner/worker.py``). Images go into the NPZ as float64,
+    # ~8x the uint8 footprint. Not a correctness issue; a memory-efficiency
+    # follow-up (dtype-preserving recorder) is tracked outside RFC-006.
+
     def __init__(
         self,
         *,
         max_steps: int = 200,
         n_substeps: int = 5,
+        render_in_obs: bool = False,
+        render_size: tuple[int, int] = _DEFAULT_RENDER_SIZE,
     ) -> None:
         if max_steps <= 0:
             raise ValueError(f"max_steps must be positive; got {max_steps}")
         if n_substeps <= 0:
             raise ValueError(f"n_substeps must be positive; got {n_substeps}")
+        if render_in_obs:
+            h, w = render_size
+            if h <= 0 or w <= 0:
+                raise ValueError(
+                    f"render_size must be a (height, width) of positive ints; got {render_size}"
+                )
 
         self._max_steps = max_steps
         self._n_substeps = n_substeps
+        self._render_in_obs = render_in_obs
+        self._render_size: tuple[int, int] = (int(render_size[0]), int(render_size[1]))
 
-        # ---- spaces (identical to TabletopEnv) ----
+        # ---- spaces (identical to TabletopEnv; ``image`` only when rendering on) ----
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(7,), dtype=np.float64)
-        self.observation_space = spaces.Dict(
-            {
-                "cube_pos": spaces.Box(low=-np.inf, high=np.inf, shape=(3,), dtype=np.float64),
-                "cube_quat": spaces.Box(low=-1.0, high=1.0, shape=(4,), dtype=np.float64),
-                "ee_pos": spaces.Box(low=-np.inf, high=np.inf, shape=(3,), dtype=np.float64),
-                "gripper": spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float64),
-                "target_pos": spaces.Box(low=-np.inf, high=np.inf, shape=(3,), dtype=np.float64),
-            }
-        )
+        obs_spaces: dict[str, gym.spaces.Space[Any]] = {
+            "cube_pos": spaces.Box(low=-np.inf, high=np.inf, shape=(3,), dtype=np.float64),
+            "cube_quat": spaces.Box(low=-1.0, high=1.0, shape=(4,), dtype=np.float64),
+            "ee_pos": spaces.Box(low=-np.inf, high=np.inf, shape=(3,), dtype=np.float64),
+            "gripper": spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float64),
+            "target_pos": spaces.Box(low=-np.inf, high=np.inf, shape=(3,), dtype=np.float64),
+        }
+        if self._render_in_obs:
+            h, w = self._render_size
+            # uint8 RGB frame from the headless TINY renderer. Shape / dtype /
+            # bounds match TabletopEnv(render_in_obs=True) byte-for-byte — VLA
+            # adapters (RFC-001, RFC-002) read the same obs["image"] key.
+            obs_spaces["image"] = spaces.Box(low=0, high=255, shape=(h, w, 3), dtype=np.uint8)
+        self.observation_space = spaces.Dict(obs_spaces)
+
+        # Projection matrix is constant per instance — fixed intrinsics, no
+        # perturbation axis touches it. Cache once so per-step render skips
+        # the (trivial) compute. View matrix depends on _cam_eye_offset and
+        # is rebuilt per render call in _render_obs_image.
+        if self._render_in_obs:
+            h, w = self._render_size
+            self._proj_matrix: list[float] | None = p.computeProjectionMatrixFOV(
+                fov=_CAM_FOV,
+                aspect=float(w) / float(h),
+                nearVal=_CAM_NEAR,
+                farVal=_CAM_FAR,
+            )
+        else:
+            self._proj_matrix = None
 
         # ---- per-session PyBullet client ----
         self._client: int = p.connect(p.DIRECT)
@@ -375,7 +432,7 @@ class PyBulletTabletopEnv:
         *,
         seed: int | None = None,
         options: dict[str, Any] | None = None,
-    ) -> tuple[dict[str, NDArray[np.float64]], dict[str, Any]]:
+    ) -> tuple[dict[str, NDArray[Any]], dict[str, Any]]:
         """Deterministic reset — ``seed`` is the only entropy source.
 
         Order (RFC-005 §3.3): ``restore_baseline`` → seed-driven state
@@ -458,7 +515,7 @@ class PyBulletTabletopEnv:
     def step(
         self,
         action: NDArray[np.float64],
-    ) -> tuple[dict[str, NDArray[np.float64]], float, bool, bool, dict[str, Any]]:
+    ) -> tuple[dict[str, NDArray[Any]], float, bool, bool, dict[str, Any]]:
         """Advance one control step (parity with MuJoCo TabletopEnv pipeline)."""
         a = np.asarray(action, dtype=np.float64).reshape(-1)
         if a.shape != (7,):
@@ -712,7 +769,7 @@ class PyBulletTabletopEnv:
         # Unreachable — set_perturbation validates before queueing.
         raise ValueError(f"internal: unknown perturbation axis {name!r}")
 
-    def _build_obs(self) -> dict[str, NDArray[np.float64]]:
+    def _build_obs(self) -> dict[str, NDArray[Any]]:
         cube_pos_tup, cube_quat_xyzw = p.getBasePositionAndOrientation(
             self._cube_id, physicsClientId=self._client
         )
@@ -720,13 +777,65 @@ class PyBulletTabletopEnv:
         cube_quat_wxyz = _xyzw_to_wxyz(cube_quat_xyzw)  # §7.3 conversion
         ee_pos = self._ee_pos.copy()
         gripper = np.array([self._gripper_state], dtype=np.float64)
-        return {
+        obs: dict[str, NDArray[Any]] = {
             "cube_pos": cube_pos,
             "cube_quat": cube_quat_wxyz,
             "ee_pos": ee_pos,
             "gripper": gripper,
             "target_pos": self._target_pos.copy(),
         }
+        if self._render_in_obs:
+            obs["image"] = self._render_obs_image()
+        return obs
+
+    def _render_obs_image(self) -> NDArray[np.uint8]:
+        """Render the main camera into a uint8 (H, W, 3) array.
+
+        Headless ``ER_TINY_RENDERER`` (no GL context). Consumes the four
+        cosmetic axes through live env state: ``lightDiffuseCoeff`` ←
+        ``self._light_intensity`` (``lighting_intensity``); camera eye
+        ← ``_CAM_EYE_BASELINE + self._cam_eye_offset`` on x, y
+        (``camera_offset_x``, ``camera_offset_y``); cube texture is
+        already bound on the cube via ``_apply_one_perturbation`` and
+        picked up by the rasteriser automatically (``object_texture``).
+
+        ``shadow=0`` is unconditional — shadow pass is non-deterministic
+        on some wheels (RFC-006 §2.3). Segmentation pass is suppressed
+        via ``ER_NO_SEGMENTATION_MASK`` to cut ~15% render time on the
+        software path.
+        """
+        assert self._proj_matrix is not None  # gate: render_in_obs=True
+        h, w = self._render_size
+        eye = [
+            _CAM_EYE_BASELINE[0] + float(self._cam_eye_offset[0]),
+            _CAM_EYE_BASELINE[1] + float(self._cam_eye_offset[1]),
+            _CAM_EYE_BASELINE[2],
+        ]
+        view = p.computeViewMatrix(
+            cameraEyePosition=eye,
+            cameraTargetPosition=list(_CAM_TARGET),
+            cameraUpVector=list(_CAM_UP),
+        )
+        _, _, rgb, _, _ = p.getCameraImage(
+            width=w,
+            height=h,
+            viewMatrix=view,
+            projectionMatrix=self._proj_matrix,
+            lightDirection=[0.0, 0.0, 1.0],
+            lightColor=[1.0, 1.0, 1.0],
+            lightDiffuseCoeff=float(self._light_intensity),
+            lightAmbientCoeff=_CAM_LIGHT_AMBIENT,
+            lightSpecularCoeff=0.0,
+            shadow=0,
+            flags=p.ER_NO_SEGMENTATION_MASK,
+            renderer=p.ER_TINY_RENDERER,
+            physicsClientId=self._client,
+        )
+        # getCameraImage returns (H, W, 4) RGBA uint8; drop alpha for MuJoCo
+        # parity. np.ascontiguousarray guarantees the returned array is
+        # C-contiguous regardless of how pybullet packed the buffer.
+        arr = np.asarray(rgb, dtype=np.uint8).reshape(h, w, 4)[:, :, :3]
+        return np.ascontiguousarray(arr)
 
     def _build_info(self) -> dict[str, Any]:
         return {
