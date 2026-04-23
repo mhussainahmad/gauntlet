@@ -407,25 +407,64 @@ axes:
         """Importing the backend subpackage at load time must be converted
         into the documented install-hint error when it raises.
 
-        At step 5 of RFC-005, ``gauntlet.env.pybullet`` does not exist yet,
-        so ``importlib.import_module`` raises :class:`ModuleNotFoundError`
-        — the loader catches both subclasses of :class:`ImportError`.
+        Canonical simulation per RFC-005 §9.1 case 12: monkeypatch
+        ``sys.modules['pybullet']`` to ``None`` so the subpackage's own
+        ``import pybullet`` guard raises ``ImportError`` on re-import.
+        The loader catches that and re-raises as the user-facing
+        ``ValueError`` with the install hint.
         """
         import sys
 
-        # Belt-and-braces: if some earlier test imported the backend,
-        # unload it so this test sees the pre-step-7 world.
+        from gauntlet.env.registry import _REGISTRY
+
+        # Simulate "the [pybullet] extra is not installed":
+        # block pybullet itself and unload any cached gauntlet.env.pybullet
+        # so the subpackage's __init__ runs again and hits its ImportError.
+        monkeypatch.setitem(sys.modules, "pybullet", None)
+        monkeypatch.setitem(sys.modules, "pybullet_data", None)
         for mod in list(sys.modules):
             if mod == "gauntlet.env.pybullet" or mod.startswith(
                 "gauntlet.env.pybullet."
             ):
                 monkeypatch.delitem(sys.modules, mod, raising=False)
+        # If a prior test successfully registered the backend, drop the
+        # entry for the duration of this test so the loader actually
+        # attempts the import.
+        if "tabletop-pybullet" in _REGISTRY:
+            saved = _REGISTRY.pop("tabletop-pybullet")
+            monkeypatch.setitem(_REGISTRY, "tabletop-pybullet", saved)
+            del _REGISTRY["tabletop-pybullet"]
 
         with pytest.raises(ValueError) as excinfo:
             load_suite_from_string(self._PYBULLET_YAML)
         msg = str(excinfo.value)
         assert "tabletop-pybullet" in msg
         assert "extra is not installed" in msg
+        assert "uv sync --extra pybullet" in msg
+        assert "pip install 'gauntlet[pybullet]'" in msg
+
+    def test_subpackage_import_raises_install_hint_when_pybullet_missing(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """RFC-005 §9.1 case 12 — direct import of the subpackage must
+        surface the ``uv sync --extra pybullet`` hint when
+        :mod:`pybullet` itself is unavailable.
+        """
+        import importlib
+        import sys
+
+        monkeypatch.setitem(sys.modules, "pybullet", None)
+        monkeypatch.setitem(sys.modules, "pybullet_data", None)
+        for mod in list(sys.modules):
+            if mod == "gauntlet.env.pybullet" or mod.startswith(
+                "gauntlet.env.pybullet."
+            ):
+                monkeypatch.delitem(sys.modules, mod, raising=False)
+
+        with pytest.raises(ImportError) as excinfo:
+            importlib.import_module("gauntlet.env.pybullet")
+        msg = str(excinfo.value)
         assert "uv sync --extra pybullet" in msg
         assert "pip install 'gauntlet[pybullet]'" in msg
 
