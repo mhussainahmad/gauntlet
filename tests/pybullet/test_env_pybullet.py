@@ -1,9 +1,12 @@
-"""PyBullet backend tests — step-7 subset (RFC-005 §9.1).
+"""PyBullet backend tests — import + registration + rollout smoke.
 
-Only the import / registration round-trip tests live here today. The
-full per-axis + determinism + rollout battery (RFC-005 §9.1 cases 1 to 11)
-lands with steps 10 and 11 of the RFC-005 §13 checklist, once the real
-backend body replaces the step-7 stub.
+Covers RFC-005 §9.1 cases 1, 2, 9, 10 — plus a shared asset-resolution
+test. The determinism battery (cases 3-6) lives in
+tests/pybullet/test_determinism_pybullet.py; the per-axis table
+(cases 7, 8) lives in tests/pybullet/test_perturbation_pybullet.py.
+Case 12 (missing-extra ImportError) lives in tests/test_suite.py to
+avoid pulling the ``@pytest.mark.pybullet`` gate on a test whose
+premise is "pybullet is not installed."
 
 All tests are marked ``@pytest.mark.pybullet`` and de-selected from the
 default ``pytest`` run by ``pyproject.toml``. Install the extra + run:
@@ -14,7 +17,14 @@ default ``pytest`` run by ``pyproject.toml``. Install the extra + run:
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
 import pytest
+
+from gauntlet.env.base import GauntletEnv
+
+if TYPE_CHECKING:
+    from gauntlet.policy.base import Policy
 
 pytestmark = pytest.mark.pybullet
 
@@ -77,6 +87,111 @@ def test_pybullet_backend_declares_visual_only_axes() -> None:
     )
     assert expected_visual == PyBulletTabletopEnv.VISUAL_ONLY_AXES
     assert expected_all == PyBulletTabletopEnv.AXIS_NAMES
+
+
+def make_fast_pybullet_env() -> GauntletEnv:
+    """Module-level factory for Runner.run (pickle-friendly under spawn).
+
+    Matches the ``make_fast_env`` pattern in tests/test_runner.py — short
+    max_steps keeps case-10 runtime under a second on CI.
+    """
+    from gauntlet.env.pybullet import PyBulletTabletopEnv
+
+    return cast(GauntletEnv, PyBulletTabletopEnv(max_steps=10))
+
+
+def make_random_policy() -> Policy:
+    """Module-level policy factory."""
+    from gauntlet.policy.random import RandomPolicy
+
+    return RandomPolicy(action_dim=7, seed=None)
+
+
+def test_ten_rollouts_with_random_policy_no_crash_no_nan() -> None:
+    """RFC-005 §9.1 case 9 — 10 rollouts with RandomPolicy on seeds 0..9.
+
+    No crashes, no NaN/Inf in observations, cube_pos[2] stays roughly
+    on the table (catches the "cube fell through the floor via bad
+    collision mask" failure mode).
+    """
+    import numpy as np
+
+    from gauntlet.env.pybullet import PyBulletTabletopEnv
+    from gauntlet.policy.random import RandomPolicy
+
+    # Semi-loose floor check — the table top is at z = 0.42; below
+    # 0.40 means the cube escaped through the table.
+    _FLOOR_CHECK = 0.40
+
+    for seed in range(10):
+        env = PyBulletTabletopEnv(max_steps=20)
+        try:
+            policy = RandomPolicy(action_dim=7, seed=seed)
+            obs, _ = env.reset(seed=seed)
+            # Up to 20 steps — break early on terminate/truncate.
+            for _ in range(20):
+                action = policy.act(obs)
+                obs, _, terminated, truncated, _ = env.step(action)
+                for k, v in obs.items():
+                    arr = np.asarray(v, dtype=np.float64)
+                    assert np.all(np.isfinite(arr)), f"seed {seed}: {k!r} not finite"
+                cube_z = float(np.asarray(obs["cube_pos"], dtype=np.float64)[2])
+                assert cube_z >= _FLOOR_CHECK, (
+                    f"seed {seed}: cube fell through table (z={cube_z:.3f})"
+                )
+                if terminated or truncated:
+                    break
+        finally:
+            env.close()
+
+
+def test_runner_integration_tabletop_pybullet_baseline_sweep() -> None:
+    """RFC-005 §9.1 case 10 — a small suite (1 axis, 2 steps, 2 eps)
+    drives end-to-end through :class:`gauntlet.runner.Runner` using the
+    PyBullet backend via the Protocol seam; Episodes pass the Episode
+    schema validator.
+    """
+    from gauntlet.runner import Runner
+    from gauntlet.runner.episode import Episode
+    from gauntlet.suite.schema import AxisSpec, Suite
+
+    suite = Suite.model_validate(
+        {
+            "name": "pybullet-runner-smoke",
+            "env": "tabletop-pybullet",
+            "episodes_per_cell": 2,
+            "seed": 99,
+            "axes": {
+                "object_initial_pose_x": {
+                    "low": -0.05,
+                    "high": 0.05,
+                    "steps": 2,
+                },
+            },
+        }
+    )
+    # 2 steps x 2 episodes_per_cell = 4 rollouts.
+    runner = Runner(n_workers=1, env_factory=make_fast_pybullet_env)
+    episodes = runner.run(
+        policy_factory=make_random_policy,
+        suite=suite,
+    )
+
+    assert len(episodes) == 4
+    # Every return value validates as a real Episode (not a subclass).
+    for ep in episodes:
+        assert isinstance(ep, Episode)
+        Episode.model_validate(ep.model_dump())
+        # perturbation_config carries the cell's axis value.
+        assert "object_initial_pose_x" in ep.perturbation_config
+        # perturbation_config values are within the sweep bounds.
+        val = ep.perturbation_config["object_initial_pose_x"]
+        assert AxisSpec(low=-0.05, high=0.05, steps=2).low is not None
+        assert -0.05 - 1e-9 <= val <= 0.05 + 1e-9
+
+    # Episodes from two distinct cells: two unique axis values.
+    unique_vals = {ep.perturbation_config["object_initial_pose_x"] for ep in episodes}
+    assert len(unique_vals) == 2
 
 
 def test_texture_assets_resolve_via_importlib_resources() -> None:
