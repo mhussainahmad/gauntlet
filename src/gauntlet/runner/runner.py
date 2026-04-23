@@ -9,7 +9,7 @@ Cells are run in parallel across processes via a ``spawn``-context
 :class:`multiprocessing.pool.Pool`; for ``n_workers == 1`` we skip the
 pool and execute in-process to keep stack traces readable and to dodge
 spawn overhead on small suites. Both paths share the same per-item
-function (:func:`gauntlet.runner.worker._execute_one`), so the n=1 and
+function (:func:`gauntlet.runner.worker.execute_one`), so the n=1 and
 n=N outputs are bit-identical for the same inputs.
 
 Seed derivation
@@ -67,7 +67,7 @@ from gauntlet.runner.episode import Episode
 from gauntlet.runner.worker import (
     WorkerInitArgs,
     WorkItem,
-    _execute_one,
+    execute_one,
     pool_initializer,
     run_work_item,
 )
@@ -263,11 +263,11 @@ class Runner:
 
         Used when ``n_workers == 1``. Produces Episodes that are
         bit-identical to the multi-worker path for the same inputs
-        because ``_execute_one`` is the same function in both cases.
+        because ``execute_one`` is the same function in both cases.
         """
         env = self._env_factory()
         try:
-            return [_execute_one(env, policy_factory, item) for item in work_items]
+            return [execute_one(env, policy_factory, item) for item in work_items]
         finally:
             env.close()
 
