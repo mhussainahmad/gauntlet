@@ -59,13 +59,11 @@ from __future__ import annotations
 import multiprocessing as mp
 from collections.abc import Callable
 from pathlib import Path
-from typing import cast
 
 import numpy as np
 
 from gauntlet.env.base import GauntletEnv
-from gauntlet.env.registry import registered_envs
-from gauntlet.env.tabletop import TabletopEnv
+from gauntlet.env.registry import get_env_factory, registered_envs
 from gauntlet.policy.base import Policy
 from gauntlet.runner.episode import Episode
 from gauntlet.runner.worker import (
@@ -78,24 +76,6 @@ from gauntlet.runner.worker import (
 from gauntlet.suite.schema import Suite
 
 __all__ = ["Runner"]
-
-
-def _default_env_factory() -> GauntletEnv:
-    """Default env factory: build a stock :class:`TabletopEnv`.
-
-    Returns a :class:`GauntletEnv` — the typed Protocol — because the
-    worker dispatches through the Protocol. The concrete type remains
-    :class:`TabletopEnv` so the no-extras / Phase-1 default is unchanged.
-    The ``cast`` documents the deliberate widening at the seam:
-    :class:`TabletopEnv` satisfies the Protocol structurally at runtime
-    (verified by ``tests/test_env.py::TestProtocolConformance``), but
-    mypy treats the narrower ``action_space: Box`` /
-    ``observation_space: Dict`` annotations as invariant with the
-    Protocol's ``Space[Any]`` declaration.
-
-    Module-level so it pickles cleanly under the ``spawn`` start method.
-    """
-    return cast(GauntletEnv, TabletopEnv())
 
 
 class Runner:
@@ -121,11 +101,16 @@ class Runner:
                 in-process fast path; ``>= 2`` uses a multiprocessing
                 pool. Must be ``>= 1``.
             env_factory: Zero-arg factory returning a :class:`GauntletEnv`.
-                Defaults to :func:`_default_env_factory` (MuJoCo
-                ``TabletopEnv``). Must be pickle-friendly (module-level
-                fn or class) when ``n_workers >= 2`` because the
-                ``spawn`` start method pickles it across the process
-                boundary.
+                When ``None`` (the default), :meth:`run` dispatches via
+                :func:`gauntlet.env.registry.get_env_factory` on
+                ``suite.env`` — so a ``tabletop-pybullet`` suite picks
+                up :class:`PyBulletTabletopEnv`, not MuJoCo's
+                :class:`TabletopEnv`. Supply an explicit factory to
+                override the registry (tests use this to inject fakes
+                or fast-config variants). Must be pickle-friendly
+                (module-level fn or class) when ``n_workers >= 2``
+                because the ``spawn`` start method pickles it across
+                the process boundary.
             start_method: multiprocessing start method.
                 ``"spawn"`` is the only safe choice with MuJoCo — fork
                 is known to leak GL contexts. We refuse other values
@@ -155,7 +140,7 @@ class Runner:
                 f"start_method must be 'spawn'; got {start_method!r}. MuJoCo is not fork-safe."
             )
         self._n_workers = n_workers
-        self._env_factory = env_factory if env_factory is not None else _default_env_factory
+        self._env_factory = env_factory
         self._start_method = start_method
         self._trajectory_dir = trajectory_dir
 
@@ -203,6 +188,15 @@ class Runner:
                 f"or import the backend subpackage before calling Runner.run()."
             )
 
+        # Resolve the env factory: a caller-supplied override wins, else
+        # dispatch via the registry on ``suite.env``. The registry path is
+        # what keeps ``gauntlet run suite.yaml`` honest — a suite declaring
+        # ``env: tabletop-pybullet`` must produce :class:`PyBulletTabletopEnv`,
+        # not the MuJoCo built-in.
+        env_factory = (
+            self._env_factory if self._env_factory is not None else get_env_factory(suite.env)
+        )
+
         # Ensure the trajectory dir exists exactly once on the main
         # process before any worker touches it, so a common parent (even
         # on a fresh ``tmp_path``) never races across multiple workers.
@@ -211,9 +205,9 @@ class Runner:
 
         work_items = self._build_work_items(suite)
         if self._n_workers == 1:
-            episodes = self._run_in_process(policy_factory, work_items)
+            episodes = self._run_in_process(env_factory, policy_factory, work_items)
         else:
-            episodes = self._run_pool(policy_factory, work_items)
+            episodes = self._run_pool(env_factory, policy_factory, work_items)
 
         # Stable output order — independent of worker completion order.
         episodes.sort(key=lambda ep: (ep.cell_index, ep.episode_index))
@@ -294,6 +288,7 @@ class Runner:
 
     def _run_in_process(
         self,
+        env_factory: Callable[[], GauntletEnv],
         policy_factory: Callable[[], Policy],
         work_items: list[WorkItem],
     ) -> list[Episode]:
@@ -303,7 +298,7 @@ class Runner:
         bit-identical to the multi-worker path for the same inputs
         because ``execute_one`` is the same function in both cases.
         """
-        env = self._env_factory()
+        env = env_factory()
         try:
             return [
                 execute_one(env, policy_factory, item, trajectory_dir=self._trajectory_dir)
@@ -314,6 +309,7 @@ class Runner:
 
     def _run_pool(
         self,
+        env_factory: Callable[[], GauntletEnv],
         policy_factory: Callable[[], Policy],
         work_items: list[WorkItem],
     ) -> list[Episode]:
@@ -326,7 +322,7 @@ class Runner:
         """
         ctx = mp.get_context(self._start_method)
         init_args = WorkerInitArgs(
-            env_factory=self._env_factory,
+            env_factory=env_factory,
             policy_factory=policy_factory,
             trajectory_dir=self._trajectory_dir,
         )

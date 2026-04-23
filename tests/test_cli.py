@@ -724,3 +724,65 @@ def test_compare_legacy_reports_without_suite_env_still_work(
     )
     assert result.exit_code == 0, result.stderr
     assert "cross-backend" not in result.stderr.lower()
+
+
+# ----------------------------------------------------------------------
+# RFC-006 §9 bullet 1 / RFC-005 §11: ``_make_env_factory`` dispatches
+# on ``suite.env``. Pre-fix this helper hard-coded ``TabletopEnv`` and
+# silently routed ``tabletop-pybullet`` YAMLs through MuJoCo — the CLI
+# gauntlet-run dispatch bug.
+# ----------------------------------------------------------------------
+
+
+def test_make_env_factory_dispatches_on_suite_env() -> None:
+    """Unit-level regression for the CLI's ``--env-max-steps`` seam.
+
+    Registers a sentinel backend whose constructor accepts
+    ``max_steps`` (matching the real backends' kwarg surface from
+    RFC-005 §3.1 / RFC-006 §3.1), asks ``_make_env_factory`` to build
+    a ``max_steps``-wrapped factory for it, and asserts the resulting
+    zero-arg callable constructs the sentinel class — not
+    ``TabletopEnv``.
+    """
+    from collections.abc import Callable
+    from functools import partial
+    from typing import cast
+
+    from gauntlet.cli import _make_env_factory
+    from gauntlet.env.base import GauntletEnv
+    from gauntlet.env.registry import register_env
+
+    class _CliDispatchSentinelEnv:
+        def __init__(self, *, max_steps: int = 200) -> None:
+            self.max_steps = max_steps
+
+        # The rest of the GauntletEnv Protocol is not exercised here —
+        # ``_make_env_factory`` does not instantiate, and this test
+        # stops at the factory-callable level.
+
+    env_name = "_dispatch_test_env_cli"
+    register_env(env_name, cast("Callable[..., GauntletEnv]", _CliDispatchSentinelEnv))
+
+    factory = _make_env_factory(env_name, env_max_steps=17)
+
+    # ``None`` would mean "caller didn't pass --env-max-steps, defer to
+    # the Runner's registry dispatch" — not what we asked for here.
+    assert factory is not None
+    assert isinstance(factory, partial)
+
+    instance = factory()
+    assert isinstance(instance, _CliDispatchSentinelEnv)
+    assert instance.max_steps == 17
+
+
+def test_make_env_factory_none_when_no_max_steps_override() -> None:
+    """When ``--env-max-steps`` is not passed, ``_make_env_factory``
+    returns ``None`` so the Runner's own registry dispatch kicks in
+    (exercised by ``test_runner.py`` — the Runner picks the factory
+    up from ``suite.env``). The CLI must not pre-empt that with a
+    hard-coded MuJoCo default, which was the original bug shape.
+    """
+    from gauntlet.cli import _make_env_factory
+
+    # "tabletop" is registered at import time; any known name suffices.
+    assert _make_env_factory("tabletop", env_max_steps=None) is None

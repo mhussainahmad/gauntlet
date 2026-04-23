@@ -34,7 +34,7 @@ from rich.console import Console
 from rich.theme import Theme
 
 from gauntlet.env.base import GauntletEnv
-from gauntlet.env.tabletop import TabletopEnv
+from gauntlet.env.registry import get_env_factory
 from gauntlet.policy.registry import PolicySpecError, resolve_policy_factory
 from gauntlet.replay import OverrideError, parse_override, replay_one
 from gauntlet.report import Report, build_report, write_html
@@ -202,23 +202,32 @@ def _episodes_to_dicts(episodes: list[Episode]) -> list[dict[str, Any]]:
     return [ep.model_dump(mode="json") for ep in episodes]
 
 
-def _make_env_factory(env_max_steps: int | None) -> Callable[[], GauntletEnv] | None:
+def _make_env_factory(
+    suite_env: str,
+    env_max_steps: int | None,
+) -> Callable[[], GauntletEnv] | None:
     """Build an env factory honouring the hidden ``--env-max-steps`` knob.
 
-    Returns ``None`` when the user didn't override max_steps so the
-    Runner uses its own default. ``functools.partial`` over the class
-    pickles cleanly under ``spawn`` — important even though the test
-    suite only exercises ``-w 1``.
+    Dispatches on ``suite_env`` via the env registry so a
+    ``tabletop-pybullet`` suite actually produces
+    :class:`PyBulletTabletopEnv`, not MuJoCo's :class:`TabletopEnv`.
+    Previously this helper hard-coded ``TabletopEnv`` and the CLI
+    silently misdispatched pybullet YAMLs through MuJoCo (RFC-005 §11.2
+    / RFC-006 §9 bullet 1 — "CLI ``suite.env`` dispatch").
 
-    Return type is widened to ``GauntletEnv`` (the Runner's Protocol-typed
-    factory signature) via ``cast``. Subpackage-specific backends flow
-    through the same seam in later steps.
+    Returns ``None`` when the user didn't override ``max_steps`` so the
+    Runner's own registry dispatch kicks in unchanged. When set, the
+    factory is ``functools.partial(backend_cls, max_steps=N)`` — the
+    ``max_steps`` kwarg is part of both backends' constructor surface
+    (RFC-005 §3.1 / RFC-006 §3.1), so wrapping is backend-agnostic.
+    ``partial`` over a class pickles cleanly under ``spawn``.
     """
     if env_max_steps is None:
         return None
+    backend = get_env_factory(suite_env)
     return cast(
         "Callable[[], GauntletEnv]",
-        partial(TabletopEnv, max_steps=env_max_steps),
+        partial(backend, max_steps=env_max_steps),
     )
 
 
@@ -293,7 +302,7 @@ def run(
         int | None,
         typer.Option(
             "--env-max-steps",
-            help="(Hidden / test hook) Override TabletopEnv max_steps for fast tests.",
+            help="(Hidden / test hook) Override the backend env's max_steps for fast tests.",
             hidden=True,
             min=1,
         ),
@@ -321,7 +330,7 @@ def run(
 
     out.mkdir(parents=True, exist_ok=True)
 
-    env_factory = _make_env_factory(env_max_steps)
+    env_factory = _make_env_factory(suite.env, env_max_steps)
     runner = Runner(
         n_workers=n_workers,
         env_factory=env_factory,
@@ -849,7 +858,7 @@ def replay(
         int | None,
         typer.Option(
             "--env-max-steps",
-            help="(Hidden / test hook) Override TabletopEnv max_steps for fast tests.",
+            help="(Hidden / test hook) Override the backend env's max_steps for fast tests.",
             hidden=True,
             min=1,
         ),
@@ -908,7 +917,7 @@ def replay(
     except PolicySpecError as exc:
         raise _fail(str(exc)) from exc
 
-    env_factory = _make_env_factory(env_max_steps)
+    env_factory = _make_env_factory(suite.env, env_max_steps)
 
     try:
         replayed = replay_one(
