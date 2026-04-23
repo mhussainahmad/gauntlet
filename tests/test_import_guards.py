@@ -1,30 +1,40 @@
-"""Import-guard tests for :mod:`gauntlet.policy.huggingface` and
-:mod:`gauntlet.policy.lerobot`.
+"""Import-guard contract for extras-gated modules.
 
-These tests verify the extras-absent contract: even when the heavy deps
-(torch for HF, lerobot for the SmolVLA adapter) are missing from the
-environment, importing :mod:`gauntlet.policy` must not blow up, and
-accessing :class:`HuggingFacePolicy` / :class:`LeRobotPolicy` must raise
-a clean ``ImportError`` with the right install hint.
+Torch-/lerobot-/pybullet-free. These tests run in the default CI job
+and verify three user-visible promises:
 
-They are **unmarked** — they run in ALL three CI jobs (torch-/lerobot-free
-default job, ``hf-tests``, and ``lerobot-tests``). The default job
-enforces the contract in the environment the contract is actually about;
-the hf/lerobot jobs enforce it via ``monkeypatch.setitem(sys.modules,
-<mod>, None)`` so the same code path is exercised on a machine that
-happens to have those deps installed.
+1. The torch-free surface of :mod:`gauntlet.monitor` (schema + entropy +
+   :class:`DriftReport`) is importable without the ``[monitor]`` extra.
+2. The torch-backed symbols (StateAutoencoder, train_ae, score_drift)
+   raise a clean ``ImportError`` pointing at ``uv sync --extra monitor``
+   when torch is absent — no mystery tracebacks.
+3. ``HuggingFacePolicy`` / ``LeRobotPolicy`` raise a clean
+   ``ImportError`` with the right install hint when torch / lerobot is
+   absent, both directly and via the ``gauntlet.policy.__getattr__``
+   re-export.
 
-See docs/phase2-rfc-001-huggingface-policy.md §6 cases 1 & 2 for the HF
-guards and docs/phase2-rfc-002-lerobot-smolvla.md §6 cases 1 & 2 for the
-lerobot analogues.
+We exercise torch/lerobot absence by monkey-patching
+``sys.modules[<name>] = None`` to simulate a fresh env without the
+extra, which works regardless of whether the host venv actually has
+those packages installed.
+
+See docs/phase2-rfc-001-huggingface-policy.md §6 cases 1 & 2 for HF,
+docs/phase2-rfc-002-lerobot-smolvla.md §6 cases 1 & 2 for lerobot, and
+docs/phase2-rfc-003-drift-detector.md §6 for the monitor surface.
 """
 
 from __future__ import annotations
 
 import importlib
+import subprocess
 import sys
+from collections.abc import Iterator
 
 import pytest
+
+# ──────────────────────────────────────────────────────────────────────
+# HuggingFacePolicy / LeRobotPolicy extras-absent guards
+# ──────────────────────────────────────────────────────────────────────
 
 
 class TestImportGuards:
@@ -33,10 +43,6 @@ class TestImportGuards:
     ) -> None:
         """``HuggingFacePolicy(...)`` must raise ``ImportError`` naming
         ``uv sync --extra hf`` when torch is unavailable (RFC §6 case 1)."""
-        # Putting ``None`` in ``sys.modules`` is the documented sentinel that
-        # turns the next ``import torch`` into ImportError — we use it so this
-        # test exercises the guard regardless of whether torch is actually
-        # installed in the current env.
         monkeypatch.setitem(sys.modules, "torch", None)
         import gauntlet.policy.huggingface as hf_mod
 
@@ -45,9 +51,6 @@ class TestImportGuards:
             with pytest.raises(ImportError, match="uv sync --extra hf"):
                 hf_mod.HuggingFacePolicy(repo_id="dummy/repo", instruction="pick up the red cube")
         finally:
-            # Restore normal module state even on failure, so a broken run
-            # doesn't poison ``sys.modules`` for every subsequent test in
-            # this process.
             monkeypatch.delitem(sys.modules, "torch", raising=False)
             importlib.reload(hf_mod)
 
@@ -56,18 +59,13 @@ class TestImportGuards:
     ) -> None:
         """``from gauntlet.policy import HuggingFacePolicy`` must fail loudly
         at attribute-access time when torch is missing — NOT at
-        ``import gauntlet.policy`` time, which would break the torch-free
-        install promise for every other policy user (RFC §6 case 2).
+        ``import gauntlet.policy`` time (RFC §6 case 2).
         """
         monkeypatch.setitem(sys.modules, "torch", None)
         import gauntlet.policy as pkg
 
         try:
-            # ``from gauntlet.policy import RandomPolicy`` must still work.
             assert pkg.RandomPolicy is not None
-
-            # Attribute access (which is what ``from pkg import HuggingFacePolicy``
-            # performs) is the point of failure.
             with pytest.raises(ImportError, match="uv sync --extra hf"):
                 pkg.__getattr__("HuggingFacePolicy")
         finally:
@@ -90,8 +88,6 @@ class TestImportGuards:
                     instruction="pick up the red cube",
                 )
         finally:
-            # Restore normal module state so a broken run can't poison
-            # ``sys.modules`` for every subsequent test.
             monkeypatch.delitem(sys.modules, "lerobot", raising=False)
             importlib.reload(lr_mod)
 
@@ -99,15 +95,109 @@ class TestImportGuards:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """``from gauntlet.policy import LeRobotPolicy`` must fail loudly
-        at attribute-access time when lerobot is missing — NOT at
-        ``import gauntlet.policy`` time (RFC-002 §6 case 2)."""
+        at attribute-access time when lerobot is missing (RFC-002 §6 case 2)."""
         monkeypatch.setitem(sys.modules, "lerobot", None)
         import gauntlet.policy as pkg
 
         try:
-            # Non-lerobot policies must still be reachable.
             assert pkg.RandomPolicy is not None
             with pytest.raises(ImportError, match="uv sync --extra lerobot"):
                 pkg.__getattr__("LeRobotPolicy")
         finally:
             monkeypatch.delitem(sys.modules, "lerobot", raising=False)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Drift-detector (``[monitor]`` extra) guards
+# ──────────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def torch_absent(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Simulate ``torch`` not being installed for monitor guards.
+
+    Setting ``sys.modules["torch"] = None`` makes future ``import torch``
+    calls raise ``ImportError`` without actually uninstalling the
+    package — safe across CI jobs that may have torch in their venv.
+    We also flush the three lazy monitor modules from the module cache
+    so the guard's ``try/except`` block re-runs on next import.
+    """
+    to_flush = [
+        "torch",
+        "gauntlet.monitor.ae",
+        "gauntlet.monitor.train",
+        "gauntlet.monitor.score",
+    ]
+    for name in to_flush:
+        if name in sys.modules:
+            monkeypatch.delitem(sys.modules, name, raising=False)
+    monkeypatch.setitem(sys.modules, "torch", None)
+    yield
+
+
+def test_monitor_torch_free_imports_always_work() -> None:
+    """DriftReport + PerEpisodeDrift + action_entropy never touch torch."""
+    from gauntlet.monitor import DriftReport, PerEpisodeDrift, action_entropy
+    from gauntlet.monitor.entropy import ActionEntropyStats
+    from gauntlet.monitor.schema import DriftReport as DriftReport2
+    from gauntlet.monitor.schema import PerEpisodeDrift as PerEpisodeDrift2
+
+    assert DriftReport is DriftReport2
+    assert PerEpisodeDrift is PerEpisodeDrift2
+    assert callable(action_entropy)
+    assert ActionEntropyStats.__name__ == "ActionEntropyStats"
+
+
+def test_state_autoencoder_raises_install_hint_when_torch_absent(
+    torch_absent: None,
+) -> None:
+    """``from gauntlet.monitor import StateAutoencoder`` fails loudly."""
+    monitor = importlib.import_module("gauntlet.monitor")
+    with pytest.raises(ImportError, match="uv sync --extra monitor"):
+        monitor.StateAutoencoder  # noqa: B018
+
+
+def test_train_ae_raises_install_hint_when_torch_absent(
+    torch_absent: None,
+) -> None:
+    monitor = importlib.import_module("gauntlet.monitor")
+    with pytest.raises(ImportError, match="uv sync --extra monitor"):
+        monitor.train_ae  # noqa: B018
+
+
+def test_score_drift_raises_install_hint_when_torch_absent(
+    torch_absent: None,
+) -> None:
+    monitor = importlib.import_module("gauntlet.monitor")
+    with pytest.raises(ImportError, match="uv sync --extra monitor"):
+        monitor.score_drift  # noqa: B018
+
+
+def test_cli_monitor_train_help_exits_zero() -> None:
+    """``gauntlet monitor train --help`` must not require torch."""
+    result = subprocess.run(
+        [sys.executable, "-m", "gauntlet.cli", "monitor", "train", "--help"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode == 0, (
+        f"exit={result.returncode}\nstdout={result.stdout}\nstderr={result.stderr}"
+    )
+    assert "trajectory_dir" in result.stdout.lower() or "TRAJECTORY_DIR" in result.stdout
+
+
+def test_cli_monitor_score_help_exits_zero() -> None:
+    """Sibling sanity-check on the ``score`` subcommand."""
+    result = subprocess.run(
+        [sys.executable, "-m", "gauntlet.cli", "monitor", "score", "--help"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode == 0, (
+        f"exit={result.returncode}\nstdout={result.stdout}\nstderr={result.stderr}"
+    )
+    assert "--ae" in result.stdout

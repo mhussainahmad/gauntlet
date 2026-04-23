@@ -32,10 +32,20 @@ out/
 results/
 *.results.json
 
+# Drift-detector artefacts (trajectory dumps, AE weights).
+# Test runs produce these under tmp paths but also land in ad-hoc local
+# directories when users follow the quickstart; never commit them.
+*.npz
+*.pt
+*.pth
+*.safetensors
+
+# Local ruvector / AgentDB state (untracked tooling DB).
+ruvector.db
+
 # Local agent / Claude Code infrastructure (runtime state, not project code)
 .claude/
 .claude-flow/
 .swarm/
 .mcp.json
 CLAUDE.md
-ruvector.db
