@@ -30,6 +30,22 @@ dependencies = [
     "pyyaml>=6.0,<7",
 ]
 
+# Optional extras — end-user-facing. Keeps core torch-free per spec §6.
+# See docs/phase2-rfc-001-huggingface-policy.md §3.
+[project.optional-dependencies]
+hf = [
+    # Version floors mirror openvla/requirements-min.txt (Apr 2026) with
+    # ceilings one major above to catch surprise breakage early.
+    "torch>=2.2,<3",
+    "transformers>=4.40,<5",
+    "timm>=0.9.10,<2",
+    "tokenizers>=0.19,<1",
+    "pillow>=10.0,<12",
+    # flash-attn is intentionally NOT listed: it requires CUDA at pip-install
+    # time and breaks CPU-only installs. Users opt in separately per the
+    # HuggingFacePolicy docstring.
+]
+
 [project.scripts]
 gauntlet = "gauntlet.cli:app"
 
@@ -45,6 +61,11 @@ dev = [
     "mypy>=1.11,<2",
     "types-pyyaml>=6.0,<7",
     "pandas-stubs>=2.2,<3",
+]
+# CI-only group so the HF pytest job can pull dev + hf together.
+hf-dev = [
+    {include-group = "dev"},
+    "pytest-mock>=3.12,<4",
 ]
 
 [build-system]
@@ -98,6 +119,12 @@ ignore_missing_imports = true
 module = ["gymnasium", "gymnasium.*"]
 ignore_missing_imports = true
 
+# Optional HF extras — let mypy import-check ``policy/huggingface.py`` even
+# when torch/transformers/PIL aren't installed (default job runs torch-free).
+[[tool.mypy.overrides]]
+module = ["torch", "torch.*", "transformers", "transformers.*", "PIL", "PIL.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 minversion = "8.0"
 addopts = [
@@ -108,6 +135,9 @@ addopts = [
     "--cov-report=term-missing",
 ]
 testpaths = ["tests"]
+markers = [
+    "hf: tests that require the [hf] extra (torch, transformers, PIL)",
+]
 
 [tool.coverage.run]
 source = ["gauntlet"]
