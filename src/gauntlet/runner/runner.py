@@ -238,6 +238,14 @@ class Runner:
                         perturbation_values=dict(cell.values),
                         episode_seq=episode_seqs[ep_idx],
                         master_seed=master_seed_echo,
+                        # Topology echo for trajectory replay (see
+                        # docs/phase2-rfc-004-trajectory-replay.md §3).
+                        # These two integers are the minimum needed to
+                        # reconstruct the spawn tree from the Episode
+                        # alone, even if the suite YAML is edited
+                        # between run and replay.
+                        n_cells=n_cells,
+                        episodes_per_cell=eps_per_cell,
                     )
                 )
         return items
