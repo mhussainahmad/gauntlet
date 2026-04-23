@@ -221,9 +221,7 @@ def test_restore_baseline_reverts_queued_perturbations_next_episode() -> None:
         try:
             obs_ref, _ = env2.reset(seed=5)
             assert np.allclose(obs_b["cube_pos"], obs_ref["cube_pos"], atol=1e-9)
-            assert np.allclose(
-                obs_b["target_pos"], obs_ref["target_pos"], atol=1e-9
-            )
+            assert np.allclose(obs_b["target_pos"], obs_ref["target_pos"], atol=1e-9)
         finally:
             env2.close()
     finally:
