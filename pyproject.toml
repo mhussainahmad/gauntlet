@@ -45,6 +45,17 @@ hf = [
     # time and breaks CPU-only installs. Users opt in separately per the
     # HuggingFacePolicy docstring.
 ]
+# Independent extra for the lerobot / SmolVLA adapter — see
+# docs/phase2-rfc-002-lerobot-smolvla.md §3. ``lerobot[smolvla]`` transitively
+# pulls torch, torchvision, opencv-python-headless, einops, safetensors,
+# accelerate, huggingface_hub and the SmolVLM2 backbone via transformers;
+# keep version floors aligned with lerobot's own floors (April 2026). No
+# ceiling on ``lerobot`` itself because its public API is not yet stable.
+lerobot = [
+    "lerobot[smolvla]>=0.4,<1",
+    "transformers>=4.40,<5",
+    "pillow>=10.0,<12",
+]
 
 [project.scripts]
 gauntlet = "gauntlet.cli:app"
@@ -64,6 +75,11 @@ dev = [
 ]
 # CI-only group so the HF pytest job can pull dev + hf together.
 hf-dev = [
+    {include-group = "dev"},
+    "pytest-mock>=3.12,<4",
+]
+# CI-only group so the lerobot pytest job can pull dev + lerobot together.
+lerobot-dev = [
     {include-group = "dev"},
     "pytest-mock>=3.12,<4",
 ]
@@ -125,6 +141,12 @@ ignore_missing_imports = true
 module = ["torch", "torch.*", "transformers", "transformers.*", "PIL", "PIL.*"]
 ignore_missing_imports = true
 
+# Optional lerobot extras — let mypy import-check ``policy/lerobot.py`` even
+# when lerobot isn't installed (default job runs torch-/lerobot-free).
+[[tool.mypy.overrides]]
+module = ["lerobot", "lerobot.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 minversion = "8.0"
 addopts = [
@@ -137,6 +159,7 @@ addopts = [
 testpaths = ["tests"]
 markers = [
     "hf: tests that require the [hf] extra (torch, transformers, PIL)",
+    "lerobot: tests that require the [lerobot] extra (lerobot, torch, PIL)",
 ]
 
 [tool.coverage.run]
