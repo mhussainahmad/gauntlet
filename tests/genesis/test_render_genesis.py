@@ -129,6 +129,60 @@ def test_reset_seed_produces_byte_identical_image() -> None:
 # ------------------------------------------------- cross-backend shape parity
 
 
+# --------------------------------------------- runner-level smoke with rendering
+
+
+def test_random_policy_smoke_with_rendering() -> None:
+    """RFC-008 §7 case 8 — end-to-end smoke: a Runner drives
+    :class:`RandomPolicy` across a tiny cosmetic-only grid with
+    ``render_in_obs=True`` and the rollout completes cleanly.
+
+    Library-level integration — not via the CLI. Asserts (a) the
+    Runner can pickle the env factory with rendering enabled, (b)
+    every emitted :class:`Episode` has a concrete ``success``
+    verdict, (c) the sweep actually produces rollouts rather than
+    being rejected at load time (the ``VISUAL_ONLY_AXES`` relaxation
+    from step 8).
+
+    ``max_steps=3`` keeps each rollout under a second after the
+    first scene build; the whole test budget lands well under the
+    ``genesis-tests`` CI job's time allowance.
+    """
+    from functools import partial
+
+    from gauntlet.env.genesis import GenesisTabletopEnv
+    from gauntlet.policy import RandomPolicy
+    from gauntlet.runner import Runner
+    from gauntlet.suite import AxisSpec, Suite
+
+    env_factory = partial(
+        GenesisTabletopEnv,
+        max_steps=3,
+        render_in_obs=True,
+        render_size=(64, 64),
+    )
+    suite = Suite(
+        name="genesis-render-smoke",
+        env="tabletop-genesis",
+        seed=0,
+        episodes_per_cell=1,
+        axes={
+            "lighting_intensity": AxisSpec(values=[0.5, 1.5]),
+            "object_texture": AxisSpec(values=[0.0, 1.0]),
+        },
+    )
+    runner = Runner(n_workers=1, env_factory=env_factory)
+    episodes = runner.run(
+        policy_factory=partial(RandomPolicy, action_dim=7),
+        suite=suite,
+    )
+
+    # 2 lighting x 2 texture = 4 cells, 1 episode per cell = 4 rollouts.
+    assert len(episodes) == 4
+    for ep in episodes:
+        assert isinstance(ep.success, bool)
+
+
 # ------------------------------------------------- axis sensitivity (four cases)
 
 

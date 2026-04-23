@@ -43,26 +43,26 @@ different trajectories. Running `gauntlet compare` across backends
 measures simulator drift, not policy regression; the CLI requires
 `--allow-cross-backend` to proceed.
 
-Image observations are available on the MuJoCo and PyBullet backends
-via `render_in_obs=True` / `render_size=(H, W)` on the env constructor
-(`TabletopEnv` or `PyBulletTabletopEnv`). PyBullet uses a headless,
-deterministic TINY rasteriser; the emitted `obs["image"]` Box has
-shape / dtype / bounds byte-identical to MuJoCo's, so VLA adapters
-(OpenVLA, SmolVLA) work on either backend by swapping only the env
-factory. Pixel values explicitly differ (different rasterisers —
-semantic parity only). The Genesis backend is state-only on this
-first cut; its four cosmetic axes (`lighting_intensity`,
-`camera_offset_{x,y}`, `object_texture`) are declared `VISUAL_ONLY`
-pending a follow-up rendering RFC — the three state-affecting axes
-(`object_initial_pose_{x,y}`, `distractor_count`) produce
-observable deltas today.
+Image observations are available on all three backends via
+`render_in_obs=True` / `render_size=(H, W)` on the env constructor
+(`TabletopEnv`, `PyBulletTabletopEnv`, or `GenesisTabletopEnv`).
+PyBullet uses a headless, deterministic TINY rasteriser; Genesis uses
+its default CPU Rasterizer (pyrender-backed). The emitted `obs["image"]`
+Box has shape / dtype / bounds byte-identical across backends, so VLA
+adapters (OpenVLA, SmolVLA) work on any of them by swapping only the
+env factory. Pixel values explicitly differ (different rasterisers —
+semantic parity only). All seven perturbation axes produce observable
+deltas on the rendered image on every backend; `VISUAL_ONLY_AXES` is
+empty everywhere.
 
 See [`docs/phase2-rfc-005-pybullet-adapter.md`](./docs/phase2-rfc-005-pybullet-adapter.md)
 for the full PyBullet backend design,
 [`docs/phase2-rfc-006-pybullet-rendering.md`](./docs/phase2-rfc-006-pybullet-rendering.md)
-for PyBullet's image-observation follow-up, and
+for PyBullet's image-observation follow-up,
 [`docs/phase2-rfc-007-genesis-adapter.md`](./docs/phase2-rfc-007-genesis-adapter.md)
-for the Genesis backend design.
+for the Genesis backend design, and
+[`docs/phase2-rfc-008-genesis-rendering.md`](./docs/phase2-rfc-008-genesis-rendering.md)
+for the Genesis image-observation follow-up.
 
 ## Quickstart
 
