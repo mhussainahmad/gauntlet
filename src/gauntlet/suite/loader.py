@@ -11,21 +11,35 @@ turns schema violations into :class:`pydantic.ValidationError`. The
 ``Any`` returned by :func:`yaml.safe_load` is contained at the boundary
 — we validate the raw mapping and hand a typed :class:`Suite` back to
 callers.
+
+For backends that live behind optional extras (RFC-005 §11.2), the
+loader triggers the canonical module import after pydantic validation
+and converts an :class:`ImportError` / :class:`ModuleNotFoundError`
+into a user-facing install-hint error. The schema already accepts the
+matching ``env:`` key via :data:`BUILTIN_BACKEND_IMPORTS` so the user
+sees "extra not installed" rather than "unknown env".
 """
 
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
 from typing import Any, cast
 
 import yaml
 
-from gauntlet.suite.schema import Suite
+from gauntlet.env.registry import registered_envs
+from gauntlet.suite.schema import BUILTIN_BACKEND_IMPORTS, Suite
 
 __all__ = [
     "load_suite",
     "load_suite_from_string",
 ]
+
+
+_EXTRA_FOR_MODULE: dict[str, str] = {
+    "gauntlet.env.pybullet": "pybullet",
+}
 
 
 def load_suite(path: Path | str) -> Suite:
@@ -73,4 +87,57 @@ def _validate(raw: Any, *, source: str) -> Suite:
     # validation pipeline narrows everything field-by-field, so we cast
     # once here to hand off a typed mapping.
     data = cast(dict[str, Any], raw)
-    return Suite.model_validate(data)
+    suite = Suite.model_validate(data)
+    _ensure_backend_registered(suite.env)
+    return suite
+
+
+def _ensure_backend_registered(env_name: str) -> None:
+    """Import the subpackage that registers ``env_name`` if needed.
+
+    The Suite schema accepts any key in :data:`BUILTIN_BACKEND_IMPORTS`
+    as a valid ``env:`` — those backends register themselves when their
+    subpackage is imported. We trigger that import here, ONCE, at load
+    time so worker processes inherit the populated registry via fork.
+
+    Behaviour:
+
+    * Already registered → no-op.
+    * Known built-in → attempt the matching import. On success, expect
+      the module's ``__init__`` to call ``register_env`` and confirm.
+    * :class:`ImportError` / :class:`ModuleNotFoundError` → re-raise as
+      a clear user-facing error with the ``uv sync --extra X`` hint.
+    * Unknown name after a successful import → raise a generic
+      ``unknown env`` error listing the currently-registered set
+      (defence-in-depth; schema should have rejected this already).
+    """
+    if env_name in registered_envs():
+        return
+
+    module_path = BUILTIN_BACKEND_IMPORTS.get(env_name)
+    if module_path is None:
+        # Defence in depth — schema validation should have rejected this
+        # already, but a misuse (direct Suite() construction bypassing
+        # validate) must still surface a clear error.
+        raise ValueError(
+            f"unknown env {env_name!r}; registered: {sorted(registered_envs())}",
+        )
+
+    extra = _EXTRA_FOR_MODULE.get(module_path, env_name)
+    try:
+        importlib.import_module(module_path)
+    except ImportError as exc:
+        raise ValueError(
+            f"env {env_name!r}: the matching extra is not installed.\n"
+            f"Install with:\n"
+            f"    uv sync --extra {extra}\n"
+            f"or, for a plain pip env:\n"
+            f"    pip install 'gauntlet[{extra}]'",
+        ) from exc
+
+    if env_name not in registered_envs():
+        raise ValueError(
+            f"env {env_name!r}: backend module {module_path!r} imported "
+            f"but did not call register_env({env_name!r}, ...). "
+            f"This is a backend-packaging bug.",
+        )
