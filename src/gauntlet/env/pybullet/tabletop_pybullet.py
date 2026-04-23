@@ -83,6 +83,20 @@ _DISTRACTOR_BASELINE_XY = np.array(
 
 _LARGE_CONSTRAINT_FORCE: float = 1000.0
 
+# Camera + light constants for the headless render path (RFC-006 §3.4).
+# Semantic (not pixel) parity with the MuJoCo ``main`` camera in
+# ``assets/tabletop.xml`` — same eye position, same target region, same
+# light direction / ambient coefficient. Cross-backend numerical pixel
+# parity is explicitly NOT a goal (RFC-005 §7.4).
+_CAM_EYE_BASELINE: tuple[float, float, float] = (0.6, -0.6, 0.8)
+_CAM_TARGET: tuple[float, float, float] = (0.0, 0.0, _TABLE_TOP_Z)
+_CAM_UP: tuple[float, float, float] = (0.0, 0.0, 1.0)
+_CAM_FOV: float = 45.0
+_CAM_NEAR: float = 0.01
+_CAM_FAR: float = 5.0
+_CAM_LIGHT_AMBIENT: float = 0.3  # matches MuJoCo headlight ambient
+_DEFAULT_RENDER_SIZE: tuple[int, int] = (224, 224)  # matches TabletopEnv
+
 
 def _xyzw_to_wxyz(q: tuple[float, float, float, float]) -> NDArray[np.float64]:
     """PyBullet native (x, y, z, w) → MuJoCo (w, x, y, z) order. See §7.3."""
