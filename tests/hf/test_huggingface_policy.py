@@ -101,20 +101,40 @@ class TestImportGuards:
 
         The re-export in ``gauntlet.policy.__init__`` uses a module-level
         ``__getattr__`` so ``from gauntlet.policy import RandomPolicy``
-        still works on torch-free installs; only accessing
-        ``HuggingFacePolicy`` pulls the submodule in (which may then
-        raise its own ``ImportError`` with the install hint).
+        still works on torch-free installs. Accessing
+        ``HuggingFacePolicy`` is what triggers the torch presence check
+        and raises ``ImportError(_HF_INSTALL_HINT)`` at attribute-access
+        time (RFC §6 case 2).
         """
         import gauntlet.policy as pkg
 
         # RandomPolicy must be reachable even if torch is mocked out.
         assert pkg.RandomPolicy is not None
-        # Unknown attr raises AttributeError, not ImportError. (``getattr``
-        # routes through the module-level ``__getattr__`` so mypy is happy
-        # with a dynamic lookup here.)
+        # Unknown attr raises AttributeError, not ImportError.
         with pytest.raises(AttributeError, match="HuggingNothingPolicy"):
-            # Trigger ``__getattr__`` with a name we know does not exist.
             pkg.__getattr__("HuggingNothingPolicy")
+
+    def test_reexport_raises_install_hint_at_attribute_access(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``from gauntlet.policy import HuggingFacePolicy`` must fail loudly
+        at attribute-access time when the ``[hf]`` extra is missing — NOT
+        at ``import gauntlet.policy`` time, which would break the
+        torch-free install promise for every other policy user.
+        """
+        # Sentinel-None in sys.modules makes the next ``import torch`` raise.
+        monkeypatch.setitem(sys.modules, "torch", None)
+        import gauntlet.policy as pkg
+
+        # ``from gauntlet.policy import RandomPolicy`` must still work.
+        assert pkg.RandomPolicy is not None
+
+        # Attribute access (which is what ``from pkg import HuggingFacePolicy``
+        # performs) is the point of failure.
+        with pytest.raises(ImportError, match="uv sync --extra hf"):
+            pkg.__getattr__("HuggingFacePolicy")
+
+        monkeypatch.delitem(sys.modules, "torch", raising=False)
 
 
 # --------------------------------------------------------------------- case 3
