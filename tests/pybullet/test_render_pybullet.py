@@ -135,9 +135,9 @@ class TestRenderDeterminism:
             for i, a in enumerate(actions):
                 obs_a, *_ = env_a.step(a)
                 obs_b, *_ = env_b.step(a)
-                assert np.array_equal(
-                    obs_a["image"], obs_b["image"]
-                ), f"images diverged at step {i}"
+                assert np.array_equal(obs_a["image"], obs_b["image"]), (
+                    f"images diverged at step {i}"
+                )
         finally:
             env_a.close()
             env_b.close()
@@ -222,6 +222,7 @@ class TestCosmeticAxisSensitivity:
             assert not np.array_equal(obs_none["image"], obs_some["image"])
         finally:
             env.close()
+
 
 class TestCrossBackendShapeParity:
     """``obs["image"]`` Box spec must match TabletopEnv byte-for-byte.
