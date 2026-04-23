@@ -138,19 +138,17 @@ def test_axis_names_are_canonical_seven(env: GenesisTabletopEnv) -> None:
     assert expected == type(e).AXIS_NAMES
 
 
-def test_visual_only_axes_are_four_cosmetic(env: GenesisTabletopEnv) -> None:
-    """State-only first cut — the four cosmetic axes are VISUAL_ONLY
-    until the follow-up rendering RFC (RFC-007 §6.6)."""
-    e = env
-    expected = frozenset(
-        {
-            "lighting_intensity",
-            "camera_offset_x",
-            "camera_offset_y",
-            "object_texture",
-        }
-    )
-    assert expected == type(e).VISUAL_ONLY_AXES
+def test_visual_only_axes_is_empty_post_rfc_008(env: GenesisTabletopEnv) -> None:
+    """Post-RFC-008 — cosmetic axes are observable via
+    ``obs["image"]`` when ``render_in_obs=True``, so
+    ``VISUAL_ONLY_AXES`` drops to the empty frozenset. Parity with
+    ``TabletopEnv`` and (post-RFC-006) ``PyBulletTabletopEnv``.
+
+    Was ``test_visual_only_axes_are_four_cosmetic`` before RFC-008;
+    the assertion flipped when the rendering path landed.
+    """
+    assert frozenset() == type(env).VISUAL_ONLY_AXES
+    assert isinstance(type(env).VISUAL_ONLY_AXES, frozenset)
 
 
 # ------------------------------------------------------------- reset / step / determinism
@@ -287,12 +285,55 @@ def test_distractor_count_teleport_semantics(env: GenesisTabletopEnv) -> None:
 # ----------------------------------------------- cosmetic axes: shadow storage
 
 
-def test_cosmetic_axes_store_on_shadows_and_leave_obs_unchanged(env: GenesisTabletopEnv) -> None:
-    """The four VISUAL_ONLY axes do not touch state obs — they set
-    the shadow attributes the rendering RFC (RFC-008) will consume.
+def test_object_texture_swap_preserves_cube_xy() -> None:
+    """RFC-008 §3.7 — the ``object_texture`` swap must inherit the
+    active cube's XY; otherwise the axis silently teleports the cube
+    to the origin and the per-seed state diverges from the no-texture
+    baseline.
 
-    Reaches into private state; same accepted coupling pattern the
-    equivalent PyBullet test uses.
+    Two fresh envs with the same seed and the same ``render_in_obs=False``:
+    one with ``object_texture=1`` queued, one without. ``cube_pos[:2]``
+    must match to within float tolerance.
+    """
+    from gauntlet.env.genesis import GenesisTabletopEnv
+
+    a = GenesisTabletopEnv()
+    b = GenesisTabletopEnv()
+    try:
+        obs_a, _ = a.reset(seed=42)
+        b.set_perturbation("object_texture", 1.0)
+        obs_b, _ = b.reset(seed=42)
+
+        # Swap happened.
+        assert b._cube is b._cube_green
+        assert a._cube is a._cube_red
+        # XY survived the swap.
+        assert np.allclose(obs_a["cube_pos"][:2], obs_b["cube_pos"][:2], atol=1e-6), (
+            f"object_texture swap lost cube XY: no-swap={obs_a['cube_pos'][:2]} "
+            f"swap={obs_b['cube_pos'][:2]}"
+        )
+
+        # A follow-up reset with no pending perturbation unswaps back
+        # to the red cube at the seed-random XY.
+        obs_c, _ = b.reset(seed=42)
+        assert b._cube is b._cube_red
+        assert np.allclose(obs_a["cube_pos"][:2], obs_c["cube_pos"][:2], atol=1e-6)
+    finally:
+        a.close()
+        b.close()
+
+
+def test_cosmetic_axes_store_on_shadows_and_leave_obs_unchanged(env: GenesisTabletopEnv) -> None:
+    """State obs unchanged after cosmetic perturbations under the
+    default ``render_in_obs=False`` path.
+
+    Post-RFC-008 the cosmetic axes DO reach the render path, but on a
+    non-rendering env they only update the shadow attributes and
+    (for ``object_texture``) swap the active cube handle. State obs
+    remains constant: cube XY is preserved through the swap (the
+    handle-aware teleport), cube_quat is reset to identity on swap,
+    the remaining keys are untouched. Reaches into private state;
+    same coupling pattern the equivalent PyBullet / MuJoCo test uses.
     """
     obs_baseline, _ = env.reset(seed=42)
 
@@ -313,6 +354,40 @@ def test_cosmetic_axes_store_on_shadows_and_leave_obs_unchanged(env: GenesisTabl
     assert float(env._cam_offset[0]) == 0.02
     assert float(env._cam_offset[1]) == -0.03
     assert env._texture_choice == 1
+
+
+# --------------------------------------------- render_in_obs / render_size surface
+
+
+def test_render_in_obs_extends_observation_space_and_validates_size() -> None:
+    """RFC-008 §3.1/§3.2 — ``render_in_obs=True`` adds an ``"image"``
+    key to ``observation_space`` with the declared shape, and a
+    non-positive ``render_size`` raises ``ValueError`` with the same
+    message ``TabletopEnv`` uses.
+
+    Asymmetric ``render_size=(64, 96)`` catches H/W transposition bugs
+    against Genesis's ``add_camera(res=(W, H))`` convention.
+    """
+    from gymnasium.spaces import Box, Dict
+
+    from gauntlet.env.genesis import GenesisTabletopEnv
+
+    e = GenesisTabletopEnv(render_in_obs=True, render_size=(64, 96))
+    try:
+        obs_space = e.observation_space
+        assert isinstance(obs_space, Dict)
+        img_space = obs_space.spaces["image"]
+        assert isinstance(img_space, Box)
+        assert img_space.shape == (64, 96, 3)
+        assert img_space.dtype == np.uint8
+        assert int(img_space.low.min()) == 0
+        assert int(img_space.high.max()) == 255
+    finally:
+        e.close()
+
+    # Validation error: same string as TabletopEnv / PyBulletTabletopEnv.
+    with pytest.raises(ValueError, match="render_size must be"):
+        GenesisTabletopEnv(render_in_obs=True, render_size=(0, 224))
 
 
 # --------------------------------------------------- restore_baseline idempotence

@@ -11,17 +11,19 @@ The Genesis counterpart of :mod:`examples.evaluate_random_policy`
 Mirrors the former's public-Python-API shape, swapping only the env
 factory — same Suite schema, same Runner, same Report artefacts.
 
-Notes specific to Genesis (RFC-007):
+Notes specific to Genesis (RFC-007, RFC-008):
 
 * Env construction is ~40 s on first instantiation per worker process
   (torch import + ``gs.init`` kernel compile + ``scene.build``). With
   ``n_workers=2`` that is a ~40 s startup, amortised across every
   episode the worker handles thereafter. ``scene.build`` inside one
   process is cached after the first call.
-* The first cut is state-only (RFC-007 §2): no image obs, so
-  ``RandomPolicy`` and any state-conditioned policy work; VLA
-  adapters (``HuggingFacePolicy``, ``LeRobotPolicy``) need the
-  follow-up rendering RFC (RFC-008).
+* Image observations are available via ``--render-in-obs``
+  (RFC-008). The flag flips the env factory to
+  ``partial(GenesisTabletopEnv, render_in_obs=True, render_size=...)``
+  so ``obs["image"]`` is a uint8 ``(H, W, 3)`` array; shape / dtype /
+  bounds match MuJoCo and PyBullet. Without the flag the default
+  state-only obs (five keys, no image) is emitted.
 * Same-process determinism (seed + action sequence -> same obs) is
   exact-to-fp-noise (~1e-11). Cross-backend numerical parity is an
   explicit non-goal — a given seed on ``tabletop`` vs
@@ -62,7 +64,11 @@ _DEFAULT_SUITE: Path = _REPO_ROOT / "examples" / "suites" / "tabletop-genesis-sm
 _DEFAULT_OUT: Path = _REPO_ROOT / "out-genesis"
 
 
-def _build_env_factory(max_steps: int) -> Callable[[], GenesisTabletopEnv]:
+def _build_env_factory(
+    max_steps: int,
+    render_in_obs: bool = False,
+    render_size: tuple[int, int] = (224, 224),
+) -> Callable[[], GenesisTabletopEnv]:
     """Return a picklable env factory that caps rollout length.
 
     ``functools.partial`` over the class is the canonical spawn-friendly
@@ -71,12 +77,21 @@ def _build_env_factory(max_steps: int) -> Callable[[], GenesisTabletopEnv]:
     this function would refuse to pickle under ``n_workers >= 2`` and
     silently work only on the in-process ``n_workers == 1`` path.
 
+    ``render_in_obs=True`` emits ``obs["image"]`` (RFC-008); off by
+    default so the state-only path stays byte-identical to the
+    pre-RFC-008 contract.
+
     :class:`GenesisTabletopEnv` is imported at module scope in this
     example; the "parent-process-torch-free" rule applies to
     ``gauntlet.core``, not to example scripts that run post
     ``uv sync --extra genesis``.
     """
-    return partial(GenesisTabletopEnv, max_steps=max_steps)
+    return partial(
+        GenesisTabletopEnv,
+        max_steps=max_steps,
+        render_in_obs=render_in_obs,
+        render_size=render_size,
+    )
 
 
 def _build_policy_factory(action_dim: int) -> Callable[[], RandomPolicy]:
@@ -101,6 +116,8 @@ def main(
     out_dir: Path = _DEFAULT_OUT,
     n_workers: int = 1,
     max_steps: int = _SMOKE_MAX_STEPS,
+    render_in_obs: bool = False,
+    render_size: tuple[int, int] = (224, 224),
 ) -> None:
     """Run a RandomPolicy smoke eval on the tabletop-genesis backend.
 
@@ -119,13 +136,21 @@ def main(
             the suite is large.
         max_steps: Hard cap on per-episode env steps. Default 20 keeps
             each episode sub-second after the first scene build.
+        render_in_obs: When true (RFC-008), emit ``obs["image"]`` as a
+            uint8 ``(H, W, 3)`` array. Default off to keep the smoke
+            path state-only.
+        render_size: ``(height, width)`` of the emitted image. Ignored
+            when ``render_in_obs=False``. Default ``(224, 224)``
+            matches MuJoCo and the VLA input convention.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     suite: Suite = load_suite(suite_path)
 
     runner = Runner(
         n_workers=n_workers,
-        env_factory=_build_env_factory(max_steps),
+        env_factory=_build_env_factory(
+            max_steps, render_in_obs=render_in_obs, render_size=render_size
+        ),
     )
     episodes: list[Episode] = runner.run(
         policy_factory=_build_policy_factory(_TABLETOP_ACTION_DIM),
@@ -179,6 +204,19 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=_SMOKE_MAX_STEPS,
         help=f"Per-episode step cap (default: {_SMOKE_MAX_STEPS}).",
     )
+    parser.add_argument(
+        "--render-in-obs",
+        action="store_true",
+        help="Emit obs['image'] (uint8 HxWx3) — RFC-008. Default off.",
+    )
+    parser.add_argument(
+        "--render-size",
+        type=int,
+        nargs=2,
+        metavar=("H", "W"),
+        default=[224, 224],
+        help="(height, width) of obs['image']; ignored without --render-in-obs.",
+    )
     return parser.parse_args(argv)
 
 
@@ -189,4 +227,6 @@ if __name__ == "__main__":  # pragma: no cover
         out_dir=args.out,
         n_workers=args.n_workers,
         max_steps=args.max_steps,
+        render_in_obs=bool(args.render_in_obs),
+        render_size=(int(args.render_size[0]), int(args.render_size[1])),
     )

@@ -1,10 +1,10 @@
-"""Genesis tabletop backend — state-only first cut (RFC-007 §5-§7).
+"""Genesis tabletop backend — state + image obs (RFC-007 + RFC-008).
 
 Parity with :class:`gauntlet.env.tabletop.TabletopEnv` and
 :class:`gauntlet.env.pybullet.tabletop_pybullet.PyBulletTabletopEnv` at
 the observation / action / perturbation-axis interface level
-(RFC-007 §3, §6), with the deliberate differences RFC-007 §7
-documents:
+(RFC-007 §3 + §6, RFC-008 §3), with the deliberate differences
+RFC-007 §7 documents:
 
 * **Numerical non-parity across backends** (§7.3). Same seed + same
   policy -> numerically different trajectories on MuJoCo vs PyBullet
@@ -13,15 +13,19 @@ documents:
 * **Same-process bit-determinism** (§7.1). Two ``env.reset(seed=s)``
   + 20 ``env.step`` calls in the same process produce bit-identical
   obs. Verified empirically in the exploration pass.
-* **Visual-only axes** (§6). ``lighting_intensity``, ``object_texture``,
-  ``camera_offset_{x,y}`` queue + validate but do not mutate the
-  state-only observation. Declared in :attr:`VISUAL_ONLY_AXES`. The
-  follow-up rendering RFC (RFC-008) empties that set.
+* **Post-RFC-008 cosmetic-axis parity** — ``lighting_intensity``,
+  ``object_texture``, ``camera_offset_{x,y}`` now mutate
+  ``obs["image"]`` when ``render_in_obs=True``. :attr:`VISUAL_ONLY_AXES`
+  is empty; the Suite loader's cosmetic-only rejection is a no-op on
+  this backend.
 
-Scene layout (RFC-007 §5): everything is built from Genesis primitives
-(``gs.morphs.Box``, ``gs.morphs.Plane``, ``gs.morphs.Cylinder``) -
-no URDF, no MJCF. Keeps ``scene.build()`` at the ~5 s minimum and
-ships no Genesis-specific asset in the repo.
+Scene layout (RFC-007 §5 + RFC-008 §3.5): everything is built from
+Genesis primitives (``gs.morphs.Box``, ``gs.morphs.Plane``,
+``gs.morphs.Cylinder``) - no URDF, no MJCF. Two cubes pre-allocated
+at build time (``_cube_red`` / ``_cube_green``) so ``object_texture``
+can teleport-swap without a scene rebuild; ``self._cube`` always
+aliases the active one. Keeps ``scene.build()`` at the ~5 s minimum
+and ships no Genesis-specific asset in the repo.
 
 Kinematic-EE pattern (RFC-007 §5): no ``createConstraint`` analogue
 in Genesis, so the EE body is a gravity-compensated dynamic rigid
@@ -29,13 +33,15 @@ whose pose is overwritten via ``entity.set_pos()`` + ``entity.set_quat()``
 every control step. Same-behaviour as PyBullet's ``p.changeConstraint``
 loop.
 
-Per-axis branches (RFC-007 §6): three state-affecting axes
-(``object_initial_pose_{x,y}``, ``distractor_count``) mutate cube /
-distractor state on reset; four cosmetic axes (``lighting_intensity``,
-``camera_offset_{x,y}``, ``object_texture``) queue + validate and are
-stored on ``self._light_intensity`` / ``self._cam_offset`` /
-``self._texture_choice`` for the follow-up rendering RFC to consume,
-same staging RFC-005 used for PyBullet pre-RFC-006.
+Rendering path (RFC-008): optional pinhole camera added at
+``__init__`` when ``render_in_obs=True``. ``_render_obs_image`` flushes
+pending rigid transforms via the private
+``scene.visualizer.rasterizer._context.update_rigid()`` hop — without
+it, post-``reset`` renders would see stale poses because no
+``scene.step()`` has run since the teleport (exploration §2.4). The
+``lighting_intensity`` axis reaches the default directional light via
+``_context._scene.directional_light_nodes[0].light.intensity``; pinned
+by ``genesis-world<0.5``.
 """
 
 from __future__ import annotations
@@ -95,6 +101,31 @@ _DISTRACTOR_BASELINE_XY: NDArray[np.float64] = np.array(
 )
 _DISTRACTOR_REST_Z: float = _TABLE_TOP_Z + _DISTRACTOR_HALF
 _DISTRACTOR_HIDDEN_Z: float = -10.0  # below the plane, out of reach
+
+
+# Camera pose — semantically matches MuJoCo's main camera
+# (``assets/tabletop.xml``: ``pos="0.6 -0.6 0.8"``, target = table-top
+# centre ``(0, 0, 0.42)``) and the PyBullet analogue RFC-006 §3.4 derived
+# from the same source. These are the exact values landed on
+# ``PyBulletTabletopEnv`` in RFC-006. Cross-backend numerical pixel
+# parity is explicitly NOT a goal (RFC-007 §7.3) — semantic parity
+# (same pose, same layout, same light direction) only.
+_CAM_EYE_BASELINE: tuple[float, float, float] = (0.6, -0.6, 0.8)
+_CAM_TARGET: tuple[float, float, float] = (0.0, 0.0, 0.42)
+_CAM_UP: tuple[float, float, float] = (0.0, 0.0, 1.0)
+_CAM_FOV: float = 45.0
+_CAM_NEAR: float = 0.01
+_CAM_FAR: float = 5.0
+
+# Genesis's default directional light (populated by
+# ``VisOptions.lights`` on scene construction) ships at
+# ``intensity=5.0`` on the 0.4.x line. The ``lighting_intensity`` axis
+# is a scalar multiplier on this baseline — axis value 1.0 leaves the
+# scene unchanged. Semantic match to MuJoCo's light stack and to
+# PyBullet's ``lightDiffuseCoeff`` (RFC-006 §3.3).
+_BASELINE_LIGHT_INTENSITY: float = 5.0
+
+_DEFAULT_RENDER_SIZE: tuple[int, int] = (224, 224)
 
 
 def _axis_angle_to_quat(axis_angle: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -183,14 +214,19 @@ class GenesisTabletopEnv:
             "distractor_count",
         }
     )
-    VISUAL_ONLY_AXES: ClassVar[frozenset[str]] = frozenset(
-        {
-            "lighting_intensity",
-            "camera_offset_x",
-            "camera_offset_y",
-            "object_texture",
-        }
-    )
+    # Post-RFC-008: all four cosmetic axes are observable via
+    # ``obs["image"]`` when ``render_in_obs=True``, so the honesty
+    # carve-out from RFC-007 §6 closes and the Suite loader's
+    # ``_reject_purely_visual_suites`` becomes a no-op on
+    # ``tabletop-genesis``. Exact parity with ``TabletopEnv`` and
+    # (post-RFC-006) ``PyBulletTabletopEnv``.
+    #
+    # Honesty caveat: a user running a cosmetic-only sweep with
+    # ``render_in_obs=False`` still gets pairwise-identical state
+    # observations across cells — not a bug, same property MuJoCo and
+    # PyBullet share. The axes still store on their shadow attributes
+    # and reach the render path only when rendering is on.
+    VISUAL_ONLY_AXES: ClassVar[frozenset[str]] = frozenset()
 
     MAX_LINEAR_STEP: float = 0.05
     MAX_ANGULAR_STEP: float = 0.1
@@ -207,14 +243,24 @@ class GenesisTabletopEnv:
         *,
         max_steps: int = 200,
         n_substeps: int = 5,
+        render_in_obs: bool = False,
+        render_size: tuple[int, int] = _DEFAULT_RENDER_SIZE,
     ) -> None:
         if max_steps <= 0:
             raise ValueError(f"max_steps must be positive; got {max_steps}")
         if n_substeps <= 0:
             raise ValueError(f"n_substeps must be positive; got {n_substeps}")
+        if render_in_obs:
+            h, w = render_size
+            if h <= 0 or w <= 0:
+                raise ValueError(
+                    f"render_size must be a (height, width) of positive ints; got {render_size}"
+                )
 
         self._max_steps = max_steps
         self._n_substeps = n_substeps
+        self._render_in_obs = bool(render_in_obs)
+        self._render_size: tuple[int, int] = (int(render_size[0]), int(render_size[1]))
 
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(7,), dtype=np.float64)
         obs_spaces: dict[str, gym.spaces.Space[Any]] = {
@@ -224,6 +270,9 @@ class GenesisTabletopEnv:
             "gripper": spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float64),
             "target_pos": spaces.Box(low=-np.inf, high=np.inf, shape=(3,), dtype=np.float64),
         }
+        if self._render_in_obs:
+            h, w = self._render_size
+            obs_spaces["image"] = spaces.Box(low=0, high=255, shape=(h, w, 3), dtype=np.uint8)
         self.observation_space = spaces.Dict(obs_spaces)
 
         # ---- per-process Genesis global init (idempotent) ----
@@ -261,12 +310,48 @@ class GenesisTabletopEnv:
             ),
             material=gs.materials.Rigid(gravity_compensation=1.0),
         )
-        self._cube: Any = self._scene.add_entity(
+        # Two cubes — red (default texture) and green (alt texture) —
+        # pre-allocated at build time because Genesis 0.4.x cannot swap
+        # surface colours post-build (exploration §5). The active cube
+        # is teleported to the rest pose; the inactive one lives at
+        # ``_DISTRACTOR_HIDDEN_Z`` — same teleport-away pattern
+        # ``distractor_count`` uses (RFC-007 §6.5).
+        #
+        # BOTH cubes carry ``gravity_compensation=1.0`` so the inactive
+        # cube stays parked at ``z=-10`` across an episode. This is a
+        # deliberate deviation from the single-cube state-only
+        # predecessor (which let the cube fall and rest on the table)
+        # — the audit in RFC-008 §3.5 confirms no existing test
+        # exercises free-fall dynamics; success is XY-only and
+        # ``_snap_cube_to_ee`` overrides cube pose during grasp anyway.
+        # Documented here so a future reader doesn't "simplify" it away.
+        self._cube_red: Any = self._scene.add_entity(
             gs.morphs.Box(
                 pos=(0.0, 0.0, _CUBE_REST_Z),
                 size=(2.0 * _CUBE_HALF, 2.0 * _CUBE_HALF, 2.0 * _CUBE_HALF),
             ),
+            surface=gs.surfaces.Default(
+                diffuse_texture=gs.surfaces.ColorTexture(color=(1.0, 0.2, 0.2)),
+            ),
+            material=gs.materials.Rigid(gravity_compensation=1.0),
         )
+        self._cube_green: Any = self._scene.add_entity(
+            gs.morphs.Box(
+                pos=(0.0, 0.0, _DISTRACTOR_HIDDEN_Z),
+                size=(2.0 * _CUBE_HALF, 2.0 * _CUBE_HALF, 2.0 * _CUBE_HALF),
+            ),
+            surface=gs.surfaces.Default(
+                diffuse_texture=gs.surfaces.ColorTexture(color=(0.2, 1.0, 0.2)),
+            ),
+            material=gs.materials.Rigid(gravity_compensation=1.0),
+        )
+        # ``self._cube`` is the authoritative handle for every downstream
+        # operation (``_cube_pos``, ``_cube_quat``, ``_snap_cube_to_ee``,
+        # reset's XY teleport). ``self._cube_alt`` aliases the hidden
+        # cube. Both pointers are swapped atomically in
+        # ``_apply_one_perturbation("object_texture", ...)``.
+        self._cube: Any = self._cube_red
+        self._cube_alt: Any = self._cube_green
         # EE body — gravity-compensated dynamic rigid, driven by
         # ``set_pos`` / ``set_quat`` each step. Collision kept on so the
         # EE-cube proximity check in ``_update_grasp_state`` sees a
@@ -292,6 +377,27 @@ class GenesisTabletopEnv:
                 material=gs.materials.Rigid(gravity_compensation=1.0),
             )
             self._distractors.append(d)
+
+        # Optional render camera — only added when ``render_in_obs=True``
+        # so the state-only default path has zero extra scene-graph
+        # work. Genesis's ``add_camera(res=(W, H))`` takes width-first;
+        # our ``render_size`` is (height, width) to match MuJoCo, so we
+        # swap here. RFC-008 §3.6.
+        self._camera: Any | None
+        if self._render_in_obs:
+            h, w = self._render_size
+            self._camera = self._scene.add_camera(
+                res=(w, h),
+                pos=_CAM_EYE_BASELINE,
+                lookat=_CAM_TARGET,
+                up=_CAM_UP,
+                fov=_CAM_FOV,
+                near=_CAM_NEAR,
+                far=_CAM_FAR,
+                GUI=False,
+            )
+        else:
+            self._camera = None
 
         # Build fuses the scene and compiles kernels — first call is
         # ~4-5 s on CPU; subsequent builds in the same process are <1 s
@@ -330,14 +436,40 @@ class GenesisTabletopEnv:
     def _cube_quat(self) -> NDArray[np.float64]:
         return np.asarray(self._cube.get_quat().cpu().numpy(), dtype=np.float64)
 
-    def _build_obs(self) -> dict[str, NDArray[np.float64]]:
-        return {
+    def _build_obs(self) -> dict[str, NDArray[Any]]:
+        obs: dict[str, NDArray[Any]] = {
             "cube_pos": self._cube_pos(),
             "cube_quat": self._cube_quat(),
             "ee_pos": self._ee_pos(),
             "gripper": np.array([self._gripper_state], dtype=np.float64),
             "target_pos": self._target_pos.copy(),
         }
+        if self._render_in_obs:
+            obs["image"] = self._render_obs_image()
+        return obs
+
+    def _render_obs_image(self) -> NDArray[np.uint8]:
+        """Render the scene camera into a uint8 ``(H, W, 3)`` array.
+
+        Deterministic headless CPU Rasterizer path (RFC-008 §3.3). The
+        ``update_rigid`` call flushes any pending ``set_pos`` /
+        ``set_quat`` transforms into the Rasterizer context — without
+        it, post-``reset`` renders would see stale entity poses because
+        no ``scene.step()`` has run since the teleports (exploration
+        §2.4). ``scene.step()`` advances sim time 50 ms and corrupts
+        reset-time state for any free body under gravity, so we flush
+        transforms without stepping.
+
+        The private ``_context`` hop is honesty-flagged in RFC-008 §4.1
+        / §10 Q5 and pinned by ``genesis-world<0.5`` (RFC-007 §3).
+        """
+        assert self._camera is not None, (
+            "_render_obs_image called with render_in_obs=False; _build_obs "
+            "must gate this call on self._render_in_obs"
+        )
+        self._scene.visualizer.rasterizer._context.update_rigid()
+        rgb = self._camera.render(rgb=True)[0]
+        return np.ascontiguousarray(np.asarray(rgb, dtype=np.uint8))
 
     def _build_info(self) -> dict[str, Any]:
         return {
@@ -396,7 +528,7 @@ class GenesisTabletopEnv:
         *,
         seed: int | None = None,
         options: dict[str, Any] | None = None,
-    ) -> tuple[dict[str, NDArray[np.float64]], dict[str, Any]]:
+    ) -> tuple[dict[str, NDArray[Any]], dict[str, Any]]:
         """Deterministic reset.
 
         ``seed`` is the only entropy source. Ordering per RFC-005 §3.2:
@@ -443,7 +575,7 @@ class GenesisTabletopEnv:
     def step(
         self,
         action: NDArray[np.float64],
-    ) -> tuple[dict[str, NDArray[np.float64]], float, bool, bool, dict[str, Any]]:
+    ) -> tuple[dict[str, NDArray[Any]], float, bool, bool, dict[str, Any]]:
         """Advance one control step.
 
         Pipeline: clip -> update EE pose -> update grasp state ->
@@ -521,11 +653,28 @@ class GenesisTabletopEnv:
             xy = _DISTRACTOR_BASELINE_XY[i]
             d.set_pos((float(xy[0]), float(xy[1]), _DISTRACTOR_HIDDEN_Z))
 
+        # Unswap the cube pointer if a prior episode flipped it. The
+        # now-hidden green cube is explicitly re-parked at
+        # ``(0, 0, _DISTRACTOR_HIDDEN_Z)`` so it doesn't drift into the
+        # next episode's frustum. Red stays wherever it was — reset's
+        # XY teleport overwrites its position a moment later.
+        if self._cube is not self._cube_red:
+            self._cube_green.set_pos((0.0, 0.0, _DISTRACTOR_HIDDEN_Z))
+            self._cube, self._cube_alt = self._cube_red, self._cube_green
+
         # Visual-axis shadows — restore to their neutral defaults so a
         # prior episode's cosmetic perturbation doesn't leak.
         self._light_intensity = 1.0
         self._cam_offset = np.zeros(2, dtype=np.float64)
         self._texture_choice = 0
+
+        # Render-side baselines — push the neutral shadow values into
+        # the pyrender context + camera pose so the next render sees
+        # the unperturbed scene. Guarded on ``render_in_obs`` so
+        # state-only envs never touch the private ``_context`` hop.
+        if self._render_in_obs:
+            self._apply_light_intensity()
+            self._apply_camera_pose()
 
     def _apply_pending_perturbations(self) -> None:
         """Apply ``self._pending_perturbations`` to the scene.
@@ -540,17 +689,87 @@ class GenesisTabletopEnv:
         for name, value in self._pending_perturbations.items():
             self._apply_one_perturbation(name, value)
 
+    def _apply_camera_pose(self) -> None:
+        """Apply ``self._cam_offset`` to the render camera.
+
+        No-op when ``render_in_obs=False`` (no camera attached). The
+        offset adds to ``_CAM_EYE_BASELINE``; the target and up vector
+        stay fixed — pan, not orbit.
+        """
+        assert self._camera is not None, (
+            "_apply_camera_pose requires render_in_obs=True — the "
+            "caller must gate on self._render_in_obs"
+        )
+        eye = (
+            _CAM_EYE_BASELINE[0] + float(self._cam_offset[0]),
+            _CAM_EYE_BASELINE[1] + float(self._cam_offset[1]),
+            _CAM_EYE_BASELINE[2],
+        )
+        self._camera.set_pose(pos=eye, lookat=_CAM_TARGET, up=_CAM_UP)
+
+    def _apply_light_intensity(self) -> None:
+        """Scale the default directional light's intensity.
+
+        Private-API hop on ``scene.visualizer.rasterizer._context._scene.light_nodes[0].light``
+        — Genesis 0.4.x does not expose a public post-build setter
+        (exploration §4, RFC-008 §4.1). Pinned by
+        ``genesis-world>=0.4,<0.5`` in ``pyproject.toml``. If 0.5
+        rearranges the internals, this site raises ``AttributeError``
+        loudly.
+        """
+        if not self._render_in_obs:
+            return
+        try:
+            pyscene = self._scene.visualizer.rasterizer._context._scene
+            # pyrender's scene exposes ``directional_light_nodes`` as
+            # an iterable (a set on 0.4.x); Genesis's default
+            # ``VisOptions.lights`` seeds exactly one directional
+            # light — take it by iteration order.
+            light_node = next(iter(pyscene.directional_light_nodes))
+            light_node.light.intensity = _BASELINE_LIGHT_INTENSITY * self._light_intensity
+        except (AttributeError, StopIteration) as e:  # pragma: no cover
+            # Genesis 0.5 may rearrange the private ``_context`` hop
+            # or alter the default light stack. Surface the breakage
+            # loudly with the pin to fix rather than the raw traceback.
+            raise RuntimeError(
+                "Genesis private light-mutation API changed — pin "
+                "'genesis-world<0.5' in your environment or file an "
+                "issue to re-wire this adapter. RFC-008 §10 Q8."
+            ) from e
+
     def _apply_one_perturbation(self, name: str, value: float) -> None:
         if name == "lighting_intensity":
-            # Cosmetic (VISUAL_ONLY_AXES) — state obs unchanged.
-            # Stored so RFC-008 can read it without rewiring dispatch.
             self._light_intensity = float(value)
+            if self._render_in_obs:
+                self._apply_light_intensity()
         elif name == "camera_offset_x":
             self._cam_offset[0] = float(value)
+            if self._render_in_obs:
+                self._apply_camera_pose()
         elif name == "camera_offset_y":
             self._cam_offset[1] = float(value)
+            if self._render_in_obs:
+                self._apply_camera_pose()
         elif name == "object_texture":
-            self._texture_choice = 1 if round(float(value)) != 0 else 0
+            new_choice = 1 if round(float(value)) != 0 else 0
+            if new_choice != self._texture_choice:
+                # Capture the active cube's XY before the swap so the
+                # new active cube inherits the seed-randomised (or
+                # ``object_initial_pose_*``-overridden) position —
+                # otherwise the axis would silently teleport the cube
+                # to the origin, corrupting per-seed state (caught in
+                # RFC-008 pre-implementation review).
+                old_xy = self._cube_pos()
+                self._cube.set_pos((0.0, 0.0, _DISTRACTOR_HIDDEN_Z))
+                self._cube, self._cube_alt = self._cube_alt, self._cube
+                self._cube.set_pos((float(old_xy[0]), float(old_xy[1]), _CUBE_REST_Z))
+                # Identity quat on the new active cube — reset's quat
+                # write earlier hit the old (now hidden) active cube,
+                # so without this line the new active cube inherits
+                # whatever quat it had last time it was active (likely
+                # post-grasp from the previous episode it was live).
+                self._cube.set_quat((1.0, 0.0, 0.0, 0.0))
+            self._texture_choice = new_choice
         elif name == "object_initial_pose_x":
             # State-affecting: overrides the random cube X from the
             # seed-driven randomisation (matches MuJoCo qpos-write
