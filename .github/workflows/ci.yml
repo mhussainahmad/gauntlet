@@ -49,7 +49,7 @@ jobs:
         run: uv run mypy
 
       - name: Run tests (excludes extras-gated markers)
-        run: uv run pytest -m "not hf and not lerobot and not monitor and not pybullet"
+        run: uv run pytest -m "not hf and not lerobot and not monitor and not pybullet and not genesis"
 
   hf-tests:
     name: hf tests (py${{ matrix.python-version }})
@@ -160,3 +160,33 @@ jobs:
 
       - name: Run pybullet-marked tests
         run: uv run pytest -m pybullet -q
+
+  genesis-tests:
+    name: genesis backend tests (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Sync dependencies (genesis extra + genesis-dev group)
+        run: >-
+          uv sync
+          --extra genesis
+          --group genesis-dev
+          --python ${{ matrix.python-version }}
+
+      - name: Run genesis-marked tests
+        run: uv run pytest -m genesis -q
