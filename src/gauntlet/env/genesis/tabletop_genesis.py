@@ -29,11 +29,13 @@ whose pose is overwritten via ``entity.set_pos()`` + ``entity.set_quat()``
 every control step. Same-behaviour as PyBullet's ``p.changeConstraint``
 loop.
 
-Per-axis branches (RFC-007 §6) are not wired here; the step-7 scope
-is the baseline env body + state-obs parity. ``set_perturbation`` /
-``restore_baseline`` raise :class:`NotImplementedError` until step 8
-lands the pending-queue + validation, and step 9 lands the seven
-branches.
+Per-axis branches (RFC-007 §6): three state-affecting axes
+(``object_initial_pose_{x,y}``, ``distractor_count``) mutate cube /
+distractor state on reset; four cosmetic axes (``lighting_intensity``,
+``camera_offset_{x,y}``, ``object_texture``) queue + validate and are
+stored on ``self._light_intensity`` / ``self._cam_offset`` /
+``self._texture_choice`` for the follow-up rendering RFC to consume,
+same staging RFC-005 used for PyBullet pre-RFC-006.
 """
 
 from __future__ import annotations
@@ -479,15 +481,25 @@ class GenesisTabletopEnv:
     def set_perturbation(self, name: str, value: float) -> None:
         """Queue an axis-value pair for the next reset.
 
-        Validation + per-axis application lands in RFC-007 §12 steps
-        8-9. Until then this scaffold raises ``NotImplementedError`` so
-        a caller who tries to drive perturbations gets a clear error
-        rather than silently-no-op behaviour.
+        Raises
+        ------
+        ValueError
+            If ``name`` is not one of :attr:`AXIS_NAMES`. For
+            ``distractor_count``, also if ``round(value)`` is outside
+            ``[0, _N_DISTRACTOR_SLOTS]`` — same integer-range check
+            PyBullet enforces.
         """
-        raise NotImplementedError(
-            "GenesisTabletopEnv.set_perturbation — next commit "
-            "(RFC-007 §12 step 8-9) wires axis validation + branches."
-        )
+        if name not in type(self).AXIS_NAMES:
+            raise ValueError(
+                f"unknown perturbation axis {name!r}; known axes: {sorted(type(self).AXIS_NAMES)}"
+            )
+        if name == "distractor_count":
+            count = round(float(value))
+            if count < 0 or count > _N_DISTRACTOR_SLOTS:
+                raise ValueError(
+                    f"distractor_count must be in [0, {_N_DISTRACTOR_SLOTS}]; got {count}"
+                )
+        self._pending_perturbations[name] = float(value)
 
     def restore_baseline(self) -> None:
         """Restore the scene to its post-__init__ observational state.
@@ -517,16 +529,50 @@ class GenesisTabletopEnv:
     def _apply_pending_perturbations(self) -> None:
         """Apply ``self._pending_perturbations`` to the scene.
 
-        The seven branches (RFC-007 §6) land in the next commit. This
-        method is called from ``reset`` after the seed-driven
-        randomisation; a ``NotImplementedError`` here rather than a
-        silent no-op ensures the test matrix catches a forgotten
-        wiring regression.
+        The seven branches (RFC-007 §6): the three state-affecting
+        axes (``object_initial_pose_{x,y}``, ``distractor_count``)
+        mutate entity state; the four cosmetic axes store on
+        visual-only shadow attributes. The cosmetic-axis branches
+        exist on day one so a follow-up rendering RFC (RFC-008)
+        only needs to read these shadows, not rewire the dispatch.
         """
-        raise NotImplementedError(
-            "GenesisTabletopEnv._apply_pending_perturbations — next commit "
-            "(RFC-007 §12 step 9) wires the seven axis branches."
-        )
+        for name, value in self._pending_perturbations.items():
+            self._apply_one_perturbation(name, value)
+
+    def _apply_one_perturbation(self, name: str, value: float) -> None:
+        if name == "lighting_intensity":
+            # Cosmetic (VISUAL_ONLY_AXES) — state obs unchanged.
+            # Stored so RFC-008 can read it without rewiring dispatch.
+            self._light_intensity = float(value)
+        elif name == "camera_offset_x":
+            self._cam_offset[0] = float(value)
+        elif name == "camera_offset_y":
+            self._cam_offset[1] = float(value)
+        elif name == "object_texture":
+            self._texture_choice = 1 if round(float(value)) != 0 else 0
+        elif name == "object_initial_pose_x":
+            # State-affecting: overrides the random cube X from the
+            # seed-driven randomisation (matches MuJoCo qpos-write
+            # semantics — RFC-007 §6.4).
+            cur = self._cube_pos()
+            self._cube.set_pos((float(value), float(cur[1]), _CUBE_REST_Z))
+        elif name == "object_initial_pose_y":
+            cur = self._cube_pos()
+            self._cube.set_pos((float(cur[0]), float(value), _CUBE_REST_Z))
+        elif name == "distractor_count":
+            # State-affecting: teleport first ``count`` distractors to
+            # their rest Z; rest stay at _DISTRACTOR_HIDDEN_Z
+            # (restore_baseline already hid them all). RFC-007 §6.5
+            # — teleport-away semantic, documented deviation from
+            # MuJoCo's visibility+collision toggle.
+            count = round(float(value))
+            for i, d in enumerate(self._distractors):
+                xy = _DISTRACTOR_BASELINE_XY[i]
+                z = _DISTRACTOR_REST_Z if i < count else _DISTRACTOR_HIDDEN_Z
+                d.set_pos((float(xy[0]), float(xy[1]), z))
+        # Unknown axis names are blocked at set_perturbation; the else
+        # branch is unreachable by contract (and mypy's exhaustive-if
+        # check flags nothing to handle at this layer).
 
     def close(self) -> None:
         """Release Genesis scene resources. Idempotent.
