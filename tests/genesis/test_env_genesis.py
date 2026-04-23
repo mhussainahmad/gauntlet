@@ -138,19 +138,17 @@ def test_axis_names_are_canonical_seven(env: GenesisTabletopEnv) -> None:
     assert expected == type(e).AXIS_NAMES
 
 
-def test_visual_only_axes_are_four_cosmetic(env: GenesisTabletopEnv) -> None:
-    """State-only first cut — the four cosmetic axes are VISUAL_ONLY
-    until the follow-up rendering RFC (RFC-007 §6.6)."""
-    e = env
-    expected = frozenset(
-        {
-            "lighting_intensity",
-            "camera_offset_x",
-            "camera_offset_y",
-            "object_texture",
-        }
-    )
-    assert expected == type(e).VISUAL_ONLY_AXES
+def test_visual_only_axes_is_empty_post_rfc_008(env: GenesisTabletopEnv) -> None:
+    """Post-RFC-008 — cosmetic axes are observable via
+    ``obs["image"]`` when ``render_in_obs=True``, so
+    ``VISUAL_ONLY_AXES`` drops to the empty frozenset. Parity with
+    ``TabletopEnv`` and (post-RFC-006) ``PyBulletTabletopEnv``.
+
+    Was ``test_visual_only_axes_are_four_cosmetic`` before RFC-008;
+    the assertion flipped when the rendering path landed.
+    """
+    assert frozenset() == type(env).VISUAL_ONLY_AXES
+    assert isinstance(type(env).VISUAL_ONLY_AXES, frozenset)
 
 
 # ------------------------------------------------------------- reset / step / determinism
@@ -326,11 +324,16 @@ def test_object_texture_swap_preserves_cube_xy() -> None:
 
 
 def test_cosmetic_axes_store_on_shadows_and_leave_obs_unchanged(env: GenesisTabletopEnv) -> None:
-    """The four VISUAL_ONLY axes do not touch state obs — they set
-    the shadow attributes the rendering RFC (RFC-008) will consume.
+    """State obs unchanged after cosmetic perturbations under the
+    default ``render_in_obs=False`` path.
 
-    Reaches into private state; same accepted coupling pattern the
-    equivalent PyBullet test uses.
+    Post-RFC-008 the cosmetic axes DO reach the render path, but on a
+    non-rendering env they only update the shadow attributes and
+    (for ``object_texture``) swap the active cube handle. State obs
+    remains constant: cube XY is preserved through the swap (the
+    handle-aware teleport), cube_quat is reset to identity on swap,
+    the remaining keys are untouched. Reaches into private state;
+    same coupling pattern the equivalent PyBullet / MuJoCo test uses.
     """
     obs_baseline, _ = env.reset(seed=42)
 

@@ -185,6 +185,38 @@ def test_camera_offset_y_changes_pixels() -> None:
     assert not np.array_equal(back, front)
 
 
+def test_loader_accepts_cosmetic_only_sweep_on_tabletop_genesis() -> None:
+    """RFC-008 §7 case 7 — post-RFC-008 the Suite loader's
+    cosmetic-only rejection is a no-op on ``tabletop-genesis``
+    because ``VISUAL_ONLY_AXES == frozenset()``. A sweep whose every
+    axis is cosmetic now loads.
+
+    The ``_reject_purely_visual_suites`` branch short-circuits on an
+    empty ``VISUAL_ONLY_AXES``, so no loader code change was needed
+    — only the classvar flip in step 8. This test locks that
+    behaviour in.
+    """
+    # Register the genesis backend.
+    import gauntlet.env.genesis  # noqa: F401
+    from gauntlet.suite.loader import load_suite_from_string
+
+    yaml_text = """
+name: genesis-cosmetic-only
+env: tabletop-genesis
+episodes_per_cell: 1
+axes:
+  lighting_intensity:
+    low: 0.5
+    high: 1.5
+    steps: 2
+  object_texture:
+    values: [0.0, 1.0]
+"""
+    suite = load_suite_from_string(yaml_text)
+    assert suite.env == "tabletop-genesis"
+    assert set(suite.axes.keys()) == {"lighting_intensity", "object_texture"}
+
+
 def test_image_space_matches_mujoco() -> None:
     """RFC-008 §7 case 2 — ``observation_space["image"]`` Box is equal
     under ``gym.spaces.Box.__eq__`` to ``TabletopEnv``'s. Pixel values
