@@ -84,7 +84,10 @@ def _topology_from_metadata(target: Episode, suite: Suite) -> tuple[int, int]:
     """
     raw_n_cells = target.metadata.get("n_cells")
     raw_eps = target.metadata.get("episodes_per_cell")
-    if isinstance(raw_n_cells, int) and isinstance(raw_eps, int):
+    # `type(...) is int` (not isinstance) so a stray bool doesn't slip
+    # past — bool is a subclass of int and would otherwise type-match
+    # here, which would silently feed the spawn tree the wrong shape.
+    if type(raw_n_cells) is int and type(raw_eps) is int:
         return raw_n_cells, raw_eps
     # Legacy Episode — topology fields absent.
     fallback_n_cells = suite.num_cells()
