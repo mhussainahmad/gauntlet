@@ -97,6 +97,31 @@ _DISTRACTOR_REST_Z: float = _TABLE_TOP_Z + _DISTRACTOR_HALF
 _DISTRACTOR_HIDDEN_Z: float = -10.0  # below the plane, out of reach
 
 
+# Camera pose — semantically matches MuJoCo's main camera
+# (``assets/tabletop.xml``: ``pos="0.6 -0.6 0.8"``, target = table-top
+# centre ``(0, 0, 0.42)``) and the PyBullet analogue RFC-006 §3.4 derived
+# from the same source. These are the exact values landed on
+# ``PyBulletTabletopEnv`` in RFC-006. Cross-backend numerical pixel
+# parity is explicitly NOT a goal (RFC-007 §7.3) — semantic parity
+# (same pose, same layout, same light direction) only.
+_CAM_EYE_BASELINE: tuple[float, float, float] = (0.6, -0.6, 0.8)
+_CAM_TARGET: tuple[float, float, float] = (0.0, 0.0, 0.42)
+_CAM_UP: tuple[float, float, float] = (0.0, 0.0, 1.0)
+_CAM_FOV: float = 45.0
+_CAM_NEAR: float = 0.01
+_CAM_FAR: float = 5.0
+
+# Genesis's default directional light (populated by
+# ``VisOptions.lights`` on scene construction) ships at
+# ``intensity=5.0`` on the 0.4.x line. The ``lighting_intensity`` axis
+# is a scalar multiplier on this baseline — axis value 1.0 leaves the
+# scene unchanged. Semantic match to MuJoCo's light stack and to
+# PyBullet's ``lightDiffuseCoeff`` (RFC-006 §3.3).
+_BASELINE_LIGHT_INTENSITY: float = 5.0
+
+_DEFAULT_RENDER_SIZE: tuple[int, int] = (224, 224)
+
+
 def _axis_angle_to_quat(axis_angle: NDArray[np.float64]) -> NDArray[np.float64]:
     """Rodrigues-style axis-angle -> wxyz quat. Zero angle returns identity.
 
