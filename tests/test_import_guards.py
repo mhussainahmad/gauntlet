@@ -1,17 +1,22 @@
-"""Import-guard tests for :mod:`gauntlet.policy.huggingface`.
+"""Import-guard tests for :mod:`gauntlet.policy.huggingface` and
+:mod:`gauntlet.policy.lerobot`.
 
-These tests verify the torch-absent contract: even when torch is missing
-from the environment, importing :mod:`gauntlet.policy` must not blow up,
-and accessing :class:`HuggingFacePolicy` must raise a clean ``ImportError``
-with the ``uv sync --extra hf`` install hint.
+These tests verify the extras-absent contract: even when the heavy deps
+(torch for HF, lerobot for the SmolVLA adapter) are missing from the
+environment, importing :mod:`gauntlet.policy` must not blow up, and
+accessing :class:`HuggingFacePolicy` / :class:`LeRobotPolicy` must raise
+a clean ``ImportError`` with the right install hint.
 
-They are **unmarked** — they run in BOTH CI jobs (torch-free default job
-and ``hf-tests`` job). The default job enforces the contract in the
-environment the contract is actually about; the hf job enforces it via
-``monkeypatch.setitem(sys.modules, "torch", None)`` so the same code path
-is exercised on a machine that happens to have torch installed.
+They are **unmarked** — they run in ALL three CI jobs (torch-/lerobot-free
+default job, ``hf-tests``, and ``lerobot-tests``). The default job
+enforces the contract in the environment the contract is actually about;
+the hf/lerobot jobs enforce it via ``monkeypatch.setitem(sys.modules,
+<mod>, None)`` so the same code path is exercised on a machine that
+happens to have those deps installed.
 
-See docs/phase2-rfc-001-huggingface-policy.md §6 cases 1 & 2.
+See docs/phase2-rfc-001-huggingface-policy.md §6 cases 1 & 2 for the HF
+guards and docs/phase2-rfc-002-lerobot-smolvla.md §6 cases 1 & 2 for the
+lerobot analogues.
 """
 
 from __future__ import annotations
@@ -67,3 +72,42 @@ class TestImportGuards:
                 pkg.__getattr__("HuggingFacePolicy")
         finally:
             monkeypatch.delitem(sys.modules, "torch", raising=False)
+
+    def test_lerobot_import_guard_raises_install_hint_when_lerobot_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``LeRobotPolicy(...)`` must raise ``ImportError`` naming
+        ``uv sync --extra lerobot`` when lerobot is unavailable
+        (RFC-002 §6 case 1)."""
+        monkeypatch.setitem(sys.modules, "lerobot", None)
+        import gauntlet.policy.lerobot as lr_mod
+
+        try:
+            importlib.reload(lr_mod)
+            with pytest.raises(ImportError, match="uv sync --extra lerobot"):
+                lr_mod.LeRobotPolicy(
+                    repo_id="dummy/repo",
+                    instruction="pick up the red cube",
+                )
+        finally:
+            # Restore normal module state so a broken run can't poison
+            # ``sys.modules`` for every subsequent test.
+            monkeypatch.delitem(sys.modules, "lerobot", raising=False)
+            importlib.reload(lr_mod)
+
+    def test_lerobot_reexport_raises_install_hint_at_attribute_access(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``from gauntlet.policy import LeRobotPolicy`` must fail loudly
+        at attribute-access time when lerobot is missing — NOT at
+        ``import gauntlet.policy`` time (RFC-002 §6 case 2)."""
+        monkeypatch.setitem(sys.modules, "lerobot", None)
+        import gauntlet.policy as pkg
+
+        try:
+            # Non-lerobot policies must still be reachable.
+            assert pkg.RandomPolicy is not None
+            with pytest.raises(ImportError, match="uv sync --extra lerobot"):
+                pkg.__getattr__("LeRobotPolicy")
+        finally:
+            monkeypatch.delitem(sys.modules, "lerobot", raising=False)
