@@ -30,22 +30,48 @@ dependencies = [
     "pyyaml>=6.0,<7",
 ]
 
+# Optional extras — end-user-facing. Keeps core torch-free per spec §6.
+# See docs/phase2-rfc-001-huggingface-policy.md §3,
+# docs/phase2-rfc-002-lerobot-smolvla.md §3,
+# docs/phase2-rfc-005-pybullet-adapter.md §4 for rationale.
+[project.optional-dependencies]
+hf = [
+    # Version floors mirror openvla/requirements-min.txt (Apr 2026) with
+    # ceilings one major above to catch surprise breakage early.
+    "torch>=2.2,<3",
+    "transformers>=4.40,<5",
+    "timm>=0.9.10,<2",
+    "tokenizers>=0.19,<1",
+    "pillow>=10.0,<12",
+    # flash-attn is intentionally NOT listed: it requires CUDA at pip-install
+    # time and breaks CPU-only installs. Users opt in separately per the
+    # HuggingFacePolicy docstring.
+]
+# Independent extra for the lerobot / SmolVLA adapter — see
+# docs/phase2-rfc-002-lerobot-smolvla.md §3. ``lerobot[smolvla]`` transitively
+# pulls torch, torchvision, opencv-python-headless, einops, safetensors,
+# accelerate, huggingface_hub and the SmolVLM2 backbone via transformers;
+# keep version floors aligned with lerobot's own floors (April 2026). No
+# ceiling on ``lerobot`` itself because its public API is not yet stable.
+lerobot = [
+    "lerobot[smolvla]>=0.4,<1",
+    "transformers>=4.40,<5",
+    "pillow>=10.0,<12",
+]
+# Independent extra for the PyBullet backend (RFC-005).
+# pybullet is a pure-Python/C++ package on PyPI, CPU-only, no CUDA needed,
+# wheels on manylinux/macOS/Windows. 3.2 floor matches the first release
+# with the stable physics-engine parameters we depend on for bit-determinism.
+pybullet = [
+    "pybullet>=3.2,<4",
+]
+
 [project.scripts]
 gauntlet = "gauntlet.cli:app"
 
 [project.urls]
 Homepage = "https://github.com/gauntlet-eval/gauntlet"
 Issues = "https://github.com/gauntlet-eval/gauntlet/issues"
-
-# Independent extra for the PyBullet backend (Phase 2 RFC-005).
-# pybullet is a pure-Python/C++ package on PyPI, CPU-only, no CUDA needed,
-# wheels on manylinux/macOS/Windows. The 3.2 floor matches the first release
-# with the stable physics-engine parameters this RFC depends on for
-# bit-determinism. Ceiling one major above to catch surprise upstream breakage.
-[project.optional-dependencies]
-pybullet = [
-    "pybullet>=3.2,<4",
-]
 
 [dependency-groups]
 dev = [
@@ -56,6 +82,17 @@ dev = [
     "types-pyyaml>=6.0,<7",
     "pandas-stubs>=2.2,<3",
 ]
+# CI-only group so the HF pytest job can pull dev + hf together.
+hf-dev = [
+    {include-group = "dev"},
+    "pytest-mock>=3.12,<4",
+]
+# CI-only group so the lerobot pytest job can pull dev + lerobot together.
+lerobot-dev = [
+    {include-group = "dev"},
+    "pytest-mock>=3.12,<4",
+]
+# CI-only group for the pybullet pytest job.
 pybullet-dev = [
     {include-group = "dev"},
     "pytest-mock>=3.12,<4",
@@ -112,6 +149,18 @@ ignore_missing_imports = true
 module = ["gymnasium", "gymnasium.*"]
 ignore_missing_imports = true
 
+# Optional HF extras — let mypy import-check ``policy/huggingface.py`` even
+# when torch/transformers/PIL aren't installed (default job runs torch-free).
+[[tool.mypy.overrides]]
+module = ["torch", "torch.*", "transformers", "transformers.*", "PIL", "PIL.*"]
+ignore_missing_imports = true
+
+# Optional lerobot extras — let mypy import-check ``policy/lerobot.py`` even
+# when lerobot isn't installed (default job runs torch-/lerobot-free).
+[[tool.mypy.overrides]]
+module = ["lerobot", "lerobot.*"]
+ignore_missing_imports = true
+
 # pybullet ships no type stubs. Per spec §6, Any is permitted at FFI boundaries;
 # this override lets mypy import-check env/pybullet/* even when the
 # [pybullet] extra isn't installed.
@@ -130,6 +179,8 @@ addopts = [
 ]
 testpaths = ["tests"]
 markers = [
+    "hf: tests that require the [hf] extra (torch, transformers, PIL)",
+    "lerobot: tests that require the [lerobot] extra (lerobot, torch, PIL)",
     "pybullet: tests that require the [pybullet] extra (pybullet>=3.2)",
 ]
 
