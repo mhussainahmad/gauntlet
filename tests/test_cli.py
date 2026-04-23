@@ -641,18 +641,14 @@ def _write_report_json_with_env(
     )
 
 
-def test_compare_rejects_cross_backend_without_opt_in(
-    runner: CliRunner, tmp_path: Path
-) -> None:
+def test_compare_rejects_cross_backend_without_opt_in(runner: CliRunner, tmp_path: Path) -> None:
     """Cross-backend compare without ``--allow-cross-backend`` must exit
     non-zero and mention the drift-vs-regression distinction from §7.4.
     """
     a_path = tmp_path / "report_a.json"
     b_path = tmp_path / "report_b.json"
     _write_report_json_with_env(a_path, suite_name="s", suite_env="tabletop")
-    _write_report_json_with_env(
-        b_path, suite_name="s", suite_env="tabletop-pybullet"
-    )
+    _write_report_json_with_env(b_path, suite_name="s", suite_env="tabletop-pybullet")
 
     result = runner.invoke(
         app,
@@ -673,9 +669,7 @@ def test_compare_allow_cross_backend_emits_warning_and_succeeds(
     a_path = tmp_path / "report_a.json"
     b_path = tmp_path / "report_b.json"
     _write_report_json_with_env(a_path, suite_name="s", suite_env="tabletop")
-    _write_report_json_with_env(
-        b_path, suite_name="s", suite_env="tabletop-pybullet"
-    )
+    _write_report_json_with_env(b_path, suite_name="s", suite_env="tabletop-pybullet")
     out = tmp_path / "c.json"
 
     result = runner.invoke(
@@ -696,9 +690,7 @@ def test_compare_allow_cross_backend_emits_warning_and_succeeds(
     assert out.is_file()
 
 
-def test_compare_same_backend_no_cross_warning(
-    runner: CliRunner, tmp_path: Path
-) -> None:
+def test_compare_same_backend_no_cross_warning(runner: CliRunner, tmp_path: Path) -> None:
     """When both reports share a suite_env, the cross-backend guard is
     silent.
     """

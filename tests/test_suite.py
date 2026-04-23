@@ -423,9 +423,7 @@ axes:
         monkeypatch.setitem(sys.modules, "pybullet", None)
         monkeypatch.setitem(sys.modules, "pybullet_data", None)
         for mod in list(sys.modules):
-            if mod == "gauntlet.env.pybullet" or mod.startswith(
-                "gauntlet.env.pybullet."
-            ):
+            if mod == "gauntlet.env.pybullet" or mod.startswith("gauntlet.env.pybullet."):
                 monkeypatch.delitem(sys.modules, mod, raising=False)
         # If a prior test successfully registered the backend, drop the
         # entry for the duration of this test so the loader actually
@@ -457,9 +455,7 @@ axes:
         monkeypatch.setitem(sys.modules, "pybullet", None)
         monkeypatch.setitem(sys.modules, "pybullet_data", None)
         for mod in list(sys.modules):
-            if mod == "gauntlet.env.pybullet" or mod.startswith(
-                "gauntlet.env.pybullet."
-            ):
+            if mod == "gauntlet.env.pybullet" or mod.startswith("gauntlet.env.pybullet."):
                 monkeypatch.delitem(sys.modules, mod, raising=False)
 
         with pytest.raises(ImportError) as excinfo:

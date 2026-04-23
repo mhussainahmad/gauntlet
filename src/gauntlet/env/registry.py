@@ -53,9 +53,7 @@ def get_env_factory(name: str) -> Callable[..., GauntletEnv]:
     try:
         return _REGISTRY[name]
     except KeyError as exc:
-        raise ValueError(
-            f"unknown env {name!r}; registered: {sorted(_REGISTRY)}"
-        ) from exc
+        raise ValueError(f"unknown env {name!r}; registered: {sorted(_REGISTRY)}") from exc
 
 
 def registered_envs() -> frozenset[str]:

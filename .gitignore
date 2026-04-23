@@ -38,3 +38,4 @@ results/
 .swarm/
 .mcp.json
 CLAUDE.md
+ruvector.db

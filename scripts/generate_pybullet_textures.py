@@ -17,12 +17,7 @@ from pathlib import Path
 
 
 def _png_chunk(tag: bytes, data: bytes) -> bytes:
-    return (
-        struct.pack(">I", len(data))
-        + tag
-        + data
-        + struct.pack(">I", zlib.crc32(tag + data))
-    )
+    return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data))
 
 
 def _solid_rgba_png(r: int, g: int, b: int, a: int, *, size: int = 2) -> bytes:
@@ -44,21 +39,13 @@ def _solid_rgba_png(r: int, g: int, b: int, a: int, *, size: int = 2) -> bytes:
     )
     idat = zlib.compress(raw, level=9)
     return (
-        signature
-        + _png_chunk(b"IHDR", ihdr)
-        + _png_chunk(b"IDAT", idat)
-        + _png_chunk(b"IEND", b"")
+        signature + _png_chunk(b"IHDR", ihdr) + _png_chunk(b"IDAT", idat) + _png_chunk(b"IEND", b"")
     )
 
 
 def main() -> int:
     assets = (
-        Path(__file__).resolve().parent.parent
-        / "src"
-        / "gauntlet"
-        / "env"
-        / "pybullet"
-        / "assets"
+        Path(__file__).resolve().parent.parent / "src" / "gauntlet" / "env" / "pybullet" / "assets"
     )
     assets.mkdir(parents=True, exist_ok=True)
     (assets / "cube_default.png").write_bytes(
