@@ -331,6 +331,27 @@ class GenesisTabletopEnv:
             )
             self._distractors.append(d)
 
+        # Optional render camera — only added when ``render_in_obs=True``
+        # so the state-only default path has zero extra scene-graph
+        # work. Genesis's ``add_camera(res=(W, H))`` takes width-first;
+        # our ``render_size`` is (height, width) to match MuJoCo, so we
+        # swap here. RFC-008 §3.6.
+        self._camera: Any | None
+        if self._render_in_obs:
+            h, w = self._render_size
+            self._camera = self._scene.add_camera(
+                res=(w, h),
+                pos=_CAM_EYE_BASELINE,
+                lookat=_CAM_TARGET,
+                up=_CAM_UP,
+                fov=_CAM_FOV,
+                near=_CAM_NEAR,
+                far=_CAM_FAR,
+                GUI=False,
+            )
+        else:
+            self._camera = None
+
         # Build fuses the scene and compiles kernels — first call is
         # ~4-5 s on CPU; subsequent builds in the same process are <1 s
         # (RFC-007 §Q4). Do not call per-episode.
@@ -368,14 +389,40 @@ class GenesisTabletopEnv:
     def _cube_quat(self) -> NDArray[np.float64]:
         return np.asarray(self._cube.get_quat().cpu().numpy(), dtype=np.float64)
 
-    def _build_obs(self) -> dict[str, NDArray[np.float64]]:
-        return {
+    def _build_obs(self) -> dict[str, NDArray[Any]]:
+        obs: dict[str, NDArray[Any]] = {
             "cube_pos": self._cube_pos(),
             "cube_quat": self._cube_quat(),
             "ee_pos": self._ee_pos(),
             "gripper": np.array([self._gripper_state], dtype=np.float64),
             "target_pos": self._target_pos.copy(),
         }
+        if self._render_in_obs:
+            obs["image"] = self._render_obs_image()
+        return obs
+
+    def _render_obs_image(self) -> NDArray[np.uint8]:
+        """Render the scene camera into a uint8 ``(H, W, 3)`` array.
+
+        Deterministic headless CPU Rasterizer path (RFC-008 §3.3). The
+        ``update_rigid`` call flushes any pending ``set_pos`` /
+        ``set_quat`` transforms into the Rasterizer context — without
+        it, post-``reset`` renders would see stale entity poses because
+        no ``scene.step()`` has run since the teleports (exploration
+        §2.4). ``scene.step()`` advances sim time 50 ms and corrupts
+        reset-time state for any free body under gravity, so we flush
+        transforms without stepping.
+
+        The private ``_context`` hop is honesty-flagged in RFC-008 §4.1
+        / §10 Q5 and pinned by ``genesis-world<0.5`` (RFC-007 §3).
+        """
+        assert self._camera is not None, (
+            "_render_obs_image called with render_in_obs=False; _build_obs "
+            "must gate this call on self._render_in_obs"
+        )
+        self._scene.visualizer.rasterizer._context.update_rigid()
+        rgb = self._camera.render(rgb=True)[0]
+        return np.ascontiguousarray(np.asarray(rgb, dtype=np.uint8))
 
     def _build_info(self) -> dict[str, Any]:
         return {
@@ -434,7 +481,7 @@ class GenesisTabletopEnv:
         *,
         seed: int | None = None,
         options: dict[str, Any] | None = None,
-    ) -> tuple[dict[str, NDArray[np.float64]], dict[str, Any]]:
+    ) -> tuple[dict[str, NDArray[Any]], dict[str, Any]]:
         """Deterministic reset.
 
         ``seed`` is the only entropy source. Ordering per RFC-005 §3.2:
@@ -481,7 +528,7 @@ class GenesisTabletopEnv:
     def step(
         self,
         action: NDArray[np.float64],
-    ) -> tuple[dict[str, NDArray[np.float64]], float, bool, bool, dict[str, Any]]:
+    ) -> tuple[dict[str, NDArray[Any]], float, bool, bool, dict[str, Any]]:
         """Advance one control step.
 
         Pipeline: clip -> update EE pose -> update grasp state ->
