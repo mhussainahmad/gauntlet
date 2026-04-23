@@ -54,6 +54,7 @@ __all__ = [
 # a user-facing install-hint error.
 BUILTIN_BACKEND_IMPORTS: Final[dict[str, str]] = {
     "tabletop-pybullet": "gauntlet.env.pybullet",
+    "tabletop-genesis": "gauntlet.env.genesis",
 }
 
 
