@@ -915,6 +915,97 @@ def test_replay_cli_help_mentions_override(tmp_path: Any) -> None:
         assert token in result.stdout
 
 
+def test_replay_dispatches_via_registry_when_env_factory_is_none() -> None:
+    """RFC-006 §9 / RFC-005 §11 dispatch bug — replay surface.
+
+    Mirrors the Runner-side regression (tests/test_runner.py): when the
+    caller leaves ``env_factory`` unset, :func:`replay_one` must
+    dispatch through :func:`get_env_factory` on ``suite.env`` rather
+    than silently falling back to MuJoCo's ``TabletopEnv``.
+    """
+    from collections.abc import Callable
+    from typing import cast
+
+    from gauntlet.env.base import GauntletEnv
+    from gauntlet.env.registry import register_env
+
+    # Sentinel backend + per-test counter. Kept inside the test to
+    # sidestep the CLI's ``--env-max-steps`` surface and focus on the
+    # ``env_factory is None`` path that the ``gauntlet replay``
+    # subcommand hits when the flag is not passed.
+    constructions: list[int] = [0]
+
+    class _ReplaySentinelEnv:
+        AXIS_NAMES = frozenset({"distractor_count"})
+        VISUAL_ONLY_AXES: frozenset[str] = frozenset()
+
+        def __init__(self) -> None:
+            from gymnasium import spaces
+
+            constructions[0] += 1
+            self.observation_space = spaces.Dict(
+                {"cube_pos": spaces.Box(low=-1.0, high=1.0, shape=(3,), dtype=np.float64)}
+            )
+            self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(7,), dtype=np.float64)
+
+        def reset(
+            self,
+            *,
+            seed: int | None = None,
+            options: dict[str, Any] | None = None,
+        ) -> tuple[dict[str, np.ndarray[Any, Any]], dict[str, Any]]:
+            return ({"cube_pos": np.zeros(3, dtype=np.float64)}, {"seed_echo": seed})
+
+        def step(
+            self,
+            action: np.ndarray[Any, Any],
+        ) -> tuple[dict[str, np.ndarray[Any, Any]], float, bool, bool, dict[str, Any]]:
+            return (
+                {"cube_pos": np.zeros(3, dtype=np.float64)},
+                1.0,
+                True,
+                False,
+                {"success": True, "step_count": 1},
+            )
+
+        def set_perturbation(self, name: str, value: float) -> None:
+            if name not in type(self).AXIS_NAMES:
+                raise ValueError(name)
+
+        def restore_baseline(self) -> None:
+            return None
+
+        def close(self) -> None:
+            return None
+
+    env_name = "_dispatch_test_env_replay"
+    register_env(env_name, cast("Callable[..., GauntletEnv]", _ReplaySentinelEnv))
+
+    # Build a Suite on the sentinel and run it once so the replay has a
+    # real Episode (carrying the master_seed + topology metadata) to
+    # reconstruct from. The original Runner call passes env_factory
+    # explicitly; the replay call does NOT — that is the path under test.
+    suite = Suite(
+        name="replay-dispatch",
+        env=env_name,
+        seed=41,
+        episodes_per_cell=1,
+        axes={"distractor_count": AxisSpec(values=[0.0])},
+    )
+    runner = Runner(n_workers=1)
+    episodes = runner.run(policy_factory=_make_scripted_policy, suite=suite)
+    target = episodes[0]
+
+    before = constructions[0]
+    replay_one(
+        target=target,
+        suite=suite,
+        policy_factory=_make_scripted_policy,
+        # env_factory deliberately omitted — exercise registry dispatch.
+    )
+    assert constructions[0] == before + 1
+
+
 def test_reconstructed_seed_matches_runner_seed() -> None:
     """End-to-end check of the two-level spawn reconstruction.
 

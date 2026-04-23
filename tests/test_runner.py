@@ -15,16 +15,17 @@ from __future__ import annotations
 import multiprocessing as mp
 import pickle
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pytest
 
+from gauntlet.env.base import GauntletEnv
+from gauntlet.env.registry import register_env
 from gauntlet.policy.base import Policy
 from gauntlet.policy.random import RandomPolicy
 from gauntlet.policy.scripted import ScriptedPolicy
 from gauntlet.runner import Episode, Runner, WorkItem
-from gauntlet.runner.runner import _default_env_factory
 from gauntlet.runner.worker import extract_env_seed
 from gauntlet.suite.schema import AxisSpec, Suite
 
@@ -422,12 +423,19 @@ def test_work_item_round_trips_through_pickle() -> None:
     assert extract_env_seed(restored.episode_seq) == extract_env_seed(seq)
 
 
-def test_default_env_factory_returns_tabletop_env() -> None:
-    """Sanity check the module-level default factory is wired up; this is
-    the factory the Runner uses when the caller doesn't supply one."""
+def test_default_factory_dispatches_tabletop_via_registry() -> None:
+    """When no ``env_factory`` is supplied, :meth:`Runner.run` dispatches
+    through :func:`get_env_factory` on ``suite.env``. For the default
+    MuJoCo ``tabletop`` backend the resolved factory is the
+    :class:`TabletopEnv` class itself (registered by
+    ``gauntlet.env.__init__``) — calling it with no args yields a
+    stock instance, matching the pre-fix ``_default_env_factory`` shape.
+    """
+    from gauntlet.env.registry import get_env_factory
     from gauntlet.env.tabletop import TabletopEnv
 
-    env = _default_env_factory()
+    factory = get_env_factory("tabletop")
+    env = factory()
     try:
         assert isinstance(env, TabletopEnv)
     finally:
@@ -535,8 +543,6 @@ def test_runner_accepts_non_tabletop_gauntlet_env_protocol_impl() -> None:
     structurally must drive the Runner end-to-end. If the Runner ever
     accidentally narrows to TabletopEnv again, this fails.
     """
-    from gauntlet.env.base import GauntletEnv
-
     # Sanity — the fake actually satisfies the Protocol at runtime.
     fake = _FakeProtocolEnv()
     assert isinstance(fake, GauntletEnv)
@@ -558,3 +564,60 @@ def test_runner_accepts_non_tabletop_gauntlet_env_protocol_impl() -> None:
     # The distractor_count axis values are preserved on the Episode.
     values = sorted(ep.perturbation_config["distractor_count"] for ep in episodes)
     assert values == [0.0, 1.0]
+
+
+# ----------------------------------------------------------------------------
+# RFC-006 §9 bullet 1 / RFC-005 §11 bug-fix regression: when the caller
+# leaves ``env_factory`` unset, the Runner must dispatch through the env
+# registry on ``suite.env``. The pre-fix Runner silently used MuJoCo
+# ``TabletopEnv`` regardless of ``suite.env`` — so ``env: tabletop-pybullet``
+# YAMLs ran on MuJoCo with the only clue being "results look wrong".
+# ----------------------------------------------------------------------------
+
+
+# Counter observable from the test-interpreter (the in-process path runs
+# in this interpreter — same rationale as ``_FACTORY_CALL_COUNTER``).
+_DISPATCH_ENV_CONSTRUCTIONS: list[int] = [0]
+
+
+class _DispatchSentinelEnv(_FakeProtocolEnv):
+    """Sub-Fake that records every construction in a module-level counter.
+
+    Inheriting ``_FakeProtocolEnv`` preserves the Protocol-conformant
+    reset/step/close surface; we only need to know *that* the class was
+    instantiated — the exact rollout behaviour is immaterial to this
+    test. Module-level so ``spawn`` would be able to pickle it even
+    though the regression test exercises ``n_workers=1``.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        _DISPATCH_ENV_CONSTRUCTIONS[0] += 1
+
+
+def test_runner_dispatches_via_registry_when_env_factory_is_none() -> None:
+    """Register a sentinel backend, run Runner(env_factory=None) against
+    a suite that names it, and assert the sentinel — not TabletopEnv —
+    was constructed. Uses a unique registry key so the test is safe
+    under pytest's session-scoped module-level registry.
+    """
+    env_name = "_dispatch_test_env_runner"
+    register_env(env_name, cast("Callable[..., GauntletEnv]", _DispatchSentinelEnv))
+
+    _DISPATCH_ENV_CONSTRUCTIONS[0] = 0
+
+    suite = Suite(
+        name="dispatch-test-suite",
+        env=env_name,
+        seed=3,
+        episodes_per_cell=1,
+        axes={"distractor_count": AxisSpec(values=[0.0])},
+    )
+
+    runner = Runner(n_workers=1)  # no env_factory -> registry dispatch
+    episodes = runner.run(policy_factory=make_scripted_policy, suite=suite)
+
+    assert len(episodes) == 1
+    # One cell * one episode -> exactly one env construction via the
+    # in-process fast path (which reuses a single env across items).
+    assert _DISPATCH_ENV_CONSTRUCTIONS[0] == 1
