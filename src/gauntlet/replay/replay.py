@@ -28,12 +28,11 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
-from typing import cast
 
 import numpy as np
 
 from gauntlet.env.base import GauntletEnv
-from gauntlet.env.tabletop import TabletopEnv
+from gauntlet.env.registry import get_env_factory
 from gauntlet.policy.base import Policy
 from gauntlet.replay.overrides import validate_overrides
 from gauntlet.runner import Episode, execute_one
@@ -43,16 +42,6 @@ from gauntlet.suite.schema import Suite
 __all__ = [
     "replay_one",
 ]
-
-
-def _default_env_factory() -> GauntletEnv:
-    """Module-level default env factory for the in-process driver.
-
-    Widened to :class:`GauntletEnv` (the Protocol) so the CLI can pass
-    its factory through — see ``src/gauntlet/cli.py::_make_env_factory``.
-    Concrete return remains :class:`TabletopEnv` for backward compat.
-    """
-    return cast(GauntletEnv, TabletopEnv())
 
 
 def _reconstruct_episode_seq(
@@ -168,9 +157,11 @@ def replay_one(
             the replayed rollout. Empty / ``None`` yields a zero-
             override replay, which RFC §9 pins as bit-identical to
             the original Episode.
-        env_factory: Optional zero-arg env factory. Defaults to a
-            stock :class:`TabletopEnv`. The env is closed in a
-            ``finally`` after the rollout.
+        env_factory: Optional zero-arg env factory. When ``None`` (the
+            default), dispatches via
+            :func:`gauntlet.env.registry.get_env_factory` on
+            ``suite.env``, matching the Runner's own dispatch contract.
+            The env is closed in a ``finally`` after the rollout.
 
     Returns:
         A freshly produced :class:`Episode`. Identical in every
@@ -225,7 +216,7 @@ def replay_one(
         episodes_per_cell=episodes_per_cell,
     )
 
-    factory = env_factory if env_factory is not None else _default_env_factory
+    factory = env_factory if env_factory is not None else get_env_factory(suite.env)
     env = factory()
     try:
         return execute_one(env, policy_factory, item)
