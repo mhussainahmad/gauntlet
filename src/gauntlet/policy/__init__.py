@@ -37,12 +37,20 @@ def __getattr__(name: str) -> Any:
     """Lazily expose ``HuggingFacePolicy`` without importing torch on package load.
 
     ``from gauntlet.policy import RandomPolicy`` must keep working on a
-    torch-free install (spec §6). Only ``from gauntlet.policy import
-    HuggingFacePolicy`` triggers the submodule import, which is where the
-    clear ``ImportError(_HF_INSTALL_HINT)`` originates if the ``[hf]``
-    extra is missing. See docs/phase2-rfc-001-huggingface-policy.md §3.
+    torch-free install (spec §6). Accessing ``HuggingFacePolicy`` — whether
+    via ``from gauntlet.policy import HuggingFacePolicy`` or
+    ``gauntlet.policy.HuggingFacePolicy`` — triggers the import-time check
+    here: if torch is unavailable we raise ``ImportError`` with the
+    install hint *at attribute-access time*, per
+    docs/phase2-rfc-001-huggingface-policy.md §3.
     """
     if name == "HuggingFacePolicy":
+        from gauntlet.policy.huggingface import _HF_INSTALL_HINT
+
+        try:
+            import torch  # noqa: F401 — presence check for the [hf] extra.
+        except ImportError as exc:
+            raise ImportError(_HF_INSTALL_HINT) from exc
         from gauntlet.policy.huggingface import HuggingFacePolicy
 
         return HuggingFacePolicy
