@@ -11,6 +11,7 @@ torch-free per spec §6.
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -87,6 +88,18 @@ class HuggingFacePolicy:
     ImportError: if the ``[hf]`` extra is not installed (clear install hint).
     KeyError: on ``act`` if ``image_obs_key`` is missing from ``obs``.
     ValueError: on ``act`` if the image shape/dtype is not ``(H, W, 3), uint8``.
+
+    Notes
+    -----
+    ``act()`` applies the gripper convention flip
+    (OpenVLA ``[0, 1]`` with ``0 = open, 1 = close`` →
+    TabletopEnv ``[+1 open, -1 close]``) unconditionally, per RFC §7. It
+    does NOT rescale the twist magnitudes on ``action[:6]``: BridgeData V2's
+    ``unnorm_key`` emits world-frame metre deltas that can exceed
+    TabletopEnv's ``[-1, 1]`` per-step bounds. We pass them through and
+    emit a ``RuntimeWarning`` when any twist component is OOB, so an
+    adapter/unnorm-key mismatch surfaces loudly instead of being silently
+    clipped by ``TabletopEnv.step``.
     """
 
     def __init__(
@@ -158,8 +171,12 @@ class HuggingFacePolicy:
 
         Extracts ``obs[image_obs_key]`` as a ``uint8 (H, W, 3)`` array,
         wraps it in ``PIL.Image``, runs the processor with the cached prompt,
-        calls ``predict_action`` on the loaded model, and returns a
-        ``np.float64`` array matching ``TabletopEnv.action_space``.
+        and calls ``predict_action`` on the loaded model. The returned
+        ``np.float64`` array has the gripper convention flipped from OpenVLA's
+        ``[0, 1]`` (``0 = open, 1 = close``) to TabletopEnv's
+        ``[+1 open, -1 close]``; twist magnitudes on ``action[:6]`` are NOT
+        rescaled, and a ``RuntimeWarning`` is emitted if any twist coordinate
+        exceeds ``[-1, 1]`` (see RFC §7).
         """
         if self.image_obs_key not in obs:
             raise KeyError(
@@ -176,6 +193,30 @@ class HuggingFacePolicy:
         raw_action = self._model.predict_action(**inputs, **kwargs)
 
         action = np.asarray(raw_action, dtype=np.float64).reshape(-1)
+
+        # OpenVLA emits gripper in [0, 1] (0 = open, 1 = close).
+        # TabletopEnv's action_space expects [+1 = open, -1 = close] with a
+        # binary snap in TabletopEnv.step. Flip once so downstream sees the
+        # env's convention.
+        action[6] = 1.0 - 2.0 * action[6]
+
+        # RFC §7: the BridgeData V2 unnorm_key emits world-frame metre deltas
+        # that can exceed TabletopEnv's [-1, 1] per-step bounds. Don't silently
+        # clip in TabletopEnv.step — surface the mismatch so "my adapter is
+        # broken" doesn't look like "my policy is dumb". Spec §6: never
+        # aggregate away failures.
+        twist = action[:6]
+        max_twist = float(np.max(np.abs(twist)))
+        if max_twist > 1.0:
+            warnings.warn(
+                f"HuggingFacePolicy: twist command exceeds TabletopEnv's [-1, 1] "
+                f"bounds (max |twist| = {max_twist:.3f}); TabletopEnv.step will clip. "
+                f"Check your unnorm_key (BridgeData V2 uses metre deltas) and "
+                f"consider rescaling.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+
         return cast("Action", action)
 
     def reset(self, rng: np.random.Generator) -> None:
