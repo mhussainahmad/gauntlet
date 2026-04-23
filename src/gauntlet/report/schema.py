@@ -130,6 +130,12 @@ class Report(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     suite_name: str
+    # Optional for Phase-1 compat: old report JSONs (pre RFC-005) do
+    # not carry the env slug and we accept them unchanged. New reports
+    # written by :func:`gauntlet.report.analyze.build_report` always
+    # set it when the caller passes the Suite. :command:`gauntlet compare`
+    # uses this to detect cross-backend comparisons (§12 Q2).
+    suite_env: str | None = None
     n_episodes: int
     n_success: int
     per_axis: list[AxisBreakdown]
