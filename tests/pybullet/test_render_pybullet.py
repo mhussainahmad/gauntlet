@@ -13,6 +13,8 @@ real environments run — no MagicMock.
 
 from __future__ import annotations
 
+import pathlib
+
 import numpy as np
 import pytest
 from gymnasium import spaces
@@ -203,6 +205,24 @@ class TestCosmeticAxisSensitivity:
         finally:
             env.close()
 
+    def test_distractor_count_changes_pixels(self) -> None:
+        """RFC-006 §5 claim: revealed distractors appear as coloured boxes.
+
+        State-effecting axis but also observable in pixels — the only
+        axis for which both columns of the §5 table are 'Yes.' This test
+        closes the loop on that claim: zero visible distractors vs five
+        visible distractors → distinct images.
+        """
+        env = PyBulletTabletopEnv(render_in_obs=True, render_size=(64, 64))
+        try:
+            env.set_perturbation("distractor_count", 0)
+            obs_none, _ = env.reset(seed=0)
+            env.set_perturbation("distractor_count", 5)
+            obs_some, _ = env.reset(seed=0)
+            assert not np.array_equal(obs_none["image"], obs_some["image"])
+        finally:
+            env.close()
+
 class TestCrossBackendShapeParity:
     """``obs["image"]`` Box spec must match TabletopEnv byte-for-byte.
 
@@ -245,6 +265,51 @@ def _make_fast_rendering_pybullet_env() -> PyBulletTabletopEnv:
     test_env_pybullet.py means future ``n_workers>=2`` tests can reuse it).
     """
     return PyBulletTabletopEnv(max_steps=10, render_in_obs=True, render_size=(64, 64))
+
+
+class TestTrajectoryRecorderInteraction:
+    """``render_in_obs=True`` + ``Runner(trajectory_dir=...)`` must coexist.
+
+    The trajectory recorder currently casts every obs array to float64
+    before stacking (``src/gauntlet/runner/worker.py``). Images (native
+    uint8) therefore land in the NPZ as float64 — ~8x inflation, not a
+    crash. This test locks the "no crash, NPZ contains an obs_image
+    array" contract so a future dtype-preserving refactor can not break
+    the interaction silently.
+    """
+
+    def test_trajectory_dir_with_rendering_writes_image_npz(self, tmp_path: pathlib.Path) -> None:
+        import numpy as _np
+
+        from gauntlet.runner import Runner
+        from gauntlet.suite.schema import Suite
+        from tests.pybullet.test_env_pybullet import make_random_policy
+
+        suite = Suite.model_validate(
+            {
+                "name": "pybullet-render-trajectory",
+                "env": "tabletop-pybullet",
+                "episodes_per_cell": 1,
+                "seed": 3,
+                "axes": {"distractor_count": {"values": [0, 2]}},
+            }
+        )
+        runner = Runner(
+            n_workers=1,
+            env_factory=_make_fast_rendering_pybullet_env,
+            trajectory_dir=tmp_path,
+        )
+        eps = runner.run(policy_factory=make_random_policy, suite=suite)
+        assert len(eps) == 2
+
+        npz_files = sorted(tmp_path.glob("*.npz"))
+        assert len(npz_files) == 2
+        with _np.load(npz_files[0]) as z:
+            assert "obs_image" in z.files
+            img = z["obs_image"]
+            # Timesteps come first; rendered shape afterwards.
+            assert img.ndim == 4
+            assert img.shape[1:] == (64, 64, 3)
 
 
 class TestRandomPolicyRenderingSmoke:

@@ -159,6 +159,13 @@ class PyBulletTabletopEnv:
     observation_space: gym.spaces.Space[Any]
     action_space: gym.spaces.Space[Any]
 
+    # ``render_in_obs`` interaction with the Runner's trajectory recorder
+    # (``trajectory_dir``, RFC-004): works, but the recorder currently casts
+    # every obs value to float64 before stacking (see
+    # ``src/gauntlet/runner/worker.py``). Images go into the NPZ as float64,
+    # ~8x the uint8 footprint. Not a correctness issue; a memory-efficiency
+    # follow-up (dtype-preserving recorder) is tracked outside RFC-006.
+
     def __init__(
         self,
         *,
