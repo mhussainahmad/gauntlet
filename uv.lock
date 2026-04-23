@@ -815,6 +815,10 @@ lerobot = [
     { name = "pillow" },
     { name = "transformers" },
 ]
+monitor = [
+    { name = "pillow" },
+    { name = "torch" },
+]
 pybullet = [
     { name = "pybullet" },
 ]
@@ -846,6 +850,15 @@ lerobot-dev = [
     { name = "ruff" },
     { name = "types-pyyaml" },
 ]
+monitor-dev = [
+    { name = "mypy" },
+    { name = "pandas-stubs" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "pytest-mock" },
+    { name = "ruff" },
+    { name = "types-pyyaml" },
+]
 pybullet-dev = [
     { name = "mypy" },
     { name = "pandas-stubs" },
@@ -866,17 +879,19 @@ requires-dist = [
     { name = "pandas", specifier = ">=2.2,<3" },
     { name = "pillow", marker = "extra == 'hf'", specifier = ">=10.0,<12" },
     { name = "pillow", marker = "extra == 'lerobot'", specifier = ">=10.0,<12" },
+    { name = "pillow", marker = "extra == 'monitor'", specifier = ">=10.0,<12" },
     { name = "pybullet", marker = "extra == 'pybullet'", specifier = ">=3.2,<4" },
     { name = "pydantic", specifier = ">=2.7,<3" },
     { name = "pyyaml", specifier = ">=6.0,<7" },
     { name = "timm", marker = "extra == 'hf'", specifier = ">=0.9.10,<2" },
     { name = "tokenizers", marker = "extra == 'hf'", specifier = ">=0.19,<1" },
     { name = "torch", marker = "extra == 'hf'", specifier = ">=2.2,<3" },
+    { name = "torch", marker = "extra == 'monitor'", specifier = ">=2.2,<3" },
     { name = "transformers", marker = "extra == 'hf'", specifier = ">=4.40,<5" },
     { name = "transformers", marker = "extra == 'lerobot'", specifier = ">=4.40,<5" },
     { name = "typer", specifier = ">=0.12,<1" },
 ]
-provides-extras = ["hf", "lerobot", "pybullet"]
+provides-extras = ["hf", "lerobot", "monitor", "pybullet"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -897,6 +912,15 @@ hf-dev = [
     { name = "types-pyyaml", specifier = ">=6.0,<7" },
 ]
 lerobot-dev = [
+    { name = "mypy", specifier = ">=1.11,<2" },
+    { name = "pandas-stubs", specifier = ">=2.2,<3" },
+    { name = "pytest", specifier = ">=8.2,<9" },
+    { name = "pytest-cov", specifier = ">=5.0,<7" },
+    { name = "pytest-mock", specifier = ">=3.12,<4" },
+    { name = "ruff", specifier = ">=0.6,<1" },
+    { name = "types-pyyaml", specifier = ">=6.0,<7" },
+]
+monitor-dev = [
     { name = "mypy", specifier = ">=1.11,<2" },
     { name = "pandas-stubs", specifier = ">=2.2,<3" },
     { name = "pytest", specifier = ">=8.2,<9" },

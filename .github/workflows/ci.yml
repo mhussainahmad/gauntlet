@@ -33,7 +33,9 @@ jobs:
 
       # Default job stays torch-free and extras-free — continuous
       # enforcement of spec §6's "small deps" / "no torch in core" rule.
-      # Every extras-gated suite (hf, lerobot, pybullet) is de-selected.
+      # Every extras-gated suite (hf, lerobot, monitor, pybullet) is
+      # de-selected; any accidental torch import in gauntlet.core would
+      # trigger ModuleNotFoundError here.
       - name: Sync dependencies (no extras)
         run: uv sync --dev --python ${{ matrix.python-version }}
 
@@ -47,7 +49,7 @@ jobs:
         run: uv run mypy
 
       - name: Run tests (excludes extras-gated markers)
-        run: uv run pytest -m "not hf and not lerobot and not pybullet"
+        run: uv run pytest -m "not hf and not lerobot and not monitor and not pybullet"
 
   hf-tests:
     name: hf tests (py${{ matrix.python-version }})
@@ -100,11 +102,34 @@ jobs:
       - name: Sync dependencies (with lerobot extra + lerobot-dev group)
         run: uv sync --extra lerobot --group lerobot-dev --python ${{ matrix.python-version }}
 
-      # lerobot-tests mock at the SmolVLAPolicy.from_pretrained /
-      # make_pre_post_processors seams — no real weights downloaded, no GPU
-      # needed. See RFC-002 §6.
       - name: Run lerobot tests
         run: uv run pytest -m lerobot
+
+  monitor-tests:
+    name: monitor-tests (torch, py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Sync dependencies (with [monitor] extra + monitor-dev group)
+        run: uv sync --extra monitor --group monitor-dev --python ${{ matrix.python-version }}
+
+      - name: Run monitor-marked tests
+        run: uv run pytest -m monitor
 
   pybullet-tests:
     name: pybullet backend tests (py${{ matrix.python-version }})
