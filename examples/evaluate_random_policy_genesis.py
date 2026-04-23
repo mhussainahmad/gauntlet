@@ -41,6 +41,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+from gauntlet.env.genesis import GenesisTabletopEnv
 from gauntlet.policy import RandomPolicy
 from gauntlet.report import Report, build_report, write_html
 from gauntlet.report.html import _nan_to_none
@@ -61,20 +62,21 @@ _DEFAULT_SUITE: Path = _REPO_ROOT / "examples" / "suites" / "tabletop-genesis-sm
 _DEFAULT_OUT: Path = _REPO_ROOT / "out-genesis"
 
 
-def _build_env_factory(max_steps: int) -> Callable[[], Any]:
-    """Picklable env factory for the Genesis backend.
+def _build_env_factory(max_steps: int) -> Callable[[], GenesisTabletopEnv]:
+    """Return a picklable env factory that caps rollout length.
 
-    Deferred ``from gauntlet.env.genesis import GenesisTabletopEnv``
-    inside the factory keeps the parent process torch/genesis-free
-    until the worker actually spawns.
+    ``functools.partial`` over the class is the canonical spawn-friendly
+    factory — matches ``examples/evaluate_random_policy.py`` and
+    ``examples/evaluate_smolvla_pybullet.py``. A closure nested inside
+    this function would refuse to pickle under ``n_workers >= 2`` and
+    silently work only on the in-process ``n_workers == 1`` path.
+
+    :class:`GenesisTabletopEnv` is imported at module scope in this
+    example; the "parent-process-torch-free" rule applies to
+    ``gauntlet.core``, not to example scripts that run post
+    ``uv sync --extra genesis``.
     """
-
-    def _factory() -> Any:
-        from gauntlet.env.genesis import GenesisTabletopEnv
-
-        return GenesisTabletopEnv(max_steps=max_steps)
-
-    return _factory
+    return partial(GenesisTabletopEnv, max_steps=max_steps)
 
 
 def _build_policy_factory(action_dim: int) -> Callable[[], RandomPolicy]:
