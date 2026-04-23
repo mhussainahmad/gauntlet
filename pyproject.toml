@@ -92,6 +92,14 @@ ignore = []
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["B011"]
+# The monitor torch modules put ``try: import torch`` at module scope
+# to raise the install-hint before any downstream import runs. That
+# forces ``from gauntlet.monitor.{ae,train,score}`` imports of the
+# sibling torch-free modules (``schema``, ``entropy``) to land below
+# the guard, which ruff flags as E402. The ordering is intentional.
+"src/gauntlet/monitor/ae.py" = ["E402"]
+"src/gauntlet/monitor/train.py" = ["E402"]
+"src/gauntlet/monitor/score.py" = ["E402"]
 
 [tool.mypy]
 python_version = "3.11"
@@ -124,6 +132,14 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = ["torch", "torch.*", "PIL", "PIL.*"]
 ignore_missing_imports = true
+
+# ``StateAutoencoder(nn.Module)`` subclasses torch.nn.Module — typed as
+# ``Any`` when the stubs are absent. mypy --strict's
+# ``disallow_subclassing_any`` would flag that; we relax it only inside
+# the monitor tree so the rest of the codebase keeps the strict rule.
+[[tool.mypy.overrides]]
+module = ["gauntlet.monitor.ae", "gauntlet.monitor.train", "gauntlet.monitor.score"]
+disallow_subclassing_any = false
 
 [tool.pytest.ini_options]
 minversion = "8.0"
