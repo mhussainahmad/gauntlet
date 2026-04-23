@@ -194,9 +194,7 @@ class Runner:
         # ``env: tabletop-pybullet`` must produce :class:`PyBulletTabletopEnv`,
         # not the MuJoCo built-in.
         env_factory = (
-            self._env_factory
-            if self._env_factory is not None
-            else get_env_factory(suite.env)
+            self._env_factory if self._env_factory is not None else get_env_factory(suite.env)
         )
 
         # Ensure the trajectory dir exists exactly once on the main
