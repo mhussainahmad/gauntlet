@@ -318,3 +318,65 @@ class TestProtocolConformance:
         policy.reset(np.random.default_rng(0))
         # Still satisfies protocol after reset.
         assert isinstance(policy, Policy)
+
+
+# --------------------------------------------------------------------- RFC §7 — action adaptation
+
+
+class TestActionAdaptation:
+    """RFC §7 defaults: gripper convention flip + OOB twist warning."""
+
+    def test_gripper_convention_is_flipped(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _install_hf_mocks(monkeypatch)
+        from gauntlet.policy.huggingface import HuggingFacePolicy
+
+        policy = HuggingFacePolicy(
+            repo_id="dummy/repo",
+            instruction="grasp the cube",
+            device="cpu",
+            dtype="float32",
+        )
+
+        # Case A: 0.7 (OpenVLA leaning closed) → 1.0 - 1.4 = -0.4.
+        policy._model.predict_action.return_value = np.array(
+            [0, 0, 0, 0, 0, 0, 0.7], dtype=np.float32
+        )
+        action = policy.act({"image": _zeros_image()})
+        assert action[6] == pytest.approx(-0.4)
+
+        # Case B: 0.0 (OpenVLA open) → +1.0 (TabletopEnv open).
+        policy._model.predict_action.return_value = np.array(
+            [0, 0, 0, 0, 0, 0, 0.0], dtype=np.float32
+        )
+        action = policy.act({"image": _zeros_image()})
+        assert action[6] == pytest.approx(1.0)
+
+        # Case C: 1.0 (OpenVLA fully closed) → -1.0 (TabletopEnv closed).
+        policy._model.predict_action.return_value = np.array(
+            [0, 0, 0, 0, 0, 0, 1.0], dtype=np.float32
+        )
+        action = policy.act({"image": _zeros_image()})
+        assert action[6] == pytest.approx(-1.0)
+
+    def test_warns_when_twist_exceeds_unit_bounds(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _install_hf_mocks(monkeypatch)
+        from gauntlet.policy.huggingface import HuggingFacePolicy
+
+        policy = HuggingFacePolicy(
+            repo_id="dummy/repo",
+            instruction="grasp the cube",
+            device="cpu",
+            dtype="float32",
+        )
+        policy._model.predict_action.return_value = np.array(
+            [2.0, 0, 0, 0, 0, 0, 0.5], dtype=np.float32
+        )
+
+        with pytest.warns(RuntimeWarning, match="twist command exceeds"):
+            action = policy.act({"image": _zeros_image()})
+
+        # Adapter does NOT rescale twist — passes through unchanged.
+        assert action[0] == pytest.approx(2.0)
+        assert np.all(action[1:6] == 0.0)
+        # Gripper flip still applied: 0.5 → 1.0 - 1.0 = 0.0.
+        assert action[6] == pytest.approx(0.0)
