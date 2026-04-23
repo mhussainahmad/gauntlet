@@ -100,6 +100,11 @@ ignore = []
 "src/gauntlet/monitor/ae.py" = ["E402"]
 "src/gauntlet/monitor/train.py" = ["E402"]
 "src/gauntlet/monitor/score.py" = ["E402"]
+# The monitor-marked test module calls ``pytest.importorskip('torch')``
+# at module scope so the default (torch-free) pytest collection does
+# not blow up. Imports of torch-backed gauntlet modules therefore land
+# after executable statements — same E402 pattern as the modules above.
+"tests/monitor/test_ae.py" = ["E402"]
 
 [tool.mypy]
 python_version = "3.11"

@@ -34,15 +34,15 @@ pytestmark = pytest.mark.monitor
 # whole run.
 torch = pytest.importorskip("torch")
 
-from gauntlet.monitor.ae import (  # noqa: E402
+from gauntlet.monitor.ae import (
     INPUT_DIM,
     StateAutoencoder,
     load_state_autoencoder,
 )
-from gauntlet.monitor.schema import DriftReport, PerEpisodeDrift  # noqa: E402
-from gauntlet.monitor.score import score_drift  # noqa: E402
-from gauntlet.monitor.train import train_ae  # noqa: E402
-from gauntlet.runner.worker import trajectory_path_for, write_trajectory_npz  # noqa: E402
+from gauntlet.monitor.schema import DriftReport, PerEpisodeDrift
+from gauntlet.monitor.score import score_drift
+from gauntlet.monitor.train import train_ae
+from gauntlet.runner.worker import trajectory_path_for, write_trajectory_npz
 
 # ----------------------------------------------------------------------------
 # Tiny synthetic-data helpers.
