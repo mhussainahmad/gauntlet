@@ -24,36 +24,45 @@ observability. The public surface is still unstable.
 
 ## Backends
 
-Gauntlet ships two simulator backends. The Suite YAML's `env:` key is
-the dispatch: `tabletop` uses MuJoCo (default, ships in the core
-install); `tabletop-pybullet` uses PyBullet and lives behind an
-optional extra.
+Gauntlet ships three simulator backends. The Suite YAML's `env:` key
+is the dispatch: `tabletop` uses MuJoCo (default, ships in the core
+install); `tabletop-pybullet` and `tabletop-genesis` each live behind
+an optional extra.
 
 | `env:` slug          | Simulator | Install                                  | Observations |
 |----------------------|-----------|------------------------------------------|--------------|
 | `tabletop`           | MuJoCo    | `uv sync` (core)                         | State + render-on-demand |
 | `tabletop-pybullet`  | PyBullet  | `uv sync --extra pybullet`               | State + render-on-demand |
+| `tabletop-genesis`   | Genesis   | `uv sync --extra genesis`                | State-only (rendering follow-up) |
 
-The two backends share action/observation spaces byte-for-byte and the
-canonical 7 perturbation axes. They are **not** numerically identical:
-same policy + same seed on `tabletop` vs `tabletop-pybullet` produces
-semantically similar but numerically different trajectories. Running
-`gauntlet compare` across backends measures simulator drift, not
-policy regression; the CLI requires `--allow-cross-backend` to proceed.
+The three backends share action/observation spaces byte-for-byte and
+the canonical 7 perturbation axes. They are **not** numerically
+identical: same policy + same seed on `tabletop` vs `tabletop-pybullet`
+vs `tabletop-genesis` produces semantically similar but numerically
+different trajectories. Running `gauntlet compare` across backends
+measures simulator drift, not policy regression; the CLI requires
+`--allow-cross-backend` to proceed.
 
-Image observations are available on either backend via
-`render_in_obs=True` / `render_size=(H, W)` on the env constructor
+Image observations are available on the MuJoCo and PyBullet backends
+via `render_in_obs=True` / `render_size=(H, W)` on the env constructor
 (`TabletopEnv` or `PyBulletTabletopEnv`). PyBullet uses a headless,
 deterministic TINY rasteriser; the emitted `obs["image"]` Box has
 shape / dtype / bounds byte-identical to MuJoCo's, so VLA adapters
 (OpenVLA, SmolVLA) work on either backend by swapping only the env
 factory. Pixel values explicitly differ (different rasterisers —
-semantic parity only).
+semantic parity only). The Genesis backend is state-only on this
+first cut; its four cosmetic axes (`lighting_intensity`,
+`camera_offset_{x,y}`, `object_texture`) are declared `VISUAL_ONLY`
+pending a follow-up rendering RFC — the three state-affecting axes
+(`object_initial_pose_{x,y}`, `distractor_count`) produce
+observable deltas today.
 
 See [`docs/phase2-rfc-005-pybullet-adapter.md`](./docs/phase2-rfc-005-pybullet-adapter.md)
-for the full PyBullet backend design, and
+for the full PyBullet backend design,
 [`docs/phase2-rfc-006-pybullet-rendering.md`](./docs/phase2-rfc-006-pybullet-rendering.md)
-for the image-observation follow-up.
+for PyBullet's image-observation follow-up, and
+[`docs/phase2-rfc-007-genesis-adapter.md`](./docs/phase2-rfc-007-genesis-adapter.md)
+for the Genesis backend design.
 
 ## Quickstart
 
@@ -75,7 +84,10 @@ tiny; for the canonical 4-axis x 144-cell x 1440-rollout shape, swap the
 YAML path for `examples/suites/tabletop-basic-v1.yaml`. See
 [`GAUNTLET_SPEC.md`](./GAUNTLET_SPEC.md) for the full design and
 [`examples/evaluate_random_policy.py`](./examples/evaluate_random_policy.py)
-for the equivalent invocation via the public Python API.
+for the equivalent invocation via the public Python API. For the
+Genesis backend, `uv sync --extra genesis` then
+[`examples/evaluate_random_policy_genesis.py`](./examples/evaluate_random_policy_genesis.py)
+drives the same smoke suite against `tabletop-genesis`.
 
 ### Using a real VLA
 
@@ -135,7 +147,7 @@ uv run pytest
 ```
 src/gauntlet/
   policy/    # Policy adapter protocol + reference wrappers (Random, Scripted, HF, LeRobot)
-  env/       # Parameterized envs — MuJoCo (core) + PyBullet ([pybullet] extra)
+  env/       # Parameterized envs — MuJoCo (core) + PyBullet ([pybullet] extra) + Genesis ([genesis] extra)
   suite/     # YAML-defined perturbation grid suites
   runner/    # Parallel rollout orchestration + seed management
   report/    # Failure analysis + HTML/JSON generation
