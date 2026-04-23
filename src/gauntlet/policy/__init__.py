@@ -18,11 +18,13 @@ from gauntlet.policy.scripted import ScriptedPolicy as ScriptedPolicy
 
 if TYPE_CHECKING:  # pragma: no cover — re-export is dynamic, see __getattr__ below.
     from gauntlet.policy.huggingface import HuggingFacePolicy as HuggingFacePolicy
+    from gauntlet.policy.lerobot import LeRobotPolicy as LeRobotPolicy
 
 __all__ = [
     "DEFAULT_PICK_AND_PLACE_TRAJECTORY",
     "Action",
     "HuggingFacePolicy",
+    "LeRobotPolicy",
     "Observation",
     "Policy",
     "PolicySpecError",
@@ -34,15 +36,16 @@ __all__ = [
 
 
 def __getattr__(name: str) -> Any:
-    """Lazily expose ``HuggingFacePolicy`` without importing torch on package load.
+    """Lazily expose the VLA adapters without importing torch on package load.
 
     ``from gauntlet.policy import RandomPolicy`` must keep working on a
-    torch-free install (spec §6). Accessing ``HuggingFacePolicy`` — whether
-    via ``from gauntlet.policy import HuggingFacePolicy`` or
-    ``gauntlet.policy.HuggingFacePolicy`` — triggers the import-time check
-    here: if torch is unavailable we raise ``ImportError`` with the
-    install hint *at attribute-access time*, per
-    docs/phase2-rfc-001-huggingface-policy.md §3.
+    torch-free install (spec §6). Accessing ``HuggingFacePolicy`` or
+    ``LeRobotPolicy`` — whether via a ``from`` import or attribute access —
+    triggers the import-time presence check here: if the relevant extra is
+    unavailable we raise ``ImportError`` with the install hint *at
+    attribute-access time*, per
+    docs/phase2-rfc-001-huggingface-policy.md §3 and
+    docs/phase2-rfc-002-lerobot-smolvla.md §5.
     """
     if name == "HuggingFacePolicy":
         from gauntlet.policy.huggingface import _HF_INSTALL_HINT
@@ -54,4 +57,14 @@ def __getattr__(name: str) -> Any:
         from gauntlet.policy.huggingface import HuggingFacePolicy
 
         return HuggingFacePolicy
+    if name == "LeRobotPolicy":
+        from gauntlet.policy.lerobot import _LEROBOT_INSTALL_HINT
+
+        try:
+            import lerobot  # noqa: F401 — presence check for the [lerobot] extra.
+        except ImportError as exc:
+            raise ImportError(_LEROBOT_INSTALL_HINT) from exc
+        from gauntlet.policy.lerobot import LeRobotPolicy
+
+        return LeRobotPolicy
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
