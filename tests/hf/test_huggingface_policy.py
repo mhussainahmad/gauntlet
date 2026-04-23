@@ -10,8 +10,6 @@ See docs/phase2-rfc-001-huggingface-policy.md §6 for case numbering.
 
 from __future__ import annotations
 
-import importlib
-import sys
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -67,44 +65,24 @@ def _install_hf_mocks(monkeypatch: pytest.MonkeyPatch) -> tuple[MagicMock, Magic
     return processor_loader, model_loader
 
 
-# --------------------------------------------------------------------- case 1 & 2
+# --------------------------------------------------------------------- case 2 (partial)
+#
+# Cases 1 and 2's torch-missing paths moved to tests/test_import_guards.py
+# so they run in the default (torch-free) pytest job — that's where the
+# contract actually needs enforcing. The laziness assertion below does
+# not require torch to be absent, so it stays marked ``@pytest.mark.hf``.
 
 
 class TestImportGuards:
-    """Cases 1 & 2 — these tests also run in the default job because the
-    import-guard contract must hold whether or not ``[hf]`` is installed.
-    """
-
-    def test_import_guard_raises_install_hint_when_torch_missing(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        # Force ``import torch`` inside ``HuggingFacePolicy.__init__`` to fail
-        # even though torch IS installed in the hf-tests job. Putting ``None``
-        # in ``sys.modules`` is the documented sentinel that turns the next
-        # ``import x`` into ImportError.
-        monkeypatch.setitem(sys.modules, "torch", None)
-        # Reload the module so the ``try/except ImportError`` inside __init__
-        # sees the patched sys.modules rather than a cached-in reference.
-        import gauntlet.policy.huggingface as hf_mod
-
-        importlib.reload(hf_mod)
-
-        with pytest.raises(ImportError, match="uv sync --extra hf"):
-            hf_mod.HuggingFacePolicy(repo_id="dummy/repo", instruction="pick up the red cube")
-
-        # Restore for later tests in this file.
-        monkeypatch.delitem(sys.modules, "torch", raising=False)
-        importlib.reload(hf_mod)
-
     def test_reexport_guard_lazy(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Importing ``gauntlet.policy`` must not import torch.
 
         The re-export in ``gauntlet.policy.__init__`` uses a module-level
         ``__getattr__`` so ``from gauntlet.policy import RandomPolicy``
-        still works on torch-free installs. Accessing
-        ``HuggingFacePolicy`` is what triggers the torch presence check
-        and raises ``ImportError(_HF_INSTALL_HINT)`` at attribute-access
-        time (RFC §6 case 2).
+        still works on torch-free installs. This test verifies the
+        attribute-lookup plumbing (unknown attr → AttributeError, not
+        ImportError); the torch-missing behaviour is covered in
+        ``tests/test_import_guards.py``.
         """
         import gauntlet.policy as pkg
 
@@ -113,28 +91,6 @@ class TestImportGuards:
         # Unknown attr raises AttributeError, not ImportError.
         with pytest.raises(AttributeError, match="HuggingNothingPolicy"):
             pkg.__getattr__("HuggingNothingPolicy")
-
-    def test_reexport_raises_install_hint_at_attribute_access(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """``from gauntlet.policy import HuggingFacePolicy`` must fail loudly
-        at attribute-access time when the ``[hf]`` extra is missing — NOT
-        at ``import gauntlet.policy`` time, which would break the
-        torch-free install promise for every other policy user.
-        """
-        # Sentinel-None in sys.modules makes the next ``import torch`` raise.
-        monkeypatch.setitem(sys.modules, "torch", None)
-        import gauntlet.policy as pkg
-
-        # ``from gauntlet.policy import RandomPolicy`` must still work.
-        assert pkg.RandomPolicy is not None
-
-        # Attribute access (which is what ``from pkg import HuggingFacePolicy``
-        # performs) is the point of failure.
-        with pytest.raises(ImportError, match="uv sync --extra hf"):
-            pkg.__getattr__("HuggingFacePolicy")
-
-        monkeypatch.delitem(sys.modules, "torch", raising=False)
 
 
 # --------------------------------------------------------------------- case 3
