@@ -203,6 +203,40 @@ class TestCosmeticAxisSensitivity:
         finally:
             env.close()
 
+class TestCrossBackendShapeParity:
+    """``obs["image"]`` Box spec must match TabletopEnv byte-for-byte.
+
+    RFC-006 §2 goal: "VLA policies that work on MuJoCo via RFC-001
+    ``render_in_obs=True`` must work on PyBullet by swapping only the env
+    factory." That contract lives in the ``observation_space["image"]`` Box
+    shape / dtype / bounds — pixel values are explicitly NOT compared
+    (RFC-005 §7.4, different rasterisers).
+    """
+
+    @pytest.mark.parametrize("render_size", [(224, 224), (64, 96)])
+    def test_image_box_matches_mujoco(self, render_size: tuple[int, int]) -> None:
+        """``PyBulletTabletopEnv.observation_space["image"]`` equals MuJoCo's."""
+        from gauntlet.env.tabletop import TabletopEnv
+
+        mj = TabletopEnv(render_in_obs=True, render_size=render_size)
+        pb = PyBulletTabletopEnv(render_in_obs=True, render_size=render_size)
+        try:
+            assert isinstance(mj.observation_space, spaces.Dict)
+            assert isinstance(pb.observation_space, spaces.Dict)
+            mj_img = mj.observation_space.spaces["image"]
+            pb_img = pb.observation_space.spaces["image"]
+            assert isinstance(mj_img, spaces.Box)
+            assert isinstance(pb_img, spaces.Box)
+            assert mj_img.shape == pb_img.shape
+            assert mj_img.dtype == pb_img.dtype
+            assert np.array_equal(mj_img.low, pb_img.low)
+            assert np.array_equal(mj_img.high, pb_img.high)
+        finally:
+            mj.close()
+            pb.close()
+
+
+class TestCosmeticNoopOnStateOnly:
     def test_cosmetic_axes_are_noop_when_render_is_off(self) -> None:
         """``render_in_obs=False`` — cosmetic axes mutate state-only obs in zero bytes.
 
