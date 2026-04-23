@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   lint-typecheck-test:
-    name: lint + mypy + pytest (py${{ matrix.python-version }})
+    name: lint + mypy + pytest (torch-free, py${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -31,8 +31,12 @@ jobs:
       - name: Set up Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}
 
-      - name: Sync dependencies
-        run: uv sync --all-extras --dev --python ${{ matrix.python-version }}
+      - name: Sync dependencies (no extras — core only)
+        # Spec §6 / RFC-003 §3: the default install path must stay
+        # torch-free. ``uv sync --dev`` (no extras) enforces that —
+        # any accidental torch import in gauntlet.core triggers a
+        # ModuleNotFoundError in this job.
+        run: uv sync --dev --python ${{ matrix.python-version }}
 
       - name: Lint (ruff)
         run: uv run ruff check .
@@ -43,5 +47,38 @@ jobs:
       - name: Type check (mypy --strict)
         run: uv run mypy
 
-      - name: Run tests with coverage
-        run: uv run pytest
+      - name: Run tests (excludes extras-gated markers)
+        # ``not hf and not lerobot and not monitor`` keeps the
+        # extras-gated suites out of this job. ``hf`` / ``lerobot``
+        # are reserved markers declared in pyproject.toml for future
+        # RFCs; only ``monitor`` currently has tests.
+        run: uv run pytest -m 'not hf and not lerobot and not monitor'
+
+  monitor-tests:
+    name: monitor-tests (torch, py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Sync dependencies (with [monitor] extra + monitor-dev group)
+        # The AE train-smoke tests are deterministic and fit on a small
+        # synthetic reference sweep — ubuntu-latest CPU is sufficient
+        # (no GPU required).
+        run: uv sync --extra monitor --group monitor-dev --python ${{ matrix.python-version }}
+
+      - name: Run monitor-marked tests
+        run: uv run pytest -m monitor
