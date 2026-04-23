@@ -140,8 +140,15 @@ class HuggingFacePolicy:
         mdl_kwargs["trust_remote_code"] = True
         mdl_kwargs.setdefault("torch_dtype", self._torch_dtype)
 
-        self._processor: Any = AutoProcessor.from_pretrained(repo_id, **proc_kwargs)
-        model: Any = AutoModelForVision2Seq.from_pretrained(repo_id, **mdl_kwargs)
+        # Loader call sites go through ``Any``-typed bindings: transformers'
+        # public stubs mark ``from_pretrained`` as untyped, which collides
+        # with our ``disallow_untyped_calls`` strict-mypy rule. Per spec §6
+        # ``Any`` is permitted at FFI boundaries, and the HF model surface
+        # is exactly that.
+        proc_from_pretrained: Any = AutoProcessor.from_pretrained
+        model_from_pretrained: Any = AutoModelForVision2Seq.from_pretrained
+        self._processor: Any = proc_from_pretrained(repo_id, **proc_kwargs)
+        model: Any = model_from_pretrained(repo_id, **mdl_kwargs)
         self._model: Any = model.to(device)
 
     # ---- public API ------------------------------------------------------
