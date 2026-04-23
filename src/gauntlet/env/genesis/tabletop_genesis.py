@@ -42,11 +42,12 @@ from __future__ import annotations
 
 from typing import Any, ClassVar
 
-import genesis as gs
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 from numpy.typing import NDArray
+
+import genesis as gs
 
 __all__ = ["GenesisTabletopEnv"]
 
