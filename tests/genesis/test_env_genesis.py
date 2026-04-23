@@ -19,8 +19,10 @@ Covers the RFC-007 §8 test matrix:
 
 Not covered here: cross-backend numerical parity (RFC-007 §7.3
 explicit non-goal), rendering (deferred to RFC-008), import-guard
-tests (live in ``tests/genesis/test_import_guards_genesis.py``
-so the positive-path tests can share a session-scoped env fixture).
+tests (live in ``tests/test_suite.py::TestBackendLazyImport``
+alongside the equivalent PyBullet cases — kept outside
+``tests/genesis/`` so they run in the default torch-free CI job
+via the ``sys.modules`` monkey-patch simulation pattern).
 
 All tests marked ``@pytest.mark.genesis`` and de-selected from the
 default run. Install + run:
