@@ -485,3 +485,120 @@ axes:
         # Error includes the sorted list of known keys.
         assert "tabletop" in msg
         assert "tabletop-pybullet" in msg
+
+    _GENESIS_YAML = """
+name: genesis-smoke
+env: tabletop-genesis
+episodes_per_cell: 1
+axes:
+  object_initial_pose_x:
+    low: -0.05
+    high: 0.05
+    steps: 2
+"""
+
+    def test_schema_accepts_tabletop_genesis_even_before_backend_import(self) -> None:
+        """RFC-007 §8 counterpart of the PyBullet test above. The validator
+        must accept ``tabletop-genesis`` even when the subpackage has not
+        been imported.
+        """
+        from gauntlet.suite.schema import BUILTIN_BACKEND_IMPORTS, Suite
+
+        assert "tabletop-genesis" in BUILTIN_BACKEND_IMPORTS
+        suite = Suite.model_validate(
+            {
+                "name": "x",
+                "env": "tabletop-genesis",
+                "episodes_per_cell": 1,
+                "axes": {
+                    "object_initial_pose_x": {
+                        "low": 0.0,
+                        "high": 0.1,
+                        "steps": 2,
+                    }
+                },
+            }
+        )
+        assert suite.env == "tabletop-genesis"
+
+    def test_loader_surfaces_install_hint_for_missing_genesis_extra(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """RFC-007 §8 counterpart of the PyBullet install-hint test.
+        Simulate "the [genesis] extra is not installed" by blocking
+        :mod:`torch` and :mod:`genesis` in :data:`sys.modules` and
+        unloading cached copies of the ``gauntlet.env.genesis``
+        subpackage. The loader must catch the resulting ImportError
+        and surface the install hint.
+        """
+        import sys
+
+        from gauntlet.env.registry import _REGISTRY
+
+        monkeypatch.setitem(sys.modules, "torch", None)
+        monkeypatch.setitem(sys.modules, "genesis", None)
+        for mod in list(sys.modules):
+            if mod == "gauntlet.env.genesis" or mod.startswith("gauntlet.env.genesis."):
+                monkeypatch.delitem(sys.modules, mod, raising=False)
+        if "tabletop-genesis" in _REGISTRY:
+            saved = _REGISTRY.pop("tabletop-genesis")
+            monkeypatch.setitem(_REGISTRY, "tabletop-genesis", saved)
+            del _REGISTRY["tabletop-genesis"]
+
+        with pytest.raises(ValueError) as excinfo:
+            load_suite_from_string(self._GENESIS_YAML)
+        msg = str(excinfo.value)
+        assert "tabletop-genesis" in msg
+        assert "extra is not installed" in msg
+        assert "uv sync --extra genesis" in msg
+        assert "pip install 'gauntlet[genesis]'" in msg
+
+    def test_subpackage_import_raises_install_hint_when_genesis_missing(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Direct ``import gauntlet.env.genesis`` must surface the
+        ``uv sync --extra genesis`` hint when :mod:`genesis` is
+        unavailable. Covers both guard arms — torch-present (so the
+        test actually exercises the genesis arm, not the torch arm)
+        on a real torch-free install.
+        """
+        import importlib
+        import sys
+
+        monkeypatch.setitem(sys.modules, "genesis", None)
+        for mod in list(sys.modules):
+            if mod == "gauntlet.env.genesis" or mod.startswith("gauntlet.env.genesis."):
+                monkeypatch.delitem(sys.modules, mod, raising=False)
+
+        with pytest.raises(ImportError) as excinfo:
+            importlib.import_module("gauntlet.env.genesis")
+        msg = str(excinfo.value)
+        assert "uv sync --extra genesis" in msg
+        assert "pip install 'gauntlet[genesis]'" in msg
+
+    def test_subpackage_import_raises_install_hint_when_torch_missing(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Genesis imports :mod:`torch` at package scope but does not
+        declare it in install_requires (RFC-007 §4.1). The subpackage
+        guard catches the torch-missing case first and points at the
+        ``[genesis]`` extra (which declares torch explicitly)."""
+        import importlib
+        import sys
+
+        monkeypatch.setitem(sys.modules, "torch", None)
+        for mod in list(sys.modules):
+            if mod == "gauntlet.env.genesis" or mod.startswith("gauntlet.env.genesis."):
+                monkeypatch.delitem(sys.modules, mod, raising=False)
+
+        with pytest.raises(ImportError) as excinfo:
+            importlib.import_module("gauntlet.env.genesis")
+        msg = str(excinfo.value)
+        # Either message is acceptable as long as it points users to
+        # the [genesis] extra; torch-first guard says "torch is
+        # required by genesis-world".
+        assert "uv sync --extra genesis" in msg
+        assert "pip install 'gauntlet[genesis]'" in msg
