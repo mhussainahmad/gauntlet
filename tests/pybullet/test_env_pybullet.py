@@ -77,3 +77,29 @@ def test_pybullet_backend_declares_visual_only_axes() -> None:
     )
     assert expected_visual == PyBulletTabletopEnv.VISUAL_ONLY_AXES
     assert expected_all == PyBulletTabletopEnv.AXIS_NAMES
+
+
+def test_texture_assets_resolve_via_importlib_resources() -> None:
+    """RFC-005 §5.1 / §6.1 / §12 Q6 — the two texture PNGs ship inside
+    the wheel under ``gauntlet/env/pybullet/assets/``.
+
+    Using :func:`importlib.resources.files` (not ``Path(__file__)``)
+    keeps the resolution wheel-portable: the assets load whether the
+    package is running from the repo, a venv install, or a zipimport.
+    """
+    from importlib.resources import files
+
+    assets = files("gauntlet.env.pybullet") / "assets"
+    default_tex = assets / "cube_default.png"
+    alt_tex = assets / "cube_alt.png"
+
+    assert default_tex.is_file()
+    assert alt_tex.is_file()
+
+    # Cheap sanity — first 8 bytes are the PNG signature.
+    assert default_tex.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    assert alt_tex.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+
+    # The two textures must be distinct — step-9 object_texture swap
+    # relies on them producing visibly different cube colours.
+    assert default_tex.read_bytes() != alt_tex.read_bytes()
