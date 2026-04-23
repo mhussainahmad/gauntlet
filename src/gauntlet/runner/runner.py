@@ -58,6 +58,7 @@ from __future__ import annotations
 
 import multiprocessing as mp
 from collections.abc import Callable
+from pathlib import Path
 from typing import cast
 
 import numpy as np
@@ -111,6 +112,7 @@ class Runner:
         n_workers: int = 1,
         env_factory: Callable[[], GauntletEnv] | None = None,
         start_method: str = "spawn",
+        trajectory_dir: Path | None = None,
     ) -> None:
         """Configure the runner.
 
@@ -128,6 +130,15 @@ class Runner:
                 ``"spawn"`` is the only safe choice with MuJoCo — fork
                 is known to leak GL contexts. We refuse other values
                 with a clear error.
+            trajectory_dir: Optional directory to dump per-episode NPZ
+                trajectories into. When ``None`` (the default) Phase 2
+                behaviour is **byte-identical** to Phase 1 — no disk
+                writes, no per-step buffering. When a :class:`Path` is
+                supplied each rollout writes one NPZ named
+                ``cell_<cell:04d>_ep_<ep:04d>.npz`` under this directory
+                *after* the :class:`Episode` is built, so the Episode
+                list returned by :meth:`run` is the same in both cases.
+                The directory is created on :meth:`run` entry.
 
         Raises:
             ValueError: If ``n_workers < 1`` or ``start_method != "spawn"``.
@@ -146,6 +157,7 @@ class Runner:
         self._n_workers = n_workers
         self._env_factory = env_factory if env_factory is not None else _default_env_factory
         self._start_method = start_method
+        self._trajectory_dir = trajectory_dir
 
     # ------------------------------------------------------------------
     # Public entry point.
@@ -190,6 +202,12 @@ class Runner:
                 f"{{{listed}}}. Load the Suite via gauntlet.suite.load_suite(...) "
                 f"or import the backend subpackage before calling Runner.run()."
             )
+
+        # Ensure the trajectory dir exists exactly once on the main
+        # process before any worker touches it, so a common parent (even
+        # on a fresh ``tmp_path``) never races across multiple workers.
+        if self._trajectory_dir is not None:
+            self._trajectory_dir.mkdir(parents=True, exist_ok=True)
 
         work_items = self._build_work_items(suite)
         if self._n_workers == 1:
@@ -279,7 +297,10 @@ class Runner:
         """
         env = self._env_factory()
         try:
-            return [_execute_one(env, policy_factory, item) for item in work_items]
+            return [
+                _execute_one(env, policy_factory, item, trajectory_dir=self._trajectory_dir)
+                for item in work_items
+            ]
         finally:
             env.close()
 
@@ -299,6 +320,7 @@ class Runner:
         init_args = WorkerInitArgs(
             env_factory=self._env_factory,
             policy_factory=policy_factory,
+            trajectory_dir=self._trajectory_dir,
         )
         with ctx.Pool(
             processes=self._n_workers,

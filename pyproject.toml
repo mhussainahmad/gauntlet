@@ -33,6 +33,7 @@ dependencies = [
 # Optional extras — end-user-facing. Keeps core torch-free per spec §6.
 # See docs/phase2-rfc-001-huggingface-policy.md §3,
 # docs/phase2-rfc-002-lerobot-smolvla.md §3,
+# docs/phase2-rfc-003-drift-detector.md §3,
 # docs/phase2-rfc-005-pybullet-adapter.md §4 for rationale.
 [project.optional-dependencies]
 hf = [
@@ -47,15 +48,18 @@ hf = [
     # time and breaks CPU-only installs. Users opt in separately per the
     # HuggingFacePolicy docstring.
 ]
-# Independent extra for the lerobot / SmolVLA adapter — see
-# docs/phase2-rfc-002-lerobot-smolvla.md §3. ``lerobot[smolvla]`` transitively
-# pulls torch, torchvision, opencv-python-headless, einops, safetensors,
-# accelerate, huggingface_hub and the SmolVLM2 backbone via transformers;
-# keep version floors aligned with lerobot's own floors (April 2026). No
-# ceiling on ``lerobot`` itself because its public API is not yet stable.
+# Independent extra for the lerobot / SmolVLA adapter — see RFC-002 §3.
 lerobot = [
     "lerobot[smolvla]>=0.4,<1",
     "transformers>=4.40,<5",
+    "pillow>=10.0,<12",
+]
+# Drift detector (Phase 2 Task 3).
+# Torch is the only heavy dep; pillow is carried along so the optional
+# image-AE path (deferred follow-up) does not silently ImportError on a
+# user who flips it on.
+monitor = [
+    "torch>=2.2,<3",
     "pillow>=10.0,<12",
 ]
 # Independent extra for the PyBullet backend (RFC-005).
@@ -92,6 +96,11 @@ lerobot-dev = [
     {include-group = "dev"},
     "pytest-mock>=3.12,<4",
 ]
+# CI-only group for the monitor / drift-detector job.
+monitor-dev = [
+    {include-group = "dev"},
+    "pytest-mock>=3.12,<4",
+]
 # CI-only group for the pybullet pytest job.
 pybullet-dev = [
     {include-group = "dev"},
@@ -125,6 +134,19 @@ ignore = []
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["B011"]
+# The monitor torch modules put ``try: import torch`` at module scope
+# to raise the install-hint before any downstream import runs. That
+# forces ``from gauntlet.monitor.{ae,train,score}`` imports of the
+# sibling torch-free modules (``schema``, ``entropy``) to land below
+# the guard, which ruff flags as E402. The ordering is intentional.
+"src/gauntlet/monitor/ae.py" = ["E402"]
+"src/gauntlet/monitor/train.py" = ["E402"]
+"src/gauntlet/monitor/score.py" = ["E402"]
+# The monitor-marked test module calls ``pytest.importorskip('torch')``
+# at module scope so the default (torch-free) pytest collection does
+# not blow up. Imports of torch-backed gauntlet modules therefore land
+# after executable statements — same E402 pattern as the modules above.
+"tests/monitor/test_ae.py" = ["E402"]
 
 [tool.mypy]
 python_version = "3.11"
@@ -151,6 +173,7 @@ ignore_missing_imports = true
 
 # Optional HF extras — let mypy import-check ``policy/huggingface.py`` even
 # when torch/transformers/PIL aren't installed (default job runs torch-free).
+# Also covers the [monitor] extra (torch + PIL).
 [[tool.mypy.overrides]]
 module = ["torch", "torch.*", "transformers", "transformers.*", "PIL", "PIL.*"]
 ignore_missing_imports = true
@@ -160,6 +183,14 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = ["lerobot", "lerobot.*"]
 ignore_missing_imports = true
+
+# ``StateAutoencoder(nn.Module)`` subclasses torch.nn.Module — typed as
+# ``Any`` when the stubs are absent. mypy --strict's
+# ``disallow_subclassing_any`` would flag that; we relax it only inside
+# the monitor tree so the rest of the codebase keeps the strict rule.
+[[tool.mypy.overrides]]
+module = ["gauntlet.monitor.ae", "gauntlet.monitor.train", "gauntlet.monitor.score"]
+disallow_subclassing_any = false
 
 # pybullet ships no type stubs. Per spec §6, Any is permitted at FFI boundaries;
 # this override lets mypy import-check env/pybullet/* even when the
@@ -181,6 +212,7 @@ testpaths = ["tests"]
 markers = [
     "hf: tests that require the [hf] extra (torch, transformers, PIL)",
     "lerobot: tests that require the [lerobot] extra (lerobot, torch, PIL)",
+    "monitor: tests that require the [monitor] extra (torch, PIL)",
     "pybullet: tests that require the [pybullet] extra (pybullet>=3.2)",
 ]
 
