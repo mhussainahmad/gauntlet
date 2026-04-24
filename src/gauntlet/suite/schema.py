@@ -55,6 +55,7 @@ __all__ = [
 BUILTIN_BACKEND_IMPORTS: Final[dict[str, str]] = {
     "tabletop-pybullet": "gauntlet.env.pybullet",
     "tabletop-genesis": "gauntlet.env.genesis",
+    "tabletop-isaac": "gauntlet.env.isaac",
 }
 
 
