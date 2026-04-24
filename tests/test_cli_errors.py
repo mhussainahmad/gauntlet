@@ -323,18 +323,12 @@ def test_build_compare_skips_cells_below_min_size() -> None:
     """
     from gauntlet.report import build_report
 
-    eps_a = [
-        _ep(cell_index=0, episode_index=i, success=True, suite_name="s") for i in range(2)
-    ]
-    eps_b = [
-        _ep(cell_index=0, episode_index=i, success=False, suite_name="s") for i in range(2)
-    ]
+    eps_a = [_ep(cell_index=0, episode_index=i, success=True, suite_name="s") for i in range(2)]
+    eps_b = [_ep(cell_index=0, episode_index=i, success=False, suite_name="s") for i in range(2)]
     rep_a = build_report(eps_a)
     rep_b = build_report(eps_b)
 
-    payload: dict[str, Any] = _build_compare(
-        rep_a, rep_b, threshold=0.1, min_cell_size=5
-    )
+    payload: dict[str, Any] = _build_compare(rep_a, rep_b, threshold=0.1, min_cell_size=5)
     assert payload["regressions"] == []
     assert payload["improvements"] == []
 

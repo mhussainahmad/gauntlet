@@ -215,7 +215,7 @@ def test_monitor_unknown_attribute_raises_attribute_error() -> None:
     import gauntlet.monitor as monitor
 
     with pytest.raises(AttributeError, match="no attribute 'definitely_not_there'"):
-        monitor.definitely_not_there  # type: ignore[attr-defined]  # noqa: B018
+        monitor.definitely_not_there  # noqa: B018
 
 
 # ──────────────────────────────────────────────────────────────────────

@@ -19,7 +19,6 @@ from gauntlet.policy.random import RandomPolicy
 from gauntlet.policy.registry import PolicySpecError, resolve_policy_factory
 from gauntlet.policy.scripted import ScriptedPolicy
 
-
 # Module-level non-callable + zero-arg-callable used by the
 # ``module:attr`` error-path tests below. They must live at module scope
 # so ``importlib.import_module`` finds them.
@@ -49,9 +48,7 @@ def test_resolve_scripted_returns_scripted_policy_class() -> None:
 
 
 def test_resolve_module_attr_happy_path() -> None:
-    factory = resolve_policy_factory(
-        "tests.test_policy_registry:_ok_policy_factory"
-    )
+    factory = resolve_policy_factory("tests.test_policy_registry:_ok_policy_factory")
     assert isinstance(factory(), RandomPolicy)
 
 

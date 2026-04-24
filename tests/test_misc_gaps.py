@@ -60,9 +60,7 @@ def test_parse_override_rejects_whitespace_only_string() -> None:
     os.geteuid() == 0,
     reason="root bypasses POSIX file permissions; chmod-0 would not block reads.",
 )
-def test_run_unreadable_suite_file_surfaces_os_error(
-    runner: CliRunner, tmp_path: Path
-) -> None:
+def test_run_unreadable_suite_file_surfaces_os_error(runner: CliRunner, tmp_path: Path) -> None:
     """A suite file that exists but cannot be opened (chmod 000) surfaces
     the OSError branch in ``cli.run`` as ``could not read file``."""
     suite_path = tmp_path / "no-read.yaml"
@@ -96,9 +94,7 @@ def test_run_unreadable_suite_file_surfaces_os_error(
     os.geteuid() == 0,
     reason="root bypasses POSIX file permissions; chmod-0 would not block reads.",
 )
-def test_replay_unreadable_suite_file_surfaces_os_error(
-    runner: CliRunner, tmp_path: Path
-) -> None:
+def test_replay_unreadable_suite_file_surfaces_os_error(runner: CliRunner, tmp_path: Path) -> None:
     """The replay subcommand has its own OSError branch on suite read.
     Same chmod trick, same expected user-facing error shape."""
     suite_path = tmp_path / "no-read.yaml"
@@ -131,9 +127,7 @@ def test_replay_unreadable_suite_file_surfaces_os_error(
         step_count=1,
         total_reward=0.0,
     )
-    eps_path.write_text(
-        json.dumps([ep.model_dump(mode="json")]) + "\n", encoding="utf-8"
-    )
+    eps_path.write_text(json.dumps([ep.model_dump(mode="json")]) + "\n", encoding="utf-8")
 
     suite_path.chmod(0o000)
     try:
@@ -290,9 +284,7 @@ def test_replay_cli_reward_down_branch_uses_delta_down_style(
     # the original — mutate it to carry a huge reward.
     inflated = target.model_copy(update={"total_reward": target.total_reward + 1000.0})
     eps_path = tmp_path / "eps.json"
-    eps_path.write_text(
-        json.dumps([inflated.model_dump(mode="json")]), encoding="utf-8"
-    )
+    eps_path.write_text(json.dumps([inflated.model_dump(mode="json")]), encoding="utf-8")
 
     suite_yaml = tmp_path / "suite.yaml"
     suite_yaml.write_text(

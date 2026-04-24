@@ -73,9 +73,7 @@ def test_monitor_train_missing_trajectory_dir(runner: CliRunner, tmp_path: Path)
     trajectory directory is absent."""
     missing = tmp_path / "no-such-dir"
     out = tmp_path / "ae"
-    result = runner.invoke(
-        app, ["monitor", "train", str(missing), "--out", str(out)]
-    )
+    result = runner.invoke(app, ["monitor", "train", str(missing), "--out", str(out)])
     assert result.exit_code != 0
     assert "trajectory dir not found" in result.stderr
 
@@ -97,9 +95,7 @@ def test_monitor_train_torch_absent_surfaces_install_hint(
     for cached in ("gauntlet.monitor.train", "gauntlet.monitor.ae"):
         monkeypatch.delitem(sys.modules, cached, raising=False)
 
-    result = runner.invoke(
-        app, ["monitor", "train", str(traj), "--out", str(out)]
-    )
+    result = runner.invoke(app, ["monitor", "train", str(traj), "--out", str(out)])
     assert result.exit_code != 0
     assert "uv sync --extra monitor" in result.stderr
 
@@ -214,9 +210,7 @@ def test_monitor_score_torch_absent_surfaces_install_hint(
 # ──────────────────────────────────────────────────────────────────────
 
 
-def test_ros2_publish_dry_run_works_without_rclpy(
-    runner: CliRunner, tmp_path: Path
-) -> None:
+def test_ros2_publish_dry_run_works_without_rclpy(runner: CliRunner, tmp_path: Path) -> None:
     """``--dry-run`` short-circuits the rclpy import entirely; only the
     pydantic-only schema module is loaded. Works on a default install."""
     eps_path = tmp_path / "eps.json"
@@ -253,14 +247,10 @@ def test_ros2_publish_empty_topic_rejected(runner: CliRunner, tmp_path: Path) ->
     assert "non-empty" in result.stderr
 
 
-def test_ros2_publish_non_list_episodes_payload(
-    runner: CliRunner, tmp_path: Path
-) -> None:
+def test_ros2_publish_non_list_episodes_payload(runner: CliRunner, tmp_path: Path) -> None:
     eps_path = tmp_path / "eps.json"
     eps_path.write_text(json.dumps({"not": "a list"}), encoding="utf-8")
-    result = runner.invoke(
-        app, ["ros2", "publish", str(eps_path), "--topic", "/g/e", "--dry-run"]
-    )
+    result = runner.invoke(app, ["ros2", "publish", str(eps_path), "--topic", "/g/e", "--dry-run"])
     assert result.exit_code != 0
     assert "expected a list" in result.stderr
 
@@ -277,9 +267,7 @@ def test_ros2_publish_non_dry_run_without_rclpy_surfaces_hint(
     monkeypatch.setitem(sys.modules, "rclpy", None)
     monkeypatch.delitem(sys.modules, "gauntlet.ros2.publisher", raising=False)
 
-    result = runner.invoke(
-        app, ["ros2", "publish", str(eps_path), "--topic", "/g/e"]
-    )
+    result = runner.invoke(app, ["ros2", "publish", str(eps_path), "--topic", "/g/e"])
     assert result.exit_code != 0
     assert "rclpy" in result.stderr.lower()
 
@@ -291,16 +279,12 @@ def test_ros2_publish_non_dry_run_without_rclpy_surfaces_hint(
 
 def test_ros2_record_empty_topic_rejected(runner: CliRunner, tmp_path: Path) -> None:
     out = tmp_path / "out.jsonl"
-    result = runner.invoke(
-        app, ["ros2", "record", "--topic", "", "--out", str(out)]
-    )
+    result = runner.invoke(app, ["ros2", "record", "--topic", "", "--out", str(out)])
     assert result.exit_code != 0
     assert "non-empty" in result.stderr
 
 
-def test_ros2_record_negative_duration_rejected(
-    runner: CliRunner, tmp_path: Path
-) -> None:
+def test_ros2_record_negative_duration_rejected(runner: CliRunner, tmp_path: Path) -> None:
     out = tmp_path / "out.jsonl"
     result = runner.invoke(
         app,
@@ -424,9 +408,7 @@ def _two_by_three_episodes(tmp_path: Path) -> Path:
     return out
 
 
-def test_replay_cli_non_list_episodes_payload(
-    runner: CliRunner, tmp_path: Path
-) -> None:
+def test_replay_cli_non_list_episodes_payload(runner: CliRunner, tmp_path: Path) -> None:
     """A top-level dict in the episodes JSON is not allowed (line 866)."""
     eps_path = tmp_path / "eps.json"
     eps_path.write_text(json.dumps({"not": "a list"}), encoding="utf-8")
@@ -495,9 +477,7 @@ def test_replay_cli_invalid_suite_yaml(runner: CliRunner, tmp_path: Path) -> Non
     assert "invalid suite YAML" in result.stderr
 
 
-def test_replay_cli_duplicate_override_rejected(
-    runner: CliRunner, tmp_path: Path
-) -> None:
+def test_replay_cli_duplicate_override_rejected(runner: CliRunner, tmp_path: Path) -> None:
     eps_path = _two_by_three_episodes(tmp_path)
     suite_yaml = tmp_path / "suite.yaml"
     _write_two_by_three_yaml(suite_yaml)
@@ -548,9 +528,7 @@ def test_replay_cli_bad_policy_spec(runner: CliRunner, tmp_path: Path) -> None:
     assert "no-such-policy" in result.stderr
 
 
-def test_replay_cli_creates_missing_out_parent_dir(
-    runner: CliRunner, tmp_path: Path
-) -> None:
+def test_replay_cli_creates_missing_out_parent_dir(runner: CliRunner, tmp_path: Path) -> None:
     eps_path = _two_by_three_episodes(tmp_path)
     suite_yaml = tmp_path / "suite.yaml"
     _write_two_by_three_yaml(suite_yaml)

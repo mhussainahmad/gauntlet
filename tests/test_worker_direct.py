@@ -31,9 +31,9 @@ from gauntlet.env.tabletop import TabletopEnv
 from gauntlet.policy.scripted import ScriptedPolicy
 from gauntlet.runner.episode import Episode
 from gauntlet.runner.worker import (
+    _WORKER_STATE,
     WorkerInitArgs,
     WorkItem,
-    _WORKER_STATE,
     extract_env_seed,
     pool_initializer,
     run_work_item,

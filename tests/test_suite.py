@@ -681,9 +681,11 @@ class TestLoaderEdgeCases:
     def test_visual_only_axes_of_handles_non_frozenset_attr(self) -> None:
         """A factory whose ``VISUAL_ONLY_AXES`` is the wrong type (eg a
         list) is treated as if it had no such attribute."""
+        from typing import ClassVar
+
         from gauntlet.suite.loader import _visual_only_axes_of
 
         class _BadAttr:
-            VISUAL_ONLY_AXES = ["a", "b"]  # not a frozenset
+            VISUAL_ONLY_AXES: ClassVar[list[str]] = ["a", "b"]  # not a frozenset
 
         assert _visual_only_axes_of(_BadAttr) == frozenset()
