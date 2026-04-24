@@ -55,6 +55,8 @@ import numpy as np
 from gymnasium import spaces
 from numpy.typing import NDArray
 
+from gauntlet.env.base import CameraSpec
+
 __all__ = ["TabletopEnv"]
 
 
@@ -159,6 +161,7 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         n_substeps: int = 5,
         render_in_obs: bool = False,
         render_size: tuple[int, int] = (224, 224),
+        cameras: list[CameraSpec] | None = None,
     ) -> None:
         super().__init__()
         if max_steps <= 0:
@@ -172,17 +175,48 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
                     f"render_size must be a (height, width) of positive ints; got {render_size}"
                 )
 
+        # ``cameras=[]`` is treated identically to ``cameras=None`` per
+        # RFC §2 — the single-cam default path is sacred. Validation +
+        # the multi-cam scene-graph injection happen further down.
+        self._cameras: tuple[CameraSpec, ...] = tuple(cameras) if cameras else ()
+        self._multi_cam_enabled: bool = bool(self._cameras)
+        if self._multi_cam_enabled:
+            _validate_camera_specs(self._cameras)
+
         self._max_steps = max_steps
         self._n_substeps = n_substeps
-        self._render_in_obs = render_in_obs
+        # When multi-cam is on, ``cameras`` takes precedence over the
+        # legacy ``render_in_obs`` flag (RFC §2: legacy kwargs are
+        # silently ignored). The ``_render_in_obs`` shadow stays False
+        # so the legacy single-camera ``obs["image"]`` codepath is
+        # disabled and the multi-cam codepath owns rendering.
+        self._render_in_obs = render_in_obs and not self._multi_cam_enabled
         self._render_size: tuple[int, int] = (int(render_size[0]), int(render_size[1]))
         # Cached offscreen renderer, built lazily on first reset so import /
         # construction stays headless-safe. Reused for the env lifetime;
         # released in ``close``. See RFC Phase 2 Task 1 §5.
         self._obs_renderer: Any | None = None
+        # Per-CameraSpec offscreen renderer cache. Each entry's GL context
+        # is built lazily on first ``_render_obs_images`` call (matching
+        # the single-cam laziness contract) and released in ``close``.
+        # Keyed by ``CameraSpec.name`` so duplicate-name validation in
+        # ``_validate_camera_specs`` is what protects this dict. Cam ids
+        # for the injected ``<camera>`` elements live in ``_extra_cam_ids``.
+        self._extra_renderers: dict[str, Any] = {}
+        self._extra_cam_ids: dict[str, int] = {}
 
         # Load model once; reset uses mj_resetData + our own randomisation.
-        self._model: Any = mujoco.MjModel.from_xml_path(str(_ASSET_PATH))
+        # When multi-cam is enabled we inject one ``<camera>`` per spec
+        # into the MJCF before parsing, then resolve their ids in
+        # ``_cache_indices``. Reading the asset as a string + injecting
+        # extra cameras is cheap (one regex sub) and keeps the legacy
+        # ``main`` camera available so ``camera_offset_*`` perturbations
+        # and the single-cam render path keep working.
+        if self._multi_cam_enabled:
+            xml_str = _inject_camera_elements(_ASSET_PATH.read_text(), self._cameras)
+            self._model: Any = mujoco.MjModel.from_xml_string(xml_str)
+        else:
+            self._model = mujoco.MjModel.from_xml_path(str(_ASSET_PATH))
         self._data: Any = mujoco.MjData(self._model)
 
         # Cached mujoco indices (set in _cache_indices) — type: int | ndarray(int).
@@ -235,6 +269,21 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
             # when render_in_obs=True so the default path stays byte-identical
             # to Phase 1.
             obs_spaces["image"] = spaces.Box(low=0, high=255, shape=(h, w, 3), dtype=np.uint8)
+        if self._multi_cam_enabled:
+            # Per-camera Box spaces under a Dict subspace. The legacy
+            # ``image`` key is also advertised at the top level, sized to
+            # the first spec, so consumers that only know about
+            # ``obs["image"]`` (e.g. the runner's video recorder at
+            # ``runner/worker.py:417``) keep working. RFC §2.
+            per_cam: dict[str, spaces.Space[Any]] = {}
+            for spec in self._cameras:
+                ch, cw = spec.size
+                per_cam[spec.name] = spaces.Box(low=0, high=255, shape=(ch, cw, 3), dtype=np.uint8)
+            obs_spaces["images"] = spaces.Dict(per_cam)
+            first_h, first_w = self._cameras[0].size
+            obs_spaces["image"] = spaces.Box(
+                low=0, high=255, shape=(first_h, first_w, 3), dtype=np.uint8
+            )
         self.observation_space: spaces.Dict = spaces.Dict(obs_spaces)
 
     # ------------------------------------------------------------------ setup
@@ -281,6 +330,21 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
                 raise RuntimeError(f"expected distractor slot '{geom_name}' missing from MJCF")
             distractor_ids.append(gid)
         self._distractor_geom_ids = tuple(distractor_ids)
+
+        # Resolve injected multi-cam ids (no-op when ``cameras=None``).
+        # Each injected element is named ``cam_<spec.name>`` to avoid
+        # colliding with the existing ``main`` camera.
+        if self._multi_cam_enabled:
+            self._extra_cam_ids = {}
+            for spec in self._cameras:
+                cam_name = f"cam_{spec.name}"
+                cid = int(mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_CAMERA, cam_name))
+                if cid < 0:
+                    raise RuntimeError(
+                        f"injected camera '{cam_name}' missing from MJCF "
+                        f"— _inject_camera_elements bug"
+                    )
+                self._extra_cam_ids[spec.name] = cid
 
     # -------------------------------------------------------------- baseline
 
@@ -561,6 +625,13 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
             with contextlib.suppress(Exception):
                 self._obs_renderer.close()
             self._obs_renderer = None
+        # Same best-effort teardown for the per-CameraSpec renderers; each
+        # carries its own GL context that needs to be released on the
+        # worker that built it (matters when n_workers >= 2).
+        for renderer in self._extra_renderers.values():
+            with contextlib.suppress(Exception):
+                renderer.close()
+        self._extra_renderers = {}
         self._data = None
         self._model = None
 
@@ -635,6 +706,19 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         }
         if self._render_in_obs:
             obs["image"] = self._render_obs_image()
+        if self._multi_cam_enabled:
+            images = self._render_obs_images()
+            obs["images"] = images  # type: ignore[assignment]
+            # Legacy single-camera alias — first spec wins. Defensive
+            # copy: without ``.copy()`` ``obs["image"]`` and
+            # ``obs["images"][first]`` would be the same ndarray, and
+            # any consumer that in-place mutates ``obs["image"]`` (a
+            # normalisation pass, an aliasing tensor conversion, etc.)
+            # would silently corrupt the per-cam dict. The runner's
+            # video buffer at runner/worker.py:417 already takes its
+            # own .copy() but not every downstream is so disciplined.
+            first_name = self._cameras[0].name
+            obs["image"] = images[first_name].copy()
         return obs
 
     def _render_obs_image(self) -> NDArray[np.uint8]:
@@ -652,6 +736,30 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         pixels = self._obs_renderer.render()
         return np.asarray(pixels, dtype=np.uint8)
 
+    def _render_obs_images(self) -> dict[str, NDArray[np.uint8]]:
+        """Render every CameraSpec into ``{name: uint8 (H, W, 3)}``.
+
+        One ``mujoco.Renderer`` per spec is cached lazily on first call —
+        each spec carries its own ``size``, so a single shared renderer
+        cannot satisfy them all. Cached renderers are reused for the env
+        lifetime and torn down in ``close``. Output frames are
+        defensively copied via ``np.asarray(..., dtype=np.uint8)`` to
+        decouple from the renderer's internal pixel buffer (mirrors the
+        single-cam path's contract).
+        """
+        out: dict[str, NDArray[np.uint8]] = {}
+        for spec in self._cameras:
+            renderer = self._extra_renderers.get(spec.name)
+            if renderer is None:
+                h, w = spec.size
+                renderer = mujoco.Renderer(self._model, height=h, width=w)
+                self._extra_renderers[spec.name] = renderer
+            cam_id = self._extra_cam_ids[spec.name]
+            renderer.update_scene(self._data, camera=cam_id)
+            pixels = renderer.render()
+            out[spec.name] = np.asarray(pixels, dtype=np.uint8)
+        return out
+
     def _build_info(self) -> dict[str, Any]:
         return {
             "success": self._success,
@@ -662,3 +770,59 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
     @staticmethod
     def _xy_distance(a: NDArray[np.float64], b: NDArray[np.float64]) -> float:
         return float(np.linalg.norm(a[:2] - b[:2]))
+
+
+# ---------------------------------------------------------- multi-cam helpers
+
+
+def _validate_camera_specs(specs: tuple[CameraSpec, ...]) -> None:
+    """Reject invalid CameraSpec lists at construction time.
+
+    See ``docs/polish-exploration-multi-camera.md`` §2 — this enforces
+    the public contract pinned in the RFC: non-empty unique names,
+    positive image dimensions. The pose tuple is structurally typed
+    by NamedTuple; no range check applies.
+    """
+    seen: set[str] = set()
+    for spec in specs:
+        if not isinstance(spec.name, str) or spec.name == "":
+            raise ValueError(f"camera name must be a non-empty string; got {spec.name!r}")
+        if spec.name in seen:
+            raise ValueError(f"duplicate camera name: {spec.name!r}")
+        seen.add(spec.name)
+        h, w = spec.size
+        if int(h) <= 0 or int(w) <= 0:
+            raise ValueError(
+                f"camera {spec.name!r} size must be (height, width) of positive ints; "
+                f"got {spec.size!r}"
+            )
+        if len(spec.pose) != 6:
+            raise ValueError(
+                f"camera {spec.name!r} pose must be (x, y, z, rx, ry, rz); got {spec.pose!r}"
+            )
+
+
+def _inject_camera_elements(xml_str: str, specs: tuple[CameraSpec, ...]) -> str:
+    """Inject one ``<camera>`` element per spec into the MJCF string.
+
+    The injected elements live just before the closing ``</worldbody>``
+    tag and are named ``cam_<spec.name>`` to avoid colliding with the
+    existing ``main`` camera. Pose is written as MuJoCo XYZ Euler in
+    radians (RFC §2). The legacy single-camera codepath continues to
+    use the ``main`` camera so ``camera_offset_*`` perturbations are
+    untouched.
+
+    Raises:
+        RuntimeError: if the input XML lacks a ``</worldbody>`` close tag.
+    """
+    close_tag = "</worldbody>"
+    if close_tag not in xml_str:
+        raise RuntimeError("MJCF asset is missing </worldbody>; cannot inject cameras")
+    inserts: list[str] = []
+    for spec in specs:
+        x, y, z, rx, ry, rz = spec.pose
+        inserts.append(
+            f'    <camera name="cam_{spec.name}" pos="{x} {y} {z}" euler="{rx} {ry} {rz}"/>'
+        )
+    block = "\n".join(inserts)
+    return xml_str.replace(close_tag, f"{block}\n  {close_tag}", 1)

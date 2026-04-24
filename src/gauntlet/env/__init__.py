@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import cast
 
-from gauntlet.env.base import GauntletEnv
+from gauntlet.env.base import CameraSpec, GauntletEnv
 from gauntlet.env.perturbation import AXIS_NAMES, PerturbationAxis, axis_for
 from gauntlet.env.registry import register_env
 from gauntlet.env.tabletop import N_DISTRACTOR_SLOTS, TabletopEnv
@@ -30,6 +30,7 @@ register_env(
 __all__ = [
     "AXIS_NAMES",
     "N_DISTRACTOR_SLOTS",
+    "CameraSpec",
     "GauntletEnv",
     "PerturbationAxis",
     "TabletopEnv",
