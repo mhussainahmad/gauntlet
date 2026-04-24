@@ -49,7 +49,7 @@ jobs:
         run: uv run mypy
 
       - name: Run tests (excludes extras-gated markers)
-        run: uv run pytest -m "not hf and not lerobot and not monitor and not pybullet and not genesis and not isaac"
+        run: uv run pytest -m "not hf and not lerobot and not monitor and not pybullet and not genesis and not ros2 and not isaac"
 
   hf-tests:
     name: hf tests (py${{ matrix.python-version }})
@@ -190,6 +190,43 @@ jobs:
 
       - name: Run genesis-marked tests
         run: uv run pytest -m genesis -q
+
+  ros2-tests:
+    name: ros2-tests (rclpy mocked, py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      # The [ros2] extra is empty (rclpy is NOT pip-installable in its
+      # official form — RFC-010 §3 / exploration §Q2). The ros2-dev
+      # group brings the dev tooling. Tests in tests/ros2/ seed
+      # sys.modules["rclpy"] = MagicMock() in conftest.py, so the unit
+      # tests run entirely against mocks. A real-rclpy integration job
+      # (docker run osrf/ros:humble-desktop) is left to a follow-up
+      # workflow_dispatch and is not required to land this task.
+      - name: Sync dependencies (with [ros2] extra + ros2-dev group)
+        run: >-
+          uv sync
+          --extra ros2
+          --group ros2-dev
+          --python ${{ matrix.python-version }}
+
+      - name: Run ros2-marked tests (rclpy mocked at module boundary)
+        run: uv run pytest -m ros2 -q
 
   isaac-tests:
     # Placeholder job for future GPU-runner-backed Isaac Sim tests

@@ -124,6 +124,34 @@ writes the sidecar. The three-step workflow is scripted end-to-end in
 [`examples/evaluate_with_drift.py`](./examples/evaluate_with_drift.py);
 `drift.json` is optional and orthogonal to `report.json`.
 
+### ROS 2 integration
+
+Optional Phase 2 add-on (`[ros2]` extra). Two halves wire gauntlet into a
+ROS 2 graph:
+
+- `gauntlet ros2 publish episodes.json --topic /gauntlet/episodes`
+  serialises each Episode as JSON inside `std_msgs/msg/String` and
+  publishes one message per Episode. Useful for fleet-wide failure-mode
+  aggregation across many real robots running gauntlet evaluations.
+- `gauntlet ros2 record --topic /robot/joint_states --out trajectory.jsonl
+  --duration 30` subscribes to a real robot's topic and dumps each
+  received message to a JSONL file on disk. Useful for the "real robots
+  with logging" half of `GAUNTLET_SPEC.md` §7.
+
+Because `rclpy` is **not** distributed via PyPI in its official form, the
+`[ros2]` extra is empty — `uv sync --extra ros2` is a no-op beyond the
+dev tooling. Install ROS 2 (Humble or Jazzy) via your system package
+manager, e.g. `sudo apt install ros-humble-rclpy`, or run inside the
+official Docker image (`docker run -it osrf/ros:humble-desktop`), then
+source the relevant `setup.bash` before invoking `gauntlet ros2`. The
+`--dry-run` flag on `gauntlet ros2 publish` short-circuits the rclpy
+import so you can preview the JSON payloads without installing ROS 2.
+
+The publisher / recorder API is documented in
+[`docs/phase2-rfc-010-ros2-integration.md`](./docs/phase2-rfc-010-ros2-integration.md);
+see [`examples/publish_episodes_to_ros2.py`](./examples/publish_episodes_to_ros2.py)
+for the equivalent invocation via the public Python API.
+
 ### Debugging failures with replay
 
 Once a run has flagged an episode as failing, `gauntlet replay` re-
@@ -167,7 +195,8 @@ src/gauntlet/
   report/    # Failure analysis + HTML/JSON generation
   monitor/   # Runtime drift detection + action-entropy ([monitor] extra)
   replay/    # Single-episode replay with axis overrides
-  cli.py     # gauntlet run / report / compare / monitor / replay
+  ros2/      # ROS 2 publisher + recorder ([ros2] extra; rclpy via apt/Docker)
+  cli.py     # gauntlet run / report / compare / monitor / replay / ros2
 ```
 
 ## License

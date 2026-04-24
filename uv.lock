@@ -2139,6 +2139,17 @@ pybullet-dev = [
     { name = "ruff" },
     { name = "types-pyyaml" },
 ]
+ros2-dev = [
+    { name = "mypy", version = "1.20.1", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.15' and extra == 'extra-8-gauntlet-isaac') or (extra == 'extra-8-gauntlet-genesis' and extra == 'extra-8-gauntlet-isaac') or (extra == 'extra-8-gauntlet-hf' and extra == 'extra-8-gauntlet-isaac') or (extra == 'extra-8-gauntlet-isaac' and extra == 'extra-8-gauntlet-lerobot') or (extra == 'extra-8-gauntlet-isaac' and extra == 'extra-8-gauntlet-monitor')" },
+    { name = "mypy", version = "1.20.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.15' or extra == 'extra-8-gauntlet-genesis' or extra == 'extra-8-gauntlet-hf' or extra != 'extra-8-gauntlet-isaac' or (extra == 'extra-8-gauntlet-isaac' and extra == 'extra-8-gauntlet-lerobot') or (extra == 'extra-8-gauntlet-isaac' and extra == 'extra-8-gauntlet-monitor')" },
+    { name = "pandas-stubs" },
+    { name = "pytest" },
+    { name = "pytest-cov", version = "5.0.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-8-gauntlet-isaac'" },
+    { name = "pytest-cov", version = "6.3.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-8-gauntlet-genesis' or extra == 'extra-8-gauntlet-hf' or extra != 'extra-8-gauntlet-isaac' or (extra == 'extra-8-gauntlet-isaac' and extra == 'extra-8-gauntlet-lerobot') or (extra == 'extra-8-gauntlet-isaac' and extra == 'extra-8-gauntlet-monitor')" },
+    { name = "pytest-mock" },
+    { name = "ruff" },
+    { name = "types-pyyaml" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -2166,7 +2177,7 @@ requires-dist = [
     { name = "transformers", marker = "extra == 'lerobot'", specifier = ">=4.40,<5" },
     { name = "typer", specifier = ">=0.12,<1" },
 ]
-provides-extras = ["hf", "lerobot", "monitor", "pybullet", "genesis", "isaac"]
+provides-extras = ["hf", "lerobot", "monitor", "pybullet", "genesis", "ros2", "isaac"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -2223,6 +2234,15 @@ monitor-dev = [
     { name = "types-pyyaml", specifier = ">=6.0,<7" },
 ]
 pybullet-dev = [
+    { name = "mypy", specifier = ">=1.11,<2" },
+    { name = "pandas-stubs", specifier = ">=2.2,<3" },
+    { name = "pytest", specifier = ">=8.2,<9" },
+    { name = "pytest-cov", specifier = ">=5.0,<7" },
+    { name = "pytest-mock", specifier = ">=3.12,<4" },
+    { name = "ruff", specifier = ">=0.6,<1" },
+    { name = "types-pyyaml", specifier = ">=6.0,<7" },
+]
+ros2-dev = [
     { name = "mypy", specifier = ">=1.11,<2" },
     { name = "pandas-stubs", specifier = ">=2.2,<3" },
     { name = "pytest", specifier = ">=8.2,<9" },
