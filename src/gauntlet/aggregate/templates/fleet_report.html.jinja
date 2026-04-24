@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+{# Gauntlet fleet meta-report.
+
+Design rules from GAUNTLET_SPEC.md §6:
+* Persistent failure clusters lead the page; the mean success rate is
+  shown alongside the failure rate in the summary card, never as the
+  lone headline.
+* The per-run "wall of numbers" table is collapsed inside a <details>.
+
+Data-embed conventions (mirror gauntlet.report.html):
+* `data` is ``fleet.model_dump(mode="json")`` with NaN -> null applied
+  recursively in ``gauntlet.aggregate.html`` so the embedded JSON is
+  always valid.
+* Float dict keys stringify under ``model_dump(mode="json")``; the JS
+  calls ``parseFloat`` on the way back out.
+#}
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Gauntlet fleet report</title>
+<style>
+  :root {
+    --fg: #1a1a1a;
+    --fg-muted: #555;
+    --bg: #fafafa;
+    --card-bg: #ffffff;
+    --border: #e1e1e1;
+    --pass: #2ca02c;
+    --fail: #d62728;
+    --warn: #f0ad4e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 "Helvetica Neue", Arial, sans-serif;
+    color: var(--fg);
+    background: var(--bg);
+    margin: 0;
+    padding: 24px;
+    line-height: 1.4;
+  }
+  h1, h2, h3 { margin: 0 0 8px; }
+  h1 { font-size: 1.6rem; }
+  h2 { font-size: 1.25rem; margin-top: 32px; }
+  h3 { font-size: 1.0rem; font-weight: 600; }
+  section { margin-bottom: 24px; }
+  .card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+  }
+  .summary-metrics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px 32px;
+  }
+  .metric-label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--fg-muted);
+  }
+  .metric-value { font-size: 1.5rem; font-weight: 600; }
+  .metric-value.fail { color: var(--fail); }
+  .subtle { color: var(--fg-muted); font-size: 0.9rem; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.9rem;
+  }
+  th, td {
+    border-bottom: 1px solid var(--border);
+    padding: 6px 10px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { background: #f0f0f0; font-weight: 600; }
+  tbody tr:hover { background: #fafafa; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.85rem;
+  }
+  .empty-state {
+    color: var(--fg-muted);
+    font-style: italic;
+  }
+  .chart-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+  }
+  .chart-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+  }
+  .chart-card canvas { max-width: 100%; height: 220px !important; }
+  details { margin-top: 12px; }
+  summary {
+    cursor: pointer;
+    font-weight: 600;
+    padding: 4px 0;
+  }
+</style>
+</head>
+<body>
+
+<h1>Gauntlet fleet report</h1>
+
+{# --- 1. Summary card --- #}
+<section>
+  <div class="card">
+    <div class="summary-metrics">
+      <div>
+        <div class="metric-label">Runs</div>
+        <div class="metric-value">{{ fleet.n_runs }}</div>
+      </div>
+      <div>
+        <div class="metric-label">Total episodes</div>
+        <div class="metric-value">{{ fleet.n_total_episodes }}</div>
+      </div>
+      <div>
+        <div class="metric-label">Fleet failure rate</div>
+        <div class="metric-value fail">{{ '%.1f'|format(fleet.fleet_baseline_failure_rate * 100) }}%</div>
+      </div>
+      <div>
+        <div class="metric-label">Mean success</div>
+        <div class="metric-value">
+          {{ '%.1f'|format(fleet.mean_success_rate * 100) }}%
+          <span class="subtle">&plusmn; {{ '%.1f'|format(fleet.std_success_rate * 100) }}%</span>
+        </div>
+      </div>
+      <div>
+        <div class="metric-label">Persistence threshold</div>
+        <div class="metric-value">&ge; {{ '%.0f'|format(fleet.persistence_threshold * 100) }}%</div>
+      </div>
+    </div>
+    {% if fleet.suite_names|length > 1 %}
+    <p class="subtle" style="margin-top:12px">
+      Multi-suite fleet:
+      {% for s in fleet.suite_names %}
+      <code>{{ s }}</code>{% if not loop.last %}, {% endif %}
+      {% endfor %}
+    </p>
+    {% endif %}
+  </div>
+</section>
+
+{# --- 2. Persistent failure clusters - leads, per spec section 6 --- #}
+<section>
+  <h2>Persistent failure clusters</h2>
+  {% if fleet.persistent_failure_clusters %}
+  <div class="card">
+    <table>
+      <thead>
+        <tr>
+          <th>Axis combination</th>
+          <th class="num">n (pooled)</th>
+          <th class="num">Failure rate</th>
+          <th class="num">Lift (&times;)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for cluster in fleet.persistent_failure_clusters %}
+        <tr>
+          <td>
+            <code>
+              {%- set pairs = [] -%}
+              {%- for axis_name, axis_value in cluster.axes.items() -%}
+                {{- '' if loop.first else ' AND ' -}}
+                {{- axis_name }}={{ axis_value -}}
+              {%- endfor -%}
+            </code>
+          </td>
+          <td class="num">{{ cluster.n_episodes }}</td>
+          <td class="num">{{ '%.1f'|format(cluster.failure_rate * 100) }}%</td>
+          <td class="num">{{ '%.2f'|format(cluster.lift) }}&times;</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="card empty-state">
+    No clusters cleared the persistence threshold.
+  </div>
+  {% endif %}
+</section>
+
+{# --- 3. Per-axis aggregate bar charts --- #}
+<section>
+  <h2>Per-axis success rate (fleet aggregate)</h2>
+  {% if fleet.per_axis_aggregate %}
+  <div class="chart-row">
+    {% for axis_name, axis in fleet.per_axis_aggregate.items() %}
+    <div class="chart-card">
+      <h3>{{ axis_name }}</h3>
+      <canvas id="fleet-axis-{{ axis_name }}"></canvas>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="card empty-state">No axes appear across the fleet.</div>
+  {% endif %}
+</section>
+
+{# --- 4. Per-suite cross-run distribution --- #}
+<section>
+  <h2>Per-suite success-rate distribution</h2>
+  {% if fleet.cross_run_success_distribution %}
+  <div class="card">
+    <table>
+      <thead>
+        <tr>
+          <th>Suite</th>
+          <th class="num">Runs</th>
+          <th class="num">Mean</th>
+          <th class="num">Min</th>
+          <th class="num">Max</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for suite_name, rates in fleet.cross_run_success_distribution.items() %}
+        <tr>
+          <td><code>{{ suite_name }}</code></td>
+          <td class="num">{{ rates|length }}</td>
+          <td class="num">{{ '%.1f'|format((rates|sum / rates|length) * 100) }}%</td>
+          <td class="num">{{ '%.1f'|format(rates|min * 100) }}%</td>
+          <td class="num">{{ '%.1f'|format(rates|max * 100) }}%</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="card empty-state">No suite-level distribution available.</div>
+  {% endif %}
+</section>
+
+{# --- 5. Per-run breakdown (collapsed by section 6 rule) --- #}
+<section>
+  <details>
+    <summary>Per-run breakdown ({{ fleet.runs|length }} runs) - expand for the full table</summary>
+    <div class="card" style="margin-top:8px">
+      <table>
+        <thead>
+          <tr>
+            <th>Run</th>
+            <th>Policy label</th>
+            <th>Suite</th>
+            <th>Source</th>
+            <th class="num">Episodes</th>
+            <th class="num">Success</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for run in fleet.runs %}
+          <tr>
+            <td><code>{{ run.run_id }}</code></td>
+            <td><code>{{ run.policy_label }}</code></td>
+            <td><code>{{ run.suite_name }}</code></td>
+            <td><code>{{ run.source_file }}</code></td>
+            <td class="num">{{ run.n_episodes }}</td>
+            <td class="num">{{ '%.1f'|format(run.success_rate * 100) }}%</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+</section>
+
+{#
+  Embed the full fleet report as JSON. NaNs have been replaced with
+  nulls in Python (gauntlet.aggregate.html._nan_to_none) so this block
+  is always valid JSON. Float dict keys become strings under
+  model_dump(mode="json"); the JS below runs parseFloat() on them.
+#}
+<script id="fleet-data" type="application/json">{{ data|tojson }}</script>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+(function () {
+  const raw = document.getElementById('fleet-data').textContent;
+  const data = JSON.parse(raw);
+
+  function heatColor(rate) {
+    if (rate === null || rate === undefined) return '#d0d0d0';
+    const r = Math.round(214 + (44 - 214) * rate);
+    const g = Math.round(39 + (160 - 39) * rate);
+    const b = Math.round(40 + (44 - 40) * rate);
+    return 'rgb(' + r + ',' + g + ',' + b + ')';
+  }
+
+  function renderAxisCharts() {
+    const aggregate = data.per_axis_aggregate || {};
+    Object.keys(aggregate).forEach(function (axisName) {
+      const axis = aggregate[axisName];
+      const canvas = document.getElementById('fleet-axis-' + axisName);
+      if (!canvas) return;
+      const keys = Object.keys(axis.rates)
+        .map(function (k) { return parseFloat(k); })
+        .sort(function (a, b) { return a - b; });
+      const labels = keys.map(function (k) { return String(k); });
+      const rates = keys.map(function (k) { return axis.rates[String(k)]; });
+      const counts = keys.map(function (k) { return axis.counts[String(k)]; });
+      new Chart(canvas, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: 'Success rate',
+            data: rates,
+            backgroundColor: rates.map(function (r) { return heatColor(r); }),
+            borderWidth: 0
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: { y: { min: 0, max: 1, ticks: { callback: function (v) { return (v * 100) + '%'; } } } },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: function (ctx) {
+                  const i = ctx.dataIndex;
+                  return 'rate=' + (rates[i] * 100).toFixed(1) + '%  n=' + counts[i];
+                }
+              }
+            }
+          }
+        }
+      });
+    });
+  }
+
+  renderAxisCharts();
+})();
+</script>
+
+</body>
+</html>

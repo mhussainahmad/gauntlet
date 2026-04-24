@@ -593,6 +593,100 @@ def compare(
 
 
 # ──────────────────────────────────────────────────────────────────────
+# `aggregate` subcommand — fleet-wide failure-mode clustering.
+# ──────────────────────────────────────────────────────────────────────
+#
+# Reads every ``report.json`` recursively under DIR and writes a
+# fleet meta-report to ``<out>/fleet_report.json`` (and, by default,
+# ``<out>/fleet_report.html``). The persistence-threshold knob keys
+# the cross-run cluster algorithm — see
+# ``docs/phase3-rfc-019-fleet-aggregate.md`` for the design.
+
+
+@app.command("aggregate")
+def aggregate(
+    directory: Annotated[
+        Path,
+        typer.Argument(
+            help="Directory to recursively scan for report.json files.",
+            exists=False,  # checked manually for a friendlier message
+            file_okay=False,
+            dir_okay=True,
+        ),
+    ],
+    out: Annotated[
+        Path,
+        typer.Option(
+            "--out",
+            "-o",
+            help="Output directory; created if missing. Receives fleet_report.json (+ .html).",
+        ),
+    ],
+    persistence_threshold: Annotated[
+        float,
+        typer.Option(
+            "--persistence-threshold",
+            help=(
+                "Minimum fraction of runs a failure cluster must appear in to be "
+                "flagged as persistent. Range [0.0, 1.0]; comparison is inclusive."
+            ),
+            min=0.0,
+            max=1.0,
+        ),
+    ] = 0.5,
+    html: Annotated[
+        bool,
+        typer.Option(
+            "--html/--no-html",
+            help="Render fleet_report.html alongside the JSON. Defaults to ON.",
+        ),
+    ] = True,
+) -> None:
+    """Aggregate every report.json under DIR into a fleet meta-report."""
+    if not directory.is_dir():
+        raise _fail(f"directory not found: {directory}")
+
+    # Lazy import — keeps `gauntlet --help` snappy and avoids pulling
+    # the jinja2 template loader into unrelated subcommand startup.
+    from gauntlet.aggregate import (
+        aggregate_directory,
+        write_fleet_html,
+    )
+
+    try:
+        fleet = aggregate_directory(
+            directory,
+            persistence_threshold=persistence_threshold,
+        )
+    except FileNotFoundError as exc:
+        raise _fail(str(exc)) from exc
+    except ValueError as exc:
+        raise _fail(str(exc)) from exc
+
+    out.mkdir(parents=True, exist_ok=True)
+    fleet_json_path = out / "fleet_report.json"
+    fleet_html_path = out / "fleet_report.html"
+
+    _write_json(fleet_json_path, fleet.model_dump(mode="json"))
+    if html:
+        write_fleet_html(fleet, fleet_html_path)
+
+    _echo_err(f"[ok]Wrote[/] {_fmt_path(fleet_json_path)}")
+    if html:
+        _echo_err(f"[ok]Wrote[/] {_fmt_path(fleet_html_path)}")
+    _echo_err(
+        f"  fleet: {fleet.n_runs} runs / {fleet.n_total_episodes} episodes "
+        f"(mean success: {_fmt_success_rate(fleet.mean_success_rate)})"
+    )
+    n_clusters = len(fleet.persistent_failure_clusters)
+    cluster_style = "delta.down" if n_clusters else "delta.zero"
+    _echo_err(
+        f"  persistent failure clusters: [{cluster_style}]{n_clusters}[/] "
+        f"(threshold >={persistence_threshold:.2f})"
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────
 # `monitor` subcommand group — drift detector (torch-backed).
 # ──────────────────────────────────────────────────────────────────────
 #
