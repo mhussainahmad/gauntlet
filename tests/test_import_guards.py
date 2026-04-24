@@ -201,3 +201,74 @@ def test_cli_monitor_score_help_exits_zero() -> None:
         f"exit={result.returncode}\nstdout={result.stdout}\nstderr={result.stderr}"
     )
     assert "--ae" in result.stdout
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Phase 2.5 Task 11 — gauntlet.monitor.__getattr__ unknown-name branch.
+# ──────────────────────────────────────────────────────────────────────
+
+
+def test_monitor_unknown_attribute_raises_attribute_error() -> None:
+    """``gauntlet.monitor.<not-a-known-name>`` raises a real AttributeError
+    rather than ImportError — the lazy router only intercepts the three
+    documented torch-backed symbols (line 80 branch in monitor/__init__.py)."""
+    import gauntlet.monitor as monitor
+
+    with pytest.raises(AttributeError, match="no attribute 'definitely_not_there'"):
+        monitor.definitely_not_there  # noqa: B018
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Phase 2.5 Task 11 — gauntlet.policy.__getattr__ unknown-name branch.
+# ──────────────────────────────────────────────────────────────────────
+
+
+def test_policy_unknown_attribute_raises_attribute_error() -> None:
+    """The lazy ``gauntlet.policy.__getattr__`` raises AttributeError on
+    names other than ``HuggingFacePolicy`` / ``LeRobotPolicy`` (line 70 branch)."""
+    import gauntlet.policy as policy_pkg
+
+    with pytest.raises(AttributeError, match="no attribute"):
+        policy_pkg.__getattr__("definitely_not_there")
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Phase 2.5 Task 11 — gauntlet.ros2.__getattr__ install-hint + unknown
+# ──────────────────────────────────────────────────────────────────────
+
+
+def test_ros2_publisher_attribute_raises_install_hint_when_rclpy_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``from gauntlet.ros2 import Ros2EpisodePublisher`` triggers the
+    lazy import inside ``gauntlet.ros2.__getattr__``; when rclpy is
+    absent that surfaces as a clean ``ImportError`` pointing at the
+    apt / Docker install path (lines 67-78 in ros2/__init__.py)."""
+    monkeypatch.setitem(sys.modules, "rclpy", None)
+    monkeypatch.delitem(sys.modules, "gauntlet.ros2.publisher", raising=False)
+
+    import gauntlet.ros2 as ros2_pkg
+
+    with pytest.raises(ImportError, match="apt install"):
+        ros2_pkg.__getattr__("Ros2EpisodePublisher")
+
+
+def test_ros2_recorder_attribute_raises_install_hint_when_rclpy_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "rclpy", None)
+    monkeypatch.delitem(sys.modules, "gauntlet.ros2.recorder", raising=False)
+
+    import gauntlet.ros2 as ros2_pkg
+
+    with pytest.raises(ImportError, match="osrf/ros"):
+        ros2_pkg.__getattr__("Ros2RolloutRecorder")
+
+
+def test_ros2_unknown_attribute_raises_attribute_error() -> None:
+    """Names other than the two lazy-routed symbols raise plain
+    AttributeError (no spurious ImportError)."""
+    import gauntlet.ros2 as ros2_pkg
+
+    with pytest.raises(AttributeError, match="no attribute"):
+        ros2_pkg.__getattr__("definitely_not_there")

@@ -73,3 +73,10 @@ def test_integer_dtype_rejected() -> None:
     """Integer arrays are rejected — ``std`` would upcast silently otherwise."""
     with pytest.raises(ValueError, match="float dtype"):
         action_entropy(np.zeros((10, 7), dtype=np.int64))
+
+
+def test_non_ndarray_input_rejected() -> None:
+    """Passing a list / tuple / DataFrame must surface a clean ValueError
+    with the type name (covers the early-guard branch in entropy.py)."""
+    with pytest.raises(ValueError, match="must be an ndarray"):
+        action_entropy([[0.1, 0.2], [0.3, 0.4]])  # type: ignore[arg-type]
