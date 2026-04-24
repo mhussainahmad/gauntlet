@@ -549,3 +549,56 @@ def test_cache_stats_zero_when_no_cache_dir() -> None:
     """cache_stats() returns zeros without a cache so wrappers can call it freely."""
     runner = Runner(n_workers=1, env_factory=_make_fast_env)
     assert runner.cache_stats() == {"hits": 0, "misses": 0, "puts": 0}
+
+
+# ----------------------------------------------------------------------------
+# 5. Regression pin — Episode shape on the no-cache path matches the
+# pre-PR schema, field-for-field. Catches any accidental Episode-schema
+# drift introduced by the cache integration even before the byte-equality
+# check above can fire.
+# ----------------------------------------------------------------------------
+
+
+def test_no_cache_episode_shape_pinned() -> None:
+    """The no-cache path must keep the Episode field set unchanged.
+
+    Field-by-field check on a fixed-seed run; if a future refactor adds
+    or drops an Episode field this test fails first, before any
+    byte-equality assertion further downstream goes mysteriously red.
+    """
+    suite = _make_suite(seed=12345, episodes_per_cell=1)
+    runner = Runner(n_workers=1, env_factory=_make_fast_env)
+    episodes = runner.run(policy_factory=_make_scripted_policy, suite=suite)
+    assert len(episodes) == suite.num_cells()
+
+    expected_fields = {
+        "suite_name",
+        "cell_index",
+        "episode_index",
+        "seed",
+        "perturbation_config",
+        "success",
+        "terminated",
+        "truncated",
+        "step_count",
+        "total_reward",
+        "metadata",
+        "video_path",
+    }
+    for ep in episodes:
+        dumped = ep.model_dump()
+        assert set(dumped.keys()) == expected_fields, (
+            "Episode schema drifted; expected the pre-cache field set. "
+            "If you added a field, bump CACHE_SCHEMA_VERSION in "
+            "src/gauntlet/runner/cache.py to invalidate older cache "
+            "entries and update this test."
+        )
+        # video_path stays None on the no-cache, no-video path.
+        assert dumped["video_path"] is None
+        # master_seed echo is the only metadata key the Runner writes
+        # without an explicit user opt-in.
+        assert dumped["metadata"] == {
+            "master_seed": 12345,
+            "n_cells": suite.num_cells(),
+            "episodes_per_cell": 1,
+        }
