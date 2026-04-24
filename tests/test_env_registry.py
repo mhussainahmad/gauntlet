@@ -6,13 +6,19 @@ They use freshly-namespaced test names (``_testreg_*``) so the
 built-in ``tabletop`` registration from ``gauntlet.env.__init__`` does
 not collide, and so the monotonically-growing module-level registry is
 safe under the default session-scoped conftest.
+
+Phase 3 (plugin-system polish task) extended the suite with
+``resolve_env_factory`` plugin-fallthrough behaviour mirroring the
+``resolve_policy`` tests in ``tests/test_policy_registry.py``.
 """
 
 from __future__ import annotations
 
 import itertools
-from collections.abc import Callable
+import warnings
+from collections.abc import Callable, Iterator, Mapping
 from typing import Any, cast
+from unittest.mock import patch
 
 import pytest
 
@@ -22,6 +28,7 @@ from gauntlet.env.registry import (
     get_env_factory,
     register_env,
     registered_envs,
+    resolve_env_factory,
 )
 
 _NAME_COUNTER = itertools.count()
@@ -98,6 +105,111 @@ def test_factory_call_returns_stub_instance() -> None:
 
 
 def test_module_exposes_only_public_api() -> None:
-    """Public surface is exactly the three documented callables."""
+    """Public surface includes the four documented callables."""
     public = {n for n in dir(registry_mod) if not n.startswith("_")}
-    assert {"register_env", "get_env_factory", "registered_envs"} <= public
+    assert {
+        "register_env",
+        "get_env_factory",
+        "registered_envs",
+        "resolve_env_factory",
+    } <= public
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Phase 3 — plugin fallthrough via resolve_env_factory.
+# ──────────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def _isolated_env_plugin_cache() -> Iterator[None]:
+    """Clear the env plugin discovery lru_cache between tests."""
+    from gauntlet.plugins import discover_env_plugins
+
+    discover_env_plugins.cache_clear()
+    yield
+    discover_env_plugins.cache_clear()
+
+
+def _patch_env_plugins(plugins: Mapping[str, type[Any]]) -> Any:
+    """Patch :func:`gauntlet.plugins.discover_env_plugins` to return ``plugins``."""
+    return patch(
+        "gauntlet.plugins.discover_env_plugins",
+        return_value=plugins,
+    )
+
+
+class _FakePluginEnv:
+    """Duck-typed env class returned by tests' fake plugin entries."""
+
+    AXIS_NAMES: frozenset[str] = frozenset()
+
+
+def test_resolve_env_factory_returns_builtin_when_present(
+    _isolated_env_plugin_cache: None,
+) -> None:
+    """The first-party ``tabletop`` registration wins over plugin discovery."""
+    # ``tabletop`` is registered by ``gauntlet.env.__init__`` at import time.
+    factory = resolve_env_factory("tabletop")
+    # Identity round-trip with the imperative table — proves no plugin shim.
+    assert factory is get_env_factory("tabletop")
+
+
+def test_resolve_env_factory_falls_through_to_plugin(
+    _isolated_env_plugin_cache: None,
+) -> None:
+    """An unknown built-in name resolves through the plugin table."""
+    fake_plugins = {"third-party-env": _FakePluginEnv}
+    with _patch_env_plugins(fake_plugins):
+        factory = resolve_env_factory("third-party-env")
+    # The cast in resolve_env_factory widens the class to a Callable; calling
+    # it constructs an instance of the fake.
+    instance = factory()
+    assert isinstance(instance, _FakePluginEnv)
+
+
+def test_resolve_env_factory_unknown_name_lists_available(
+    _isolated_env_plugin_cache: None,
+) -> None:
+    """Unknown name surfaces both built-in and plugin names in the error."""
+    with (
+        _patch_env_plugins({"third-party-env": _FakePluginEnv}),
+        pytest.raises(ValueError, match="unknown env") as excinfo,
+    ):
+        resolve_env_factory("definitely-not-here")
+    msg = str(excinfo.value)
+    assert "tabletop" in msg
+    assert "third-party-env" in msg
+
+
+def test_resolve_env_factory_collision_warns_and_keeps_builtin(
+    _isolated_env_plugin_cache: None,
+) -> None:
+    """A plugin shadowing ``tabletop`` warns + keeps the built-in factory."""
+    fake_plugins = {"tabletop": _FakePluginEnv}
+    builtin = get_env_factory("tabletop")
+    with (
+        _patch_env_plugins(fake_plugins),
+        pytest.warns(RuntimeWarning, match="shadows the built-in 'tabletop'"),
+    ):
+        result = resolve_env_factory("tabletop")
+    assert result is builtin
+
+
+def test_resolve_env_factory_dogfood_collision_silent(
+    _isolated_env_plugin_cache: None,
+) -> None:
+    """Identity collision (gauntlet's own dogfood entry points) must NOT warn.
+
+    The dogfooded ``tabletop`` entry point loads the same class object
+    the imperative ``register_env`` already holds, so the
+    identity-based collision check should stay silent.
+    """
+    builtin = get_env_factory("tabletop")
+    fake_plugins = {"tabletop": cast(type[Any], builtin)}
+    with (
+        _patch_env_plugins(fake_plugins),
+        warnings.catch_warnings(),
+    ):
+        warnings.simplefilter("error", RuntimeWarning)
+        result = resolve_env_factory("tabletop")
+    assert result is builtin
