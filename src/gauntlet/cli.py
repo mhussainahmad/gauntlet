@@ -964,6 +964,215 @@ def replay(
     )
 
 
+# ──────────────────────────────────────────────────────────────────────
+# `ros2` subcommand group — RFC-010.
+# ──────────────────────────────────────────────────────────────────────
+#
+# The subcommands call into ``gauntlet.ros2.publisher`` /
+# ``gauntlet.ros2.recorder``. Both lazily import rclpy at module scope
+# and raise an ``ImportError`` with the apt / Docker install hint when
+# the user hasn't installed ROS 2 — we surface that as a clean CLI
+# error so users get the hint on the same line, not after a traceback.
+#
+# ``--dry-run`` on ``publish`` short-circuits the rclpy import entirely
+# so users can preview the JSON payloads without installing ROS 2.
+
+
+ros2_app = typer.Typer(
+    name="ros2",
+    help="ROS 2 integration — publish episode summaries / record robot topics.",
+    no_args_is_help=True,
+    add_completion=False,
+)
+app.add_typer(ros2_app)
+
+
+def _fail_ros2_extra(exc: ImportError) -> typer.Exit:
+    """Turn the rclpy install-hint ``ImportError`` into a clean CLI error."""
+    return _fail(str(exc))
+
+
+@ros2_app.command("publish")
+def ros2_publish(
+    episodes_path: Annotated[
+        Path,
+        typer.Argument(
+            help="Path to an episodes.json emitted by a prior 'gauntlet run'.",
+            dir_okay=False,
+            file_okay=True,
+        ),
+    ],
+    topic: Annotated[
+        str,
+        typer.Option(
+            "--topic",
+            help="ROS 2 topic to publish on. Defaults to /gauntlet/episodes.",
+        ),
+    ] = "/gauntlet/episodes",
+    node_name: Annotated[
+        str,
+        typer.Option(
+            "--node-name",
+            help="ROS 2 node name. Defaults to gauntlet_episode_publisher.",
+        ),
+    ] = "gauntlet_episode_publisher",
+    qos_depth: Annotated[
+        int,
+        typer.Option(
+            "--qos-depth",
+            min=1,
+            help="QoS history depth. Defaults to 10.",
+        ),
+    ] = 10,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help=(
+                "Render the JSON payloads to stderr without contacting rclpy. "
+                "Useful for previewing the wire format on a machine without "
+                "ROS 2 installed."
+            ),
+        ),
+    ] = False,
+) -> None:
+    """Publish each Episode in EPISODES_JSON to a ROS 2 topic.
+
+    Wire format: JSON serialised inside ``std_msgs/msg/String`` (RFC-010
+    §5). One message per Episode. Requires the ``rclpy`` Python bindings
+    on PATH unless ``--dry-run`` is passed; install ROS 2 via your
+    system package manager (``apt install ros-<distro>-rclpy``) or via
+    the official Docker image (``osrf/ros:<distro>-desktop``).
+    """
+    if not episodes_path.is_file():
+        raise _fail(f"episodes file not found: {episodes_path}")
+    if not topic:
+        raise _fail("--topic must be a non-empty string")
+
+    raw = _read_json(episodes_path)
+    if not isinstance(raw, list):
+        raise _fail(
+            f"{episodes_path}: expected a list of Episode objects (got {type(raw).__name__})"
+        )
+    episodes = _episodes_from_dicts(raw, source=episodes_path)
+
+    if dry_run:
+        # Lazy schema import — torch-/rclpy-free; works on every install.
+        from gauntlet.ros2.schema import Ros2EpisodePayload
+
+        for ep in episodes:
+            payload = Ros2EpisodePayload.from_episode(ep)
+            _echo_err(payload.model_dump_json())
+        _echo_err(
+            f"[ok]Dry-run[/] published {len(episodes)} payloads to stderr "
+            f"(topic [path]{topic}[/], rclpy NOT contacted)"
+        )
+        return
+
+    try:
+        from gauntlet.ros2.publisher import Ros2EpisodePublisher
+    except ImportError as exc:
+        raise _fail_ros2_extra(exc) from exc
+
+    try:
+        publisher = Ros2EpisodePublisher(
+            topic=topic,
+            node_name=node_name,
+            qos_depth=qos_depth,
+        )
+    except ValueError as exc:
+        raise _fail(f"ros2 publish failed: {exc}") from exc
+
+    try:
+        for ep in episodes:
+            publisher.publish_episode(ep)
+    finally:
+        publisher.close()
+
+    _echo_err(
+        f"[ok]Published[/] {len(episodes)} episodes to [path]{topic}[/] (node [path]{node_name}[/])"
+    )
+
+
+@ros2_app.command("record")
+def ros2_record(
+    topic: Annotated[
+        str,
+        typer.Option(
+            "--topic",
+            help="ROS 2 topic to subscribe to (required).",
+        ),
+    ],
+    out: Annotated[
+        Path,
+        typer.Option(
+            "--out",
+            "-o",
+            help="JSONL output path (one received message per line).",
+            dir_okay=False,
+            file_okay=True,
+        ),
+    ],
+    duration: Annotated[
+        float,
+        typer.Option(
+            "--duration",
+            help=(
+                "Soft cap in seconds. 0.0 means run forever (until Ctrl-C). Defaults to 30 seconds."
+            ),
+        ),
+    ] = 30.0,
+    node_name: Annotated[
+        str,
+        typer.Option(
+            "--node-name",
+            help="ROS 2 node name. Defaults to gauntlet_rollout_recorder.",
+        ),
+    ] = "gauntlet_rollout_recorder",
+    qos_depth: Annotated[
+        int,
+        typer.Option(
+            "--qos-depth",
+            min=1,
+            help="QoS history depth. Defaults to 10.",
+        ),
+    ] = 10,
+) -> None:
+    """Subscribe to TOPIC and dump received messages to OUT as JSONL.
+
+    One JSON object per line: ``{"timestamp": <float>, "topic": <str>,
+    "data": <str>}``. ``data`` is :func:`str` of the message payload —
+    lossy but generic across message types (RFC-010 §6 / §11).
+
+    Requires the ``rclpy`` Python bindings on PATH; install ROS 2 via
+    ``apt install ros-<distro>-rclpy`` or the official Docker image
+    (``osrf/ros:<distro>-desktop``).
+    """
+    if not topic:
+        raise _fail("--topic must be a non-empty string")
+    if duration < 0.0:
+        raise _fail(f"--duration must be >= 0; got {duration}")
+
+    try:
+        from gauntlet.ros2.recorder import Ros2RolloutRecorder
+    except ImportError as exc:
+        raise _fail_ros2_extra(exc) from exc
+
+    try:
+        with Ros2RolloutRecorder(
+            topic=topic,
+            out_path=out,
+            node_name=node_name,
+            duration_s=duration,
+            qos_depth=qos_depth,
+        ) as recorder:
+            n_received = recorder.spin_until_done()
+    except ValueError as exc:
+        raise _fail(f"ros2 record failed: {exc}") from exc
+
+    _echo_err(f"[ok]Recorded[/] {n_received} messages from [path]{topic}[/] -> {_fmt_path(out)}")
+
+
 # ``python -m gauntlet.cli`` parity with the installed entry point.
 if __name__ == "__main__":  # pragma: no cover
     app()

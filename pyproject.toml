@@ -88,6 +88,16 @@ genesis = [
     "genesis-world>=0.4,<0.5",
     "torch>=2.2,<3",
 ]
+# Independent extra for the ROS 2 integration (RFC-010).
+# Empty on purpose: rclpy is NOT distributed via PyPI in its official
+# form (RFC-010 §3). Users install via ``apt install ros-<distro>-rclpy``
+# or ``docker run osrf/ros:<distro>-desktop`` and source the relevant
+# ``setup.bash`` before ``gauntlet ros2 publish`` works. The lazy-import
+# guard in ``gauntlet.ros2.publisher`` / ``.recorder`` raises a clean
+# ImportError pointing at the apt/Docker install path on first use.
+# The extra exists so ``uv sync --extra ros2`` is a recognised
+# invocation and so the [ros2-dev] dev-group has a partner extra.
+ros2 = []
 
 [project.scripts]
 gauntlet = "gauntlet.cli:app"
@@ -127,6 +137,12 @@ pybullet-dev = [
 ]
 # CI-only group for the genesis pytest job.
 genesis-dev = [
+    {include-group = "dev"},
+    "pytest-mock>=3.12,<4",
+]
+# CI-only group for the ros2 pytest job. rclpy is mocked at the module
+# boundary in tests/ros2/conftest.py, so no real ROS 2 install is needed.
+ros2-dev = [
     {include-group = "dev"},
     "pytest-mock>=3.12,<4",
 ]
@@ -171,6 +187,13 @@ ignore = []
 # not blow up. Imports of torch-backed gauntlet modules therefore land
 # after executable statements — same E402 pattern as the modules above.
 "tests/monitor/test_ae.py" = ["E402"]
+# The ros2 modules put ``try: import rclpy`` at module scope to raise
+# the install-hint before any downstream import runs. That forces the
+# sibling ``from gauntlet.ros2.schema import ...`` imports to land
+# below the guard, which ruff flags as E402. The ordering is
+# intentional — same shape as the monitor torch modules above.
+"src/gauntlet/ros2/publisher.py" = ["E402"]
+"src/gauntlet/ros2/recorder.py" = ["E402"]
 
 [tool.mypy]
 python_version = "3.11"
@@ -230,6 +253,25 @@ ignore_missing_imports = true
 module = ["genesis", "genesis.*"]
 ignore_missing_imports = true
 
+# rclpy and the standard ROS 2 message packages (std_msgs, sensor_msgs,
+# geometry_msgs) are not pip-installable in their official form
+# (RFC-010 §3 — distributed via apt or Docker). This override lets mypy
+# import-check src/gauntlet/ros2/* even when the [ros2] extra is empty
+# / no real ROS 2 install is on PATH. Per spec §6, Any is permitted at
+# FFI boundaries; this is the rclpy FFI boundary.
+[[tool.mypy.overrides]]
+module = [
+    "rclpy",
+    "rclpy.*",
+    "std_msgs",
+    "std_msgs.*",
+    "sensor_msgs",
+    "sensor_msgs.*",
+    "geometry_msgs",
+    "geometry_msgs.*",
+]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 minversion = "8.0"
 addopts = [
@@ -246,6 +288,7 @@ markers = [
     "monitor: tests that require the [monitor] extra (torch, PIL)",
     "pybullet: tests that require the [pybullet] extra (pybullet>=3.2)",
     "genesis: tests that require the [genesis] extra (genesis-world>=0.4, torch)",
+    "ros2: tests that require the [ros2] extra (rclpy mocked at the module boundary)",
 ]
 
 [tool.coverage.run]
