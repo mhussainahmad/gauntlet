@@ -26,7 +26,7 @@ Design notes:
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = [
     "AxisBreakdown",
@@ -74,7 +74,7 @@ class CellBreakdown(BaseModel):
     n_episodes: int
     n_success: int
     success_rate: float
-    video_paths: list[str] = []
+    video_paths: list[str] = Field(default_factory=list)
 
 
 class FailureCluster(BaseModel):
@@ -105,7 +105,7 @@ class FailureCluster(BaseModel):
     n_success: int
     failure_rate: float
     lift: float
-    video_paths: list[str] = []
+    video_paths: list[str] = Field(default_factory=list)
 
 
 class Heatmap2D(BaseModel):
