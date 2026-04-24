@@ -113,18 +113,29 @@ class TestRos2EpisodePayloadSchema:
 
 
 class TestPackageImportSurface:
-    def test_top_level_import_works_without_rclpy(self) -> None:
-        """``import gauntlet.ros2`` does not transitively import rclpy.
+    def test_top_level_import_does_not_load_publisher_or_recorder(self) -> None:
+        """``import gauntlet.ros2`` is rclpy-free.
 
         The eager re-export is only :class:`Ros2EpisodePayload` (pure
-        pydantic). The publisher / recorder are routed through
-        ``__getattr__`` (added in a later step) so a bare
-        ``import gauntlet.ros2`` is safe on the default torch-free /
-        rclpy-free install path.
+        pydantic). The publisher / recorder modules — which carry the
+        module-scope ``try: import rclpy`` guard — are routed through
+        ``__getattr__`` and must NOT be loaded by a bare
+        ``import gauntlet.ros2``. This is the bimodal-surface contract
+        from RFC-010 §4 and is the property that keeps the default
+        torch-free / rclpy-free CI job green.
         """
         import sys
+
+        # Flush any prior load of the rclpy-backed modules so the
+        # assertion below tests the clean import path. (Other tests in
+        # the suite may have triggered the lazy loader.)
+        for cached in ("gauntlet.ros2", "gauntlet.ros2.publisher", "gauntlet.ros2.recorder"):
+            sys.modules.pop(cached, None)
 
         import gauntlet.ros2 as pkg
 
         assert pkg.Ros2EpisodePayload is Ros2EpisodePayload
-        assert "rclpy" not in sys.modules or sys.modules["rclpy"] is None
+        # The bimodal-surface contract: the rclpy-backed modules must
+        # NOT have been imported by ``import gauntlet.ros2``.
+        assert "gauntlet.ros2.publisher" not in sys.modules
+        assert "gauntlet.ros2.recorder" not in sys.modules
