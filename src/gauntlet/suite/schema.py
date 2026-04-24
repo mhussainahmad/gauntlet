@@ -22,7 +22,10 @@ Two axis spec shapes are accepted (one or the other, never both):
 
 Validation is firm — extras are forbidden, axis names must be canonical,
 ``low <= high``, ``steps >= 1``, ``episodes_per_cell >= 1``, ``env`` must
-be ``"tabletop"`` in Phase 1, and the axes mapping must be non-empty.
+match either a currently-registered backend or one of the lazy-import
+keys in :data:`BUILTIN_BACKEND_IMPORTS` (``tabletop``,
+``tabletop-pybullet``, ``tabletop-genesis``, ``tabletop-isaac``), and
+the axes mapping must be non-empty.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""PyBullet tabletop backend — state-only first cut (RFC-005 §5 through §8).
+"""PyBullet tabletop backend — state + image obs (RFC-005 + RFC-006).
 
 Parity with :class:`gauntlet.env.tabletop.TabletopEnv` at the
 observation / action / perturbation-axis interface level (RFC-005 §7.2),
@@ -11,21 +11,19 @@ surfaces:
   backends measures simulator drift, not policy regression.
 * **Quat wire-format** (§7.3). PyBullet returns xyzw everywhere;
   ``_build_obs`` converts once so ``cube_quat`` is always MuJoCo wxyz.
-* **Visual-only axes** (§6 / §6.2). ``lighting_intensity`` and
-  ``object_texture`` mutate the scene (texture swap applies
-  immediately; lighting is stored on ``self._light_intensity`` for the
-  follow-up rendering RFC) but do not change state-only observations.
+* **Post-RFC-006 cosmetic-axis parity** (§3.5). ``lighting_intensity``,
+  ``object_texture``, and ``camera_offset_{x,y}`` now mutate
+  ``obs["image"]`` when ``render_in_obs=True``. :attr:`VISUAL_ONLY_AXES`
+  is empty (matching MuJoCo's ``TabletopEnv``); the Suite loader's
+  cosmetic-only rejection is a no-op on this backend. A user running a
+  cosmetic-only sweep with ``render_in_obs=False`` will still see
+  pairwise-identical state-only cells — documented, not a bug, same
+  shape MuJoCo has always had.
 
 Scene layout: per RFC §5.1, built from PyBullet primitives
 (createMultiBody + loadTexture). Only ``plane.urdf`` from
 ``pybullet_data`` is loaded as a URDF — everything else is authored as
 a box/cylinder shape so the repo ships no custom URDF.
-
-Per-axis branches (RFC §13 item 10) are not wired here; the step-9
-scope is the baseline env body. ``set_perturbation`` queues + validates,
-``reset`` applies the queue through ``_apply_pending_perturbations``
-which currently raises :class:`NotImplementedError` if anything is
-queued. Step 10 lands the seven branches.
 """
 
 from __future__ import annotations

@@ -90,18 +90,53 @@ class GauntletEnv(Protocol):
         *,
         seed: int | None = None,
         options: dict[str, Any] | None = None,
-    ) -> tuple[Observation, dict[str, Any]]: ...
+    ) -> tuple[Observation, dict[str, Any]]:
+        """Initialise a new episode and return the first observation + info.
+
+        See the class docstring "Behavioural contract" section for the
+        mandatory four-step ordering (restore baseline -> seed-driven
+        randomisation -> apply queued perturbations -> clear queue) every
+        backend MUST implement to satisfy the Runner's determinism
+        guarantee.
+        """
+        ...
 
     def step(
         self,
         action: Action,
-    ) -> tuple[Observation, float, bool, bool, dict[str, Any]]: ...
+    ) -> tuple[Observation, float, bool, bool, dict[str, Any]]:
+        """Apply one control action and return ``(obs, reward, terminated, truncated, info)``.
 
-    def set_perturbation(self, name: str, value: float) -> None: ...
+        The five-tuple matches :class:`gymnasium.Env`. ``info["success"]``
+        is the canonical truth flag the Runner reads when materialising
+        :attr:`gauntlet.runner.Episode.success`.
+        """
+        ...
 
-    def restore_baseline(self) -> None: ...
+    def set_perturbation(self, name: str, value: float) -> None:
+        """Queue a named scalar perturbation for the next :meth:`reset`.
 
-    def close(self) -> None: ...
+        Does NOT take effect until the following ``reset()``. Raises
+        :class:`ValueError` for ``name not in type(self).AXIS_NAMES``.
+        Per-backend validation (integer bounds on ``distractor_count``,
+        categorical-set membership on ``object_texture``, etc.) applies
+        on top of the name check.
+        """
+        ...
+
+    def restore_baseline(self) -> None:
+        """Make the env observationally equivalent to its post-``__init__`` state.
+
+        Called by the Runner between episodes. Does NOT clear the
+        pending-perturbation queue — those values are the input to the
+        next reset. Bit-identical internal state is a MuJoCo-only
+        property; the contract is *observational* equivalence.
+        """
+        ...
+
+    def close(self) -> None:
+        """Release simulator-held resources. Idempotent."""
+        ...
 
 
 __all__ = ["Action", "GauntletEnv", "Observation"]
