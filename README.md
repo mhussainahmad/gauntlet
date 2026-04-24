@@ -67,6 +67,20 @@ semantic parity only). All seven perturbation axes produce observable
 deltas on the rendered image on every backend; `VISUAL_ONLY_AXES` is
 empty everywhere.
 
+For multi-view policies (SmolVLA, ACT, Diffusion Policy — anything
+that consumes paired wrist + side + overhead frames), pass
+`cameras=[CameraSpec(...), ...]` to `TabletopEnv` or
+`PyBulletTabletopEnv` instead. Each spec lands in
+`obs["images"][name]`; `obs["image"]` stays populated as an alias to
+the first camera so single-view consumers (the runner's video
+recorder, OpenVLA-style adapters) keep working unchanged. The
+single-camera default (`cameras=None`) is byte-identical to the
+phase-1 contract — see
+[`docs/polish-exploration-multi-camera.md`](./docs/polish-exploration-multi-camera.md)
+for the full design and
+[`examples/evaluate_multi_camera.py`](./examples/evaluate_multi_camera.py)
+for a worked example.
+
 See [`docs/phase2-rfc-005-pybullet-adapter.md`](./docs/phase2-rfc-005-pybullet-adapter.md)
 for the full PyBullet backend design,
 [`docs/phase2-rfc-006-pybullet-rendering.md`](./docs/phase2-rfc-006-pybullet-rendering.md)
