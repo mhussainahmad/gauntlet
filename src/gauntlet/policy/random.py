@@ -37,6 +37,13 @@ class RandomPolicy:
         self._rng: np.random.Generator = np.random.default_rng(seed)
 
     def act(self, obs: Observation) -> Action:
+        """Draw one ``(action_dim,) float64`` action from the configured uniform.
+
+        Observations are ignored by design — the random baseline is the
+        zero-information reference point against which a learned policy's
+        success rate is judged. Determinism is anchored on :attr:`_rng`,
+        which :meth:`reset` rebinds at the start of every episode.
+        """
         del obs  # random policy ignores observations by design
         sample = self._rng.uniform(
             low=self.action_low,
