@@ -1,0 +1,35 @@
+# tabletop-lhs-smoke — Latin-hypercube perturbation sampling demo.
+#
+# Same five axes as a 5x5x5x5x5 = 3,125-cell cartesian sweep, but
+# evaluated at 32 LHS samples instead of the full grid. Every axis
+# still covers 32 distinct strata (more than the cartesian 5),
+# meaning marginal coverage is *higher* while the rollout count
+# drops by ~98x.
+#
+# Total work: 32 cells * 2 episodes = 64 rollouts (vs 3,125 * 2 =
+# 6,250 for the cartesian equivalent). Finishes in seconds on a
+# laptop and demonstrates the failure-mode coverage you cannot
+# afford to grid-search.
+
+name: tabletop-lhs-smoke
+env: tabletop
+seed: 42
+sampling: latin_hypercube
+n_samples: 32
+episodes_per_cell: 2
+axes:
+  lighting_intensity:
+    low: 0.3
+    high: 1.5
+  camera_offset_x:
+    low: -0.05
+    high: 0.05
+  camera_offset_y:
+    low: -0.05
+    high: 0.05
+  object_initial_pose_x:
+    low: -0.15
+    high: 0.15
+  object_initial_pose_y:
+    low: -0.15
+    high: 0.15
