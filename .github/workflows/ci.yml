@@ -49,7 +49,7 @@ jobs:
         run: uv run mypy
 
       - name: Run tests (excludes extras-gated markers)
-        run: uv run pytest -m "not hf and not lerobot and not monitor and not pybullet and not genesis and not ros2"
+        run: uv run pytest -m "not hf and not lerobot and not monitor and not pybullet and not genesis and not ros2 and not isaac"
 
   hf-tests:
     name: hf tests (py${{ matrix.python-version }})
@@ -227,3 +227,54 @@ jobs:
 
       - name: Run ros2-marked tests (rclpy mocked at module boundary)
         run: uv run pytest -m ros2 -q
+
+  isaac-tests:
+    # Placeholder job for future GPU-runner-backed Isaac Sim tests
+    # (RFC-009 §9). isaacsim wraps NVIDIA Omniverse Kit and requires a
+    # CUDA RTX-class GPU at runtime; the PyPI wheel resolves on
+    # ubuntu-latest but the Kit bootstrap segfaults probing for a GPU.
+    # So this job is allowed to fail (continue-on-error) and the test
+    # step uses a `|| [ $? -eq 5 ]` guard so a zero-collection on the
+    # `isaac` marker (no real-runtime tests carry it in this PR) is
+    # treated as success. The mocked default-job tests in `tests/isaac/`
+    # are unmarked and run in `lint-typecheck-test` above.
+    name: isaac backend tests (placeholder, py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Sync dependencies (isaac extra + isaac-dev group)
+        # ~15 GB Kit binaries pulled from the NVIDIA index — slow on
+        # cold cache. Allowed to fail because the GPU dependency
+        # surfaces during install on some runner SKUs.
+        continue-on-error: true
+        run: >-
+          uv sync
+          --extra isaac
+          --group isaac-dev
+          --python ${{ matrix.python-version }}
+
+      - name: Run isaac-marked tests (zero-collection tolerated)
+        # No tests carry the `isaac` marker in this PR (RFC-009 §8 —
+        # the marker is reserved for future GPU-runner-backed live
+        # tests). pytest exits 5 when zero tests match a marker, so we
+        # silence that exit code explicitly. The mocked default-job
+        # tests do not need this job at all.
+        continue-on-error: true
+        run: |
+          uv run pytest -m isaac --co -q || [ $? -eq 5 ]

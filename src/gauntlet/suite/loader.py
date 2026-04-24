@@ -41,6 +41,7 @@ __all__ = [
 _EXTRA_FOR_MODULE: dict[str, str] = {
     "gauntlet.env.pybullet": "pybullet",
     "gauntlet.env.genesis": "genesis",
+    "gauntlet.env.isaac": "isaac",
 }
 
 

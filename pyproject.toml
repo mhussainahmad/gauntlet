@@ -98,6 +98,23 @@ genesis = [
 # The extra exists so ``uv sync --extra ros2`` is a recognised
 # invocation and so the [ros2-dev] dev-group has a partner extra.
 ros2 = []
+# Independent extra for the Isaac Sim backend (RFC-009).
+# isaacsim wraps NVIDIA Omniverse Kit and requires a CUDA-capable
+# RTX-class GPU at runtime. The PyPI wheel resolves on CPU-only
+# machines but every meaningful import probes for the GPU and fails,
+# so this extra is intended for a developer's GPU workstation. CI
+# tests use a sys.modules-injected fake `isaacsim` namespace and do
+# NOT install this extra (RFC-009 §8). isaacsim brings its own
+# transitive torch / numpy / gymnasium so we do not declare them.
+#
+# Pin: >=5.0,<6 — Isaac Sim 5.0 is the first release that publishes
+# Python 3.11 wheels (older 4.x line was cp310-only); 6.x bumped to
+# cp312-only, which we cannot use under our `requires-python = ">=3.11"`
+# floor without an explicit Python upper bound. Revisit when the
+# Python floor moves.
+isaac = [
+    "isaacsim>=5.0,<6",
+]
 
 [project.scripts]
 gauntlet = "gauntlet.cli:app"
@@ -146,10 +163,86 @@ ros2-dev = [
     {include-group = "dev"},
     "pytest-mock>=3.12,<4",
 ]
+# CI-only group for the isaac pytest job (RFC-009). pytest-mock is
+# pulled in for parity with the other backend dev groups; the
+# default-job mocked tests in tests/isaac/ use sys.modules injection
+# in conftest.py rather than pytest-mock fixtures, but having
+# pytest-mock available keeps future test additions trivial.
+isaac-dev = [
+    {include-group = "dev"},
+    "pytest-mock>=3.12,<4",
+]
 
 [build-system]
 requires = ["uv_build>=0.8.13,<0.9.0"]
 build-backend = "uv_build"
+
+# NVIDIA's index (pypi.nvidia.com) hosts the actual omniverse-kit /
+# isaacsim wheels. The PyPI placeholders for those packages are
+# wheel-stub shims that download from the NVIDIA index at install
+# time, which means uv's resolver also needs to see the NVIDIA index
+# to populate the lockfile. Without this entry,
+# `uv sync` / `uv lock` fail trying to build the omniverse-kit
+# placeholder. RFC-009 §4.1 / §8.
+# isaacsim pins numpy==1.26.0 (via isaacsim-kernel); the other heavy
+# extras (genesis, hf, lerobot, monitor) all want numpy>=1.26.4 or
+# numpy>=2. Mark them as mutually exclusive at install-time. uv
+# resolves each side of the conflict independently, so a developer
+# either gets `[isaac]` (Isaac Sim workstation) or one of the other
+# heavy backends — never both in one venv. CI installs each extra in
+# its own job, so the conflict never bites in practice. RFC-009 §4.3.
+[tool.uv]
+conflicts = [
+    [
+        { extra = "isaac" },
+        { extra = "genesis" },
+    ],
+    [
+        { extra = "isaac" },
+        { extra = "hf" },
+    ],
+    [
+        { extra = "isaac" },
+        { extra = "lerobot" },
+    ],
+    [
+        { extra = "isaac" },
+        { extra = "monitor" },
+    ],
+]
+
+[[tool.uv.index]]
+name = "nvidia"
+url = "https://pypi.nvidia.com/"
+explicit = true
+
+[tool.uv.sources]
+isaacsim = { index = "nvidia" }
+isaacsim-kernel = { index = "nvidia" }
+isaacsim-app = { index = "nvidia" }
+isaacsim-core = { index = "nvidia" }
+isaacsim-asset = { index = "nvidia" }
+isaacsim-rl = { index = "nvidia" }
+isaacsim-cortex = { index = "nvidia" }
+isaacsim-extscache-physics = { index = "nvidia" }
+isaacsim-extscache-kit = { index = "nvidia" }
+isaacsim-extscache-kit-sdk = { index = "nvidia" }
+isaacsim-utils = { index = "nvidia" }
+isaacsim-storage = { index = "nvidia" }
+isaacsim-template = { index = "nvidia" }
+isaacsim-test = { index = "nvidia" }
+isaacsim-replicator = { index = "nvidia" }
+isaacsim-sensor = { index = "nvidia" }
+isaacsim-robot = { index = "nvidia" }
+isaacsim-robot-motion = { index = "nvidia" }
+isaacsim-robot-policy = { index = "nvidia" }
+isaacsim-robot-setup = { index = "nvidia" }
+isaacsim-ros2 = { index = "nvidia" }
+isaacsim-gui = { index = "nvidia" }
+isaacsim-benchmark = { index = "nvidia" }
+isaacsim-code-editor = { index = "nvidia" }
+isaacsim-example = { index = "nvidia" }
+omniverse-kit = { index = "nvidia" }
 
 # ---------- Tooling ----------
 
@@ -272,6 +365,27 @@ module = [
 ]
 ignore_missing_imports = true
 
+# isaacsim / omni / pxr ship no type stubs (Omniverse Kit is a closed
+# C++ surface). Same FFI-boundary carve-out as pybullet / mujoco /
+# genesis — lets mypy import-check env/isaac/* even when the [isaac]
+# extra isn't installed (which is the case on every CI runner — the
+# wheel resolves but Kit needs a GPU; see RFC-009 §4.4).
+#
+# omni / pxr are reserved for the rendering follow-up RFC (camera +
+# lighting + USD material wiring); the state-only first cut only
+# touches `isaacsim` + `isaacsim.core.api`. Kept here pre-emptively
+# so the rendering RFC adds zero pyproject.toml lines.
+[[tool.mypy.overrides]]
+module = [
+    "isaacsim",
+    "isaacsim.*",
+    "omni",
+    "omni.*",
+    "pxr",
+    "pxr.*",
+]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 minversion = "8.0"
 addopts = [
@@ -289,6 +403,7 @@ markers = [
     "pybullet: tests that require the [pybullet] extra (pybullet>=3.2)",
     "genesis: tests that require the [genesis] extra (genesis-world>=0.4, torch)",
     "ros2: tests that require the [ros2] extra (rclpy mocked at the module boundary)",
+    "isaac: tests that require a real Isaac Sim install (isaacsim>=5.0) and a CUDA GPU; the default tests/isaac/ suite is mock-driven and unmarked",
 ]
 
 [tool.coverage.run]
