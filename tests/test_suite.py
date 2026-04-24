@@ -689,3 +689,143 @@ class TestLoaderEdgeCases:
             VISUAL_ONLY_AXES: ClassVar[list[str]] = ["a", "b"]  # not a frozenset
 
         assert _visual_only_axes_of(_BadAttr) == frozenset()
+
+
+# ---------------------------------------------------------------- sampling
+# Polish: opt-in LHS / Sobol sampling. The default remains ``cartesian``
+# so every prior test in this module pins the backwards-compatible path.
+
+
+class TestSamplingFieldDefaults:
+    def test_default_sampling_is_cartesian(self) -> None:
+        suite = load_suite_from_string(_VALID_YAML)
+        assert suite.sampling == "cartesian"
+        assert suite.n_samples is None
+
+    def test_sampling_field_present_in_model_dump(self) -> None:
+        suite = load_suite_from_string(_VALID_YAML)
+        dumped = suite.model_dump()
+        assert dumped["sampling"] == "cartesian"
+        assert dumped["n_samples"] is None
+        # Round-trip: model_dump -> model_validate must produce an
+        # equal Suite. Pins backwards-compat for any caller that
+        # serialises a Suite to JSON / YAML and parses it back.
+        reparsed = Suite.model_validate(dumped)
+        assert reparsed == suite
+
+    def test_explicit_cartesian_accepted(self) -> None:
+        text = _VALID_YAML + "sampling: cartesian\n"
+        suite = load_suite_from_string(text)
+        assert suite.sampling == "cartesian"
+
+
+class TestSamplingValidation:
+    """Cross-field validation: ``sampling`` <-> ``n_samples`` <-> per-axis steps."""
+
+    _LHS_OK = """
+name: lhs-suite
+env: tabletop
+seed: 42
+episodes_per_cell: 1
+sampling: latin_hypercube
+n_samples: 16
+axes:
+  lighting_intensity:
+    low: 0.3
+    high: 1.5
+  camera_offset_x:
+    low: -0.05
+    high: 0.05
+"""
+
+    def test_lhs_yaml_without_steps_loads(self) -> None:
+        suite = load_suite_from_string(self._LHS_OK)
+        assert suite.sampling == "latin_hypercube"
+        assert suite.n_samples == 16
+        for spec in suite.axes.values():
+            assert spec.steps is None
+            assert spec.low is not None
+            assert spec.high is not None
+
+    def test_lhs_requires_n_samples(self) -> None:
+        bad = self._LHS_OK.replace("n_samples: 16\n", "")
+        with pytest.raises(ValidationError, match="n_samples is required"):
+            load_suite_from_string(bad)
+
+    def test_lhs_rejects_per_axis_steps(self) -> None:
+        bad = """
+name: x
+env: tabletop
+sampling: latin_hypercube
+n_samples: 16
+episodes_per_cell: 1
+axes:
+  lighting_intensity:
+    low: 0.3
+    high: 1.5
+    steps: 5
+"""
+        with pytest.raises(ValidationError, match="forbids per-axis steps"):
+            load_suite_from_string(bad)
+
+    def test_cartesian_rejects_n_samples(self) -> None:
+        bad = """
+name: x
+env: tabletop
+sampling: cartesian
+n_samples: 16
+episodes_per_cell: 1
+axes:
+  lighting_intensity:
+    low: 0.3
+    high: 1.5
+    steps: 5
+"""
+        with pytest.raises(ValidationError, match="n_samples must be omitted"):
+            load_suite_from_string(bad)
+
+    def test_cartesian_still_requires_steps(self) -> None:
+        # Equivalent to the existing ``test_partial_continuous_shape_rejected``
+        # but pinned at the Suite layer (the AxisSpec layer is now lenient
+        # so non-cartesian YAMLs can omit ``steps``). The user-facing
+        # error message keeps the historical "requires low, high, steps"
+        # phrasing so existing call-sites that pattern-match the error
+        # do not break.
+        bad = """
+name: x
+env: tabletop
+sampling: cartesian
+episodes_per_cell: 1
+axes:
+  lighting_intensity:
+    low: 0.0
+    high: 1.0
+"""
+        with pytest.raises(ValidationError, match="requires low, high, steps"):
+            load_suite_from_string(bad)
+
+    def test_unknown_sampling_mode_rejected(self) -> None:
+        bad = """
+name: x
+env: tabletop
+sampling: not-a-mode
+episodes_per_cell: 1
+axes:
+  lighting_intensity:
+    low: 0.3
+    high: 1.5
+    steps: 2
+"""
+        with pytest.raises(ValidationError):
+            load_suite_from_string(bad)
+
+    def test_n_samples_must_be_positive(self) -> None:
+        bad = self._LHS_OK.replace("n_samples: 16", "n_samples: 0")
+        with pytest.raises(ValidationError, match="n_samples must be >= 1"):
+            load_suite_from_string(bad)
+
+    def test_sobol_validates_through_schema(self) -> None:
+        text = self._LHS_OK.replace("latin_hypercube", "sobol")
+        suite = load_suite_from_string(text)
+        assert suite.sampling == "sobol"
+        assert suite.n_samples == 16
