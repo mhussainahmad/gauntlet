@@ -12,7 +12,7 @@ See ``docs/phase2-rfc-005-pybullet-adapter.md`` §3 for the full rationale.
 
 from __future__ import annotations
 
-from typing import Any, ClassVar, Protocol, runtime_checkable
+from typing import Any, ClassVar, NamedTuple, Protocol, runtime_checkable
 
 import gymnasium as gym
 from numpy.typing import NDArray
@@ -26,6 +26,45 @@ from numpy.typing import NDArray
 # liberally to absorb minor dtype drift at the policy/env seam.
 Observation = dict[str, NDArray[Any]]
 Action = NDArray[Any]
+
+
+class CameraSpec(NamedTuple):
+    """Declarative description of a single render camera.
+
+    Used by the optional ``cameras=[...]`` kwarg on backend envs (see
+    :class:`GauntletEnv` and :class:`gauntlet.env.tabletop.TabletopEnv`).
+    When at least one ``CameraSpec`` is supplied, the env's observation
+    grows an ``obs["images"]: dict[str, NDArray[uint8]]`` mapping
+    ``spec.name -> rendered frame``. The legacy ``obs["image"]`` key
+    is also populated, aliased to the **first** camera's frame, so
+    consumers that read the single-camera surface keep working
+    unchanged. See ``docs/polish-exploration-multi-camera.md`` §2 for
+    the full contract.
+
+    Attributes
+    ----------
+    name:
+        Key under which this camera's frame appears in
+        ``obs["images"][name]``. Must be non-empty and unique within
+        the supplied list. Recommended values follow LeRobot
+        conventions: ``"wrist"``, ``"top"``, ``"side"``, ``"front"``.
+    pose:
+        ``(x, y, z, rx, ry, rz)`` — world-frame position in **metres**
+        and **MuJoCo-convention XYZ Euler angles in radians**. The
+        camera looks along its local ``-Z`` axis with local ``+Y`` as
+        up (standard MJCF ``<camera>`` semantics). Quaternions were
+        rejected because the multi-cam use case is humans authoring
+        camera positions in a config file; quats are awful by hand
+        (RFC §2).
+    size:
+        ``(H, W)`` — rendered image shape. Height-first to match the
+        existing ``render_size`` convention and MuJoCo's
+        ``Renderer(model, height=H, width=W)`` constructor.
+    """
+
+    name: str
+    pose: tuple[float, float, float, float, float, float]
+    size: tuple[int, int]
 
 
 @runtime_checkable
@@ -139,4 +178,4 @@ class GauntletEnv(Protocol):
         ...
 
 
-__all__ = ["Action", "GauntletEnv", "Observation"]
+__all__ = ["Action", "CameraSpec", "GauntletEnv", "Observation"]
