@@ -346,3 +346,52 @@ def test_real_entrypoint_type_is_accepted() -> None:
         result = discover_policy_plugins()
     assert set(result) == {"real-test"}
     assert result["real-test"] is cast(Any, list)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# End-to-end: gauntlet's own dogfood entry points materialize.
+# ──────────────────────────────────────────────────────────────────────
+
+
+def test_dogfood_policies_discovered_after_install() -> None:
+    """The ``[project.entry-points."gauntlet.policies"]`` block in pyproject.toml
+    registers gauntlet's own four built-in adapters. After ``uv pip install -e .``
+    they must surface through :func:`discover_policy_plugins`.
+
+    This is the eat-your-own-dogfood smoke test promised by the polish
+    task: if the plugin mechanism is broken on a fresh checkout, this
+    fires before any third-party plugin author hits the same bug.
+
+    Failure-tolerant: ``huggingface`` / ``lerobot`` may fail to load on
+    a default-job venv (their extras aren't installed); we accept that
+    by checking for a *subset* of the always-available built-ins
+    (``random`` + ``scripted``).
+    """
+    discover_policy_plugins.cache_clear()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        plugins = discover_policy_plugins()
+    # ``random`` and ``scripted`` are torch-free and always load.
+    assert {"random", "scripted"} <= set(plugins), (
+        f"Dogfood entry points missing — got {sorted(plugins)}. "
+        "Did you re-install after pyproject.toml changes? "
+        "Try: uv pip install -e ."
+    )
+
+
+def test_dogfood_envs_discovered_after_install() -> None:
+    """The first-party ``tabletop`` env entry point must materialize.
+
+    Heavy backends (`tabletop-pybullet`, `-genesis`, `-isaac`) drop on
+    a default-job venv because their extras aren't installed —
+    accepting this matches the lazy-load failure model.
+    """
+    discover_env_plugins.cache_clear()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        plugins = discover_env_plugins()
+    assert "tabletop" in plugins, (
+        f"Dogfood env entry point missing — got {sorted(plugins)}. "
+        "Did you re-install after pyproject.toml changes? "
+        "Try: uv pip install -e ."
+    )
