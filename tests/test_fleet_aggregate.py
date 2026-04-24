@@ -471,3 +471,202 @@ def test_mean_and_std_success_rate_match_statistics() -> None:
 def test_single_run_std_is_zero() -> None:
     fleet = aggregate_reports([_report_for(failing_cluster=None)])
     assert fleet.std_success_rate == 0.0
+
+
+# ---------------------------------------------------------------------------
+# HTML rendering — structural + XSS.
+# ---------------------------------------------------------------------------
+
+
+from gauntlet.aggregate import render_fleet_html, write_fleet_html  # noqa: E402
+
+
+def _make_clean_fleet() -> FleetReport:
+    rep_a = _report_for(failing_cluster=(0.3, 0.0))
+    rep_b = _report_for(failing_cluster=(0.3, 0.0))
+    return aggregate_reports([rep_a, rep_b], persistence_threshold=0.5)
+
+
+def test_render_fleet_html_starts_with_doctype() -> None:
+    fleet = _make_clean_fleet()
+    html = render_fleet_html(fleet)
+    assert html.startswith("<!DOCTYPE html>")
+
+
+def test_render_fleet_html_contains_expected_sections() -> None:
+    fleet = _make_clean_fleet()
+    html = render_fleet_html(fleet)
+    # Summary card metrics — labels, not values.
+    assert "Runs" in html
+    assert "Total episodes" in html
+    assert "Mean success" in html
+    # Persistent-cluster table heading.
+    assert "Persistent failure clusters" in html
+    # Per-axis chart canvases (one per aggregate axis).
+    for axis in fleet.per_axis_aggregate:
+        assert f'id="fleet-axis-{axis}"' in html
+    # Per-run table header.
+    assert "Per-run breakdown" in html
+
+
+def test_write_fleet_html_writes_a_file(tmp_path: Path) -> None:
+    fleet = _make_clean_fleet()
+    out = tmp_path / "fleet_report.html"
+    write_fleet_html(fleet, out)
+    assert out.is_file()
+    body = out.read_text(encoding="utf-8")
+    assert body.startswith("<!DOCTYPE html>")
+    assert body.endswith("</html>\n") or body.endswith("</html>")
+
+
+# XSS payload — same shape as tests/test_security_html_report.py.
+_XSS = "<script>alert(1)</script>"
+
+
+def test_xss_in_policy_label_is_escaped() -> None:
+    """An attacker-controlled policy_label MUST be HTML-escaped."""
+    fr = FleetRun(
+        run_id="r0",
+        policy_label=_XSS,
+        suite_name="suite",
+        suite_env=None,
+        n_episodes=1,
+        n_success=1,
+        success_rate=1.0,
+        source_file="r0/report.json",
+    )
+    fleet = FleetReport(
+        runs=[fr],
+        n_runs=1,
+        n_total_episodes=1,
+        per_axis_aggregate={},
+        persistent_failure_clusters=[],
+        cross_run_success_distribution={"suite": [1.0]},
+        persistence_threshold=0.5,
+        fleet_baseline_failure_rate=0.0,
+        mean_success_rate=1.0,
+        std_success_rate=0.0,
+        suite_names=["suite"],
+    )
+    html = render_fleet_html(fleet)
+    assert _XSS not in html
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+
+
+def test_xss_in_source_file_is_escaped() -> None:
+    fr = FleetRun(
+        run_id="r0",
+        policy_label="p",
+        suite_name="suite",
+        suite_env=None,
+        n_episodes=1,
+        n_success=1,
+        success_rate=1.0,
+        source_file=_XSS,
+    )
+    fleet = FleetReport(
+        runs=[fr],
+        n_runs=1,
+        n_total_episodes=1,
+        per_axis_aggregate={},
+        persistent_failure_clusters=[],
+        cross_run_success_distribution={"suite": [1.0]},
+        persistence_threshold=0.5,
+        fleet_baseline_failure_rate=0.0,
+        mean_success_rate=1.0,
+        std_success_rate=0.0,
+        suite_names=["suite"],
+    )
+    html = render_fleet_html(fleet)
+    assert _XSS not in html
+
+
+def test_xss_in_axis_name_is_escaped() -> None:
+    """Axis name surfaces in chart title and per-axis table."""
+    breakdown = AxisBreakdown(
+        name=_XSS,
+        rates={0.0: 1.0, 1.0: 0.0},
+        counts={0.0: 1, 1.0: 1},
+        successes={0.0: 1, 1.0: 0},
+    )
+    fleet = FleetReport(
+        runs=[],
+        n_runs=0,
+        n_total_episodes=0,
+        per_axis_aggregate={_XSS: breakdown},
+        persistent_failure_clusters=[],
+        cross_run_success_distribution={},
+        persistence_threshold=0.5,
+        fleet_baseline_failure_rate=0.0,
+        mean_success_rate=0.0,
+        std_success_rate=0.0,
+        suite_names=[],
+    )
+    html = render_fleet_html(fleet)
+    assert _XSS not in html
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+
+
+def test_xss_in_cluster_axis_name_is_escaped() -> None:
+    cluster = FailureCluster(
+        axes={_XSS: 0.3, "second_axis": 1.0},
+        n_episodes=10,
+        n_success=0,
+        failure_rate=1.0,
+        lift=10.0,
+    )
+    fleet = FleetReport(
+        runs=[],
+        n_runs=0,
+        n_total_episodes=0,
+        per_axis_aggregate={},
+        persistent_failure_clusters=[cluster],
+        cross_run_success_distribution={},
+        persistence_threshold=0.5,
+        fleet_baseline_failure_rate=0.1,
+        mean_success_rate=0.0,
+        std_success_rate=0.0,
+        suite_names=[],
+    )
+    html = render_fleet_html(fleet)
+    assert _XSS not in html
+
+
+def test_embedded_json_block_does_not_break_out_of_script() -> None:
+    """``</script>`` inside an attacker-controlled string must be escaped
+    inside the embedded ``<script id="fleet-data">`` block.
+    """
+    import re
+
+    payload = "</script><script>alert(5)</script>"
+    fr = FleetRun(
+        run_id="r0",
+        policy_label=payload,
+        suite_name="suite",
+        suite_env=None,
+        n_episodes=1,
+        n_success=1,
+        success_rate=1.0,
+        source_file="r0/report.json",
+    )
+    fleet = FleetReport(
+        runs=[fr],
+        n_runs=1,
+        n_total_episodes=1,
+        per_axis_aggregate={},
+        persistent_failure_clusters=[],
+        cross_run_success_distribution={"suite": [1.0]},
+        persistence_threshold=0.5,
+        fleet_baseline_failure_rate=0.0,
+        mean_success_rate=1.0,
+        std_success_rate=0.0,
+        suite_names=["suite"],
+    )
+    html = render_fleet_html(fleet)
+    match = re.search(
+        r'<script id="fleet-data" type="application/json">(?P<body>.*?)</script>',
+        html,
+        re.DOTALL,
+    )
+    assert match is not None, "fleet-data script block missing"
+    assert "</script>" not in match.group("body")
