@@ -307,6 +307,38 @@ def run(
             min=1,
         ),
     ] = None,
+    cache_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--cache-dir",
+            help=(
+                "Directory for the per-Episode rollout cache. When set, every "
+                "(suite, axis_config, env_seed, policy, max_steps) cell is "
+                "looked up before dispatch — a hit returns the cached Episode "
+                "without re-rolling. Defaults to OFF (no cache lookup, "
+                "byte-identical to no-cache runs). See "
+                "docs/polish-exploration-incremental-cache.md."
+            ),
+        ),
+    ] = None,
+    no_cache: Annotated[
+        bool,
+        typer.Option(
+            "--no-cache",
+            help=(
+                "Force-disable the rollout cache even if --cache-dir is set "
+                "(useful for wrapper scripts that bake in a default cache "
+                "path)."
+            ),
+        ),
+    ] = False,
+    cache_stats: Annotated[
+        bool,
+        typer.Option(
+            "--cache-stats",
+            help="Print cache hit / miss / put counts to stderr after the run.",
+        ),
+    ] = False,
 ) -> None:
     """Execute a suite and write episodes / report artefacts to ``--out``."""
     if not suite_path.is_file():
@@ -331,11 +363,30 @@ def run(
     out.mkdir(parents=True, exist_ok=True)
 
     env_factory = _make_env_factory(suite.env, env_max_steps)
-    runner = Runner(
-        n_workers=n_workers,
-        env_factory=env_factory,
-        trajectory_dir=record_trajectories,
-    )
+
+    # Resolve the cache configuration. ``--no-cache`` always wins (so a
+    # wrapper script that bakes in --cache-dir can be opted out per
+    # invocation); when --cache-dir is honoured, --env-max-steps must
+    # be set because the cache key depends on max_steps and we have no
+    # other way to derive it.
+    effective_cache_dir = None if no_cache else cache_dir
+    if effective_cache_dir is not None and env_max_steps is None:
+        raise _fail(
+            "--cache-dir requires --env-max-steps to be set; the cache key "
+            "depends on max_steps and the env factory does not expose it."
+        )
+
+    try:
+        runner = Runner(
+            n_workers=n_workers,
+            env_factory=env_factory,
+            trajectory_dir=record_trajectories,
+            cache_dir=effective_cache_dir,
+            policy_id=policy if effective_cache_dir is not None else None,
+            max_steps=env_max_steps if effective_cache_dir is not None else None,
+        )
+    except ValueError as exc:
+        raise _fail(f"runner config invalid: {exc}") from exc
 
     try:
         episodes = runner.run(policy_factory=policy_factory, suite=suite)
@@ -362,6 +413,13 @@ def run(
         f"-> {_fmt_path(out)} (success: {_fmt_success_rate(report.overall_success_rate)})"
     )
     _echo_err(summary)
+
+    if cache_stats:
+        # Always emit a stats line when --cache-stats is set, even when
+        # the cache is disabled — zeros across the board signal "you
+        # asked for stats but you also disabled the cache".
+        s = runner.cache_stats()
+        _echo_err(f"  cache: hits={s['hits']} misses={s['misses']} puts={s['puts']}")
 
 
 # ──────────────────────────────────────────────────────────────────────
