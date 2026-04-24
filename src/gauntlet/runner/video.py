@@ -108,14 +108,14 @@ class VideoWriter:
     """
 
     # libx264 is the default video codec — every browser, every macOS /
-    # Linux / Windows player handles it. The ``yuv420p`` pixel format
-    # is required for browser playback (Chromium / Safari refuse other
-    # formats); we pass it via the ffmpeg backend's ``output_params``
-    # pass-through because ``imageio[ffmpeg]`` does not expose a
-    # dedicated ``pixel_format=`` kwarg on every release line. Both
-    # settings are baked in to keep the per-episode write deterministic.
+    # Linux / Windows player handles it. ``imageio[ffmpeg]`` already
+    # defaults to ``-pix_fmt yuv420p`` (verified against
+    # imageio_ffmpeg 0.6.0 ``_io.py``), which is the format browsers
+    # require for inline playback. We pin the codec but do NOT
+    # duplicate ``-pix_fmt``: ffmpeg emits a "multiple -pix_fmt
+    # specified" warning when both sides set it, and the output is
+    # identical either way.
     _CODEC = "libx264"
-    _OUTPUT_PARAMS: tuple[str, ...] = ("-pix_fmt", "yuv420p")
 
     def __init__(self, *, fps: int = 30) -> None:
         if not isinstance(fps, int) or fps <= 0:
@@ -205,19 +205,17 @@ class VideoWriter:
             )
 
         path.parent.mkdir(parents=True, exist_ok=True)
-        # imageio v3 accepts ``codec`` / ``fps`` / ``output_params``
-        # as keyword extras; the ffmpeg backend forwards
-        # ``output_params`` straight to the ffmpeg CLI so we can pin
-        # the pixel format independently of the imageio release line.
-        # ``macro_block_size=1`` disables imageio's default 16-pixel
-        # block alignment (which would otherwise auto-resize tiny
-        # frames and break the explicit yuv420p contract).
+        # imageio v3 accepts ``codec`` / ``fps`` as keyword extras;
+        # the ffmpeg backend forwards them. ``macro_block_size=1``
+        # disables imageio's default 16-pixel block alignment (which
+        # would otherwise auto-resize tiny frames and break the test-
+        # fixture invariant that input H/W match output H/W after the
+        # parity-pad above).
         _imwrite: Any = iio.imwrite
         _imwrite(
             path,
             stacked,
             fps=self._fps,
             codec=self._CODEC,
-            output_params=list(self._OUTPUT_PARAMS),
             macro_block_size=1,
         )

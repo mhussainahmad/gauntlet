@@ -172,6 +172,27 @@ deviation points at a real reproducibility bug. See
 [`examples/replay_failure.py`](./examples/replay_failure.py) for the
 equivalent library call.
 
+### Recording rollout videos
+
+Failure analytics are far more actionable when a human can *watch*
+the broken rollout. Opt in to the `[video]` extra to dump one MP4 per
+episode and surface inline `<video>` thumbnails in the failure-
+clusters table of the HTML report:
+
+```bash
+uv sync --extra video
+uv run python examples/evaluate_random_policy_with_video.py --out out
+# Open out/report.html — the failure-clusters table now embeds
+# clickable thumbnails of every failed rollout.
+```
+
+The `[video]` extra pulls `imageio[ffmpeg]`, which bundles a static
+ffmpeg binary — no system ffmpeg install required. Pass
+`--only-failures` to suppress MP4 writes for successful episodes
+(saves disk on long sweeps). The Runner asserts the env was
+constructed with `render_in_obs=True` when `record_video=True`; the
+example wires that automatically.
+
 ## Development
 
 ```bash
