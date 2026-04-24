@@ -146,3 +146,89 @@ class TestBuildSampler:
     def test_unknown_mode_rejected(self) -> None:
         with pytest.raises(ValueError, match="unknown sampling mode"):
             build_sampler("not-a-mode")
+
+
+class TestSuiteCellsDispatch:
+    """Pin :meth:`Suite.cells` to the right sampler keyed off ``sampling``."""
+
+    _LHS_YAML = """
+name: lhs-dispatch
+env: tabletop
+seed: 42
+sampling: latin_hypercube
+n_samples: 24
+episodes_per_cell: 1
+axes:
+  lighting_intensity:
+    low: 0.3
+    high: 1.5
+  camera_offset_x:
+    low: -0.05
+    high: 0.05
+"""
+
+    _SOBOL_YAML = """
+name: sobol-dispatch
+env: tabletop
+seed: 42
+sampling: sobol
+n_samples: 8
+episodes_per_cell: 1
+axes:
+  lighting_intensity:
+    low: 0.3
+    high: 1.5
+"""
+
+    def test_default_cells_unchanged_for_cartesian(self) -> None:
+        # The flagship backwards-compat assertion: every shipped suite
+        # YAML produces the exact same cell list it produced before
+        # this PR. ``CartesianSampler`` is byte-identical to the
+        # historical inline body (pinned in TestCartesianSampler);
+        # this test pins that ``Suite.cells`` keeps using it.
+        suite = load_suite(EXAMPLE_BASIC)
+        # Default sampling is cartesian; no n_samples; no LHS budget.
+        assert suite.sampling == "cartesian"
+        first_pass = [(c.index, dict(c.values)) for c in suite.cells()]
+        second_pass = [(c.index, dict(c.values)) for c in suite.cells()]
+        assert first_pass == second_pass
+        # And matches the sampler-level oracle:
+        sampler_pass = [
+            (c.index, dict(c.values))
+            for c in CartesianSampler().sample(suite, np.random.default_rng(0))
+        ]
+        assert first_pass == sampler_pass
+        assert len(first_pass) == 4 * 3 * 2 * 6
+
+    def test_lhs_cells_emits_n_samples_rows(self) -> None:
+        suite = load_suite_from_string(self._LHS_YAML)
+        cells = list(suite.cells())
+        assert len(cells) == 24
+        assert suite.num_cells() == 24
+
+    def test_lhs_cells_deterministic_across_calls(self) -> None:
+        # Two ``Suite.cells()`` calls on the same Suite must produce
+        # the same list — the dispatch layer seeds a fresh RNG from
+        # ``suite.seed`` each time, so calls are idempotent.
+        suite = load_suite_from_string(self._LHS_YAML)
+        a = [(c.index, dict(c.values)) for c in suite.cells()]
+        b = [(c.index, dict(c.values)) for c in suite.cells()]
+        assert a == b
+
+    def test_lhs_cells_differ_under_different_seeds(self) -> None:
+        suite_a = load_suite_from_string(self._LHS_YAML.replace("seed: 42", "seed: 1"))
+        suite_b = load_suite_from_string(self._LHS_YAML.replace("seed: 42", "seed: 2"))
+        rows_a = [dict(c.values) for c in suite_a.cells()]
+        rows_b = [dict(c.values) for c in suite_b.cells()]
+        assert rows_a != rows_b
+
+    def test_sobol_cells_propagates_not_implemented(self) -> None:
+        suite = load_suite_from_string(self._SOBOL_YAML)
+        with pytest.raises(NotImplementedError, match="follow-up"):
+            list(suite.cells())
+
+    def test_lhs_num_cells_matches_n_samples_without_iterating(self) -> None:
+        # ``num_cells`` for non-cartesian must read off ``n_samples``
+        # directly; iterating the sampler would be wasteful.
+        suite = load_suite_from_string(self._LHS_YAML)
+        assert suite.num_cells() == suite.n_samples

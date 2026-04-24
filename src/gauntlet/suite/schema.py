@@ -30,11 +30,11 @@ the axes mapping must be non-empty.
 
 from __future__ import annotations
 
-import itertools
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from typing import Final, Literal
 
+import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from gauntlet.env.perturbation import AXIS_NAMES
@@ -367,14 +367,23 @@ class Suite(BaseModel):
         return self
 
     # ------------------------------------------------------------------
-    # Cell enumeration. Cartesian product over per-axis enumerations,
-    # in YAML axis-declaration order.
+    # Cell enumeration. Dispatches through the :class:`Sampler` selected
+    # by :attr:`sampling`:
+    #
+    # * ``"cartesian"`` (default) — :class:`CartesianSampler`,
+    #   byte-identical to the historical itertools.product behaviour.
+    # * ``"latin_hypercube"`` — :class:`LatinHypercubeSampler`,
+    #   ``n_samples`` rows, RNG seeded from :attr:`seed`.
+    # * ``"sobol"`` — :class:`SobolSampler` (NotImplementedError, see
+    #   ``docs/polish-exploration-lhs-sampling.md`` for the deferral
+    #   rationale).
     # ------------------------------------------------------------------
 
     def cells(self) -> Iterator[SuiteCell]:
         """Yield every grid point as a :class:`SuiteCell`.
 
-        Ordering is deterministic and stable across runs:
+        Cartesian (default) ordering is deterministic and stable across
+        runs:
 
         * Axes vary in YAML insertion order (preserved by PyYAML +
           Pydantic v2 dict ordering).
@@ -382,18 +391,37 @@ class Suite(BaseModel):
         * The rightmost axis varies fastest (standard
           :func:`itertools.product` ordering).
 
+        Non-cartesian sampling (LHS / Sobol) returns ``n_samples``
+        cells whose ordering is also deterministic — the underlying
+        :class:`numpy.random.Generator` is seeded from :attr:`seed`
+        (or OS entropy when ``seed is None``), so the same Suite
+        produces the same cells across iterations.
+
         Each yielded :class:`SuiteCell` carries a zero-based ``index``
         the Runner uses as the cell id.
         """
-        axis_names = tuple(self.axes.keys())
-        per_axis_values = tuple(spec.enumerate() for spec in self.axes.values())
-        for index, combo in enumerate(itertools.product(*per_axis_values)):
-            mapping: dict[str, float] = dict(zip(axis_names, combo, strict=True))
-            yield SuiteCell(index=index, values=mapping)
+        # Local import to dodge the schema <-> sampling cycle: the
+        # sampling module imports SuiteCell at TYPE_CHECKING time and
+        # CartesianSampler imports it lazily inside ``sample``.
+        from gauntlet.suite.sampling import build_sampler
+
+        sampler = build_sampler(self.sampling)
+        rng = np.random.default_rng(np.random.SeedSequence(self.seed))
+        yield from sampler.sample(self, rng)
 
     def num_cells(self) -> int:
-        """Return the total number of grid cells (product of per-axis sizes)."""
-        total = 1
-        for spec in self.axes.values():
-            total *= len(spec.enumerate())
-        return total
+        """Return the total number of cells :meth:`cells` will yield.
+
+        For cartesian sampling, this is the product of per-axis grid
+        sizes (no RNG / sampler call needed). For LHS / Sobol it is
+        ``n_samples`` — the schema validator guarantees that field is
+        set whenever ``sampling != "cartesian"``.
+        """
+        if self.sampling == "cartesian":
+            total = 1
+            for spec in self.axes.values():
+                total *= len(spec.enumerate())
+            return total
+        # Non-cartesian: the validator guarantees ``n_samples`` is set.
+        assert self.n_samples is not None
+        return self.n_samples
