@@ -503,20 +503,40 @@ class IsaacSimTabletopEnv:
         return self._build_obs(), reward, terminated, truncated, self._build_info()
 
     def set_perturbation(self, name: str, value: float) -> None:
-        """Queue an axis-value pair — full validation lands in step 6."""
-        del value
-        raise NotImplementedError(
-            f"IsaacSimTabletopEnv.set_perturbation({name!r}, ...) lands in step 6 of RFC-009 §12"
-        )
+        """Queue a named scalar on the env (applied by the next :meth:`reset`).
+
+        Validation rules match the other backends:
+
+        * Unknown axis -> :class:`ValueError` with the canonical
+          message naming the axis.
+        * ``distractor_count`` must round to an integer in
+          ``[0, _N_DISTRACTOR_SLOTS]``.
+
+        Cosmetic axes (``lighting_intensity``, ``camera_offset_x``,
+        ``camera_offset_y``, ``object_texture``) are accepted but
+        only mutate the shadow attributes during the apply phase
+        (state-only first cut, RFC-009 §6.6).
+        """
+        if name not in type(self).AXIS_NAMES:
+            raise ValueError(
+                f"unknown perturbation axis {name!r}; known axes: {sorted(type(self).AXIS_NAMES)}"
+            )
+        if name == "distractor_count":
+            count = round(float(value))
+            if count < 0 or count > _N_DISTRACTOR_SLOTS:
+                raise ValueError(
+                    f"distractor_count must be in [0, {_N_DISTRACTOR_SLOTS}]; got {count}"
+                )
+        self._pending_perturbations[name] = float(value)
 
     def restore_baseline(self) -> None:
-        """Restore observable baseline state — body lands in step 6.
+        """Restore the env to its post-``__init__`` observable state.
 
-        Until step 6 lands the full body, ``reset`` calls
-        ``restore_baseline`` and gets a minimal first-cut: hide every
-        distractor at ``_DISTRACTOR_HIDDEN_Z`` and reset the cosmetic
-        shadow attributes. Perturbation branches are step 6's
-        responsibility.
+        Hide every distractor at ``_DISTRACTOR_HIDDEN_Z`` (the
+        ``distractor_count`` branch then re-reveals the first N during
+        ``_apply_pending_perturbations``) and reset the cosmetic
+        shadow attributes.  Idempotent — a second call is a no-op
+        observational delta against the first.
         """
         for i, d in enumerate(self._distractors):
             xy = _DISTRACTOR_BASELINE_XY[i]
@@ -535,13 +555,79 @@ class IsaacSimTabletopEnv:
     def _apply_pending_perturbations(self) -> None:
         """Apply ``self._pending_perturbations`` to the scene.
 
-        Step 6 lands the seven branches. Until then this raises so a
-        sneaky enqueue + reset path doesn't silently no-op (which
-        would mask a missing wire-up).
+        Walks each queued axis through :meth:`_apply_one_perturbation`.
+        Pose-overriding axes (``object_initial_pose_{x,y}``) must
+        run after the random cube XY write in :meth:`reset`, which
+        is the order :meth:`reset` already guarantees (random write
+        first, then call this method).
         """
-        raise NotImplementedError(
-            "IsaacSimTabletopEnv._apply_pending_perturbations lands in step 6 of RFC-009 §12"
-        )
+        for name, value in self._pending_perturbations.items():
+            self._apply_one_perturbation(name, value)
+
+    def _apply_one_perturbation(self, name: str, value: float) -> None:
+        """Per-axis branch dispatcher (RFC-009 §6 table)."""
+        if name == "lighting_intensity":
+            # Cosmetic on the state-only first cut (§6.1). Stored on
+            # the shadow attribute for the follow-up rendering RFC.
+            self._light_intensity = float(value)
+            return
+
+        if name == "camera_offset_x":
+            # Cosmetic — camera pose is a rendering-time concept (§6.2).
+            self._cam_offset = self._cam_offset.copy()
+            self._cam_offset[0] = float(value)
+            return
+
+        if name == "camera_offset_y":
+            self._cam_offset = self._cam_offset.copy()
+            self._cam_offset[1] = float(value)
+            return
+
+        if name == "object_texture":
+            # Cosmetic — material binding is a rendering-time concept
+            # (§6.3). Stored on the shadow attribute.
+            self._texture_choice = 1 if round(float(value)) != 0 else 0
+            return
+
+        if name == "object_initial_pose_x":
+            # State-affecting (§6.4). Override the random cube X write
+            # from reset; preserve the random Y already in place.
+            cur_pos = self._prim_pos(self._cube)
+            new_pos = np.array([float(value), float(cur_pos[1]), _CUBE_REST_Z], dtype=np.float64)
+            self._cube.set_world_pose(
+                position=new_pos,
+                orientation=np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64),
+            )
+            return
+
+        if name == "object_initial_pose_y":
+            cur_pos = self._prim_pos(self._cube)
+            new_pos = np.array([float(cur_pos[0]), float(value), _CUBE_REST_Z], dtype=np.float64)
+            self._cube.set_world_pose(
+                position=new_pos,
+                orientation=np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64),
+            )
+            return
+
+        if name == "distractor_count":
+            # State-affecting (§6.5). Teleport-away semantic — first
+            # ``count`` distractors come up to rest_z; the remaining
+            # ones stay at hidden_z (restore_baseline already put them
+            # all there). Documented deviation from MuJoCo's
+            # visibility+collision toggle.
+            count = round(float(value))
+            for i, d in enumerate(self._distractors):
+                xy = _DISTRACTOR_BASELINE_XY[i]
+                z = _DISTRACTOR_REST_Z if i < count else _DISTRACTOR_HIDDEN_Z
+                d.set_world_pose(
+                    position=np.array([float(xy[0]), float(xy[1]), z], dtype=np.float64),
+                    orientation=np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64),
+                )
+            return
+
+        # Unknown axis names are blocked at set_perturbation; the
+        # else-fallthrough is unreachable by contract.
+        raise ValueError(f"internal: unknown perturbation axis {name!r}")
 
     def close(self) -> None:
         """Release Kit + simulation resources. Idempotent.

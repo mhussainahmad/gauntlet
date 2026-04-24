@@ -226,7 +226,7 @@ def _install_fake_isaacsim(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     # cleanly. ``monkeypatch.setitem`` on a key the dict doesn't have
     # yet would still set it, so we use direct dict manipulation +
     # an addfinalizer to restore the registry at fixture teardown.
-    from gauntlet.env.registry import _REGISTRY  # type: ignore[attr-defined]
+    from gauntlet.env.registry import _REGISTRY
 
     saved = _REGISTRY.pop("tabletop-isaac", None)
 
