@@ -20,9 +20,30 @@ from typing import Any
 
 import pytest
 
-from gauntlet.runner import Episode
+from gauntlet.policy.scripted import ScriptedPolicy
+from gauntlet.runner import Episode, Runner
 from gauntlet.runner.cache import CACHE_SCHEMA_VERSION, EpisodeCache
 from gauntlet.suite.schema import AxisSpec, Suite
+
+# ----------------------------------------------------------------------------
+# Module-level Runner-test factories — picklable for spawn-based pools.
+# ----------------------------------------------------------------------------
+
+
+def _make_scripted_policy() -> ScriptedPolicy:
+    """Pickle-friendly ScriptedPolicy factory."""
+    return ScriptedPolicy()
+
+
+def _make_fast_env() -> Any:
+    """Tabletop env with a small max_steps so the test is sub-second."""
+    from gauntlet.env.tabletop import TabletopEnv
+
+    return TabletopEnv(max_steps=20)
+
+
+# Match _make_fast_env above; threaded into the Runner cache key.
+_TEST_MAX_STEPS = 20
 
 # ----------------------------------------------------------------------------
 # Suite builder shared across cache-key + Runner-integration tests.
@@ -319,3 +340,212 @@ def test_episode_round_trip_preserves_non_finite_floats(tmp_path: Path) -> None:
     fetched = cache.get(key)
     assert fetched is not None
     assert math.isnan(fetched.total_reward)
+
+
+# ----------------------------------------------------------------------------
+# 4. Runner integration — the load-bearing tests.
+# ----------------------------------------------------------------------------
+
+
+def test_no_cache_default_byte_identical(tmp_path: Path) -> None:
+    """Runner(cache_dir=None) MUST produce byte-identical Episodes to today.
+
+    Two back-to-back fixed-seed runs with no cache_dir set; every Pydantic
+    field on every Episode must match. This pins the no-cache opt-out path.
+    """
+    suite = _make_suite(seed=999, episodes_per_cell=1)
+    runner = Runner(n_workers=1, env_factory=_make_fast_env)
+    a = runner.run(policy_factory=_make_scripted_policy, suite=suite)
+    b = runner.run(policy_factory=_make_scripted_policy, suite=suite)
+    assert len(a) == len(b)
+    for ea, eb in zip(a, b, strict=True):
+        assert ea.model_dump() == eb.model_dump()
+
+
+def test_runner_no_cache_does_not_construct_episodecache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When cache_dir=None the Runner must NEVER construct EpisodeCache.
+
+    Monkeypatch the constructor to raise; if the assertion fires the test
+    fails. This pins the "byte-identical hot path" promise stronger than
+    behaviour comparison alone.
+    """
+    constructed: list[bool] = []
+
+    def _exploding_init(self: EpisodeCache, *args: Any, **kwargs: Any) -> None:
+        constructed.append(True)
+        raise AssertionError("EpisodeCache must NOT be constructed when cache_dir=None")
+
+    monkeypatch.setattr(EpisodeCache, "__init__", _exploding_init)
+
+    suite = _make_suite(seed=11, episodes_per_cell=1)
+    runner = Runner(n_workers=1, env_factory=_make_fast_env)  # cache_dir defaults to None
+    episodes = runner.run(policy_factory=_make_scripted_policy, suite=suite)
+    assert len(episodes) == suite.num_cells()
+    assert constructed == []  # double-check: no construction recorded
+
+
+def test_runner_cache_hit_on_second_run(tmp_path: Path) -> None:
+    """The second invocation against the same cache_dir must be 100% hits.
+
+    Two cells x 1 episode = 2 episodes. First run: 0 hits, 2 misses, 2 puts.
+    Second run: 2 hits, 0 misses, 0 puts. Episode payloads must match the
+    no-cache path bit-for-bit.
+    """
+    suite = _make_suite(seed=2024, episodes_per_cell=1)
+    cache_dir = tmp_path / "cache"
+
+    runner_a = Runner(
+        n_workers=1,
+        env_factory=_make_fast_env,
+        cache_dir=cache_dir,
+        max_steps=_TEST_MAX_STEPS,
+        policy_id="ScriptedPolicy-fixture",
+    )
+    first = runner_a.run(policy_factory=_make_scripted_policy, suite=suite)
+    stats_first = runner_a.cache_stats()
+    assert stats_first == {"hits": 0, "misses": len(first), "puts": len(first)}
+
+    runner_b = Runner(
+        n_workers=1,
+        env_factory=_make_fast_env,
+        cache_dir=cache_dir,
+        max_steps=_TEST_MAX_STEPS,
+        policy_id="ScriptedPolicy-fixture",
+    )
+    second = runner_b.run(policy_factory=_make_scripted_policy, suite=suite)
+    stats_second = runner_b.cache_stats()
+    assert stats_second == {"hits": len(second), "misses": 0, "puts": 0}
+
+    assert len(first) == len(second)
+    for ea, eb in zip(first, second, strict=True):
+        assert ea.model_dump() == eb.model_dump()
+
+
+def test_runner_cache_matches_no_cache_path(tmp_path: Path) -> None:
+    """Cached Episode list must be bit-equal to the no-cache Episode list."""
+    suite = _make_suite(seed=314, episodes_per_cell=1)
+    cache_dir = tmp_path / "cache"
+
+    no_cache = Runner(n_workers=1, env_factory=_make_fast_env).run(
+        policy_factory=_make_scripted_policy, suite=suite
+    )
+    cached_runner = Runner(
+        n_workers=1,
+        env_factory=_make_fast_env,
+        cache_dir=cache_dir,
+        max_steps=_TEST_MAX_STEPS,
+        policy_id="ScriptedPolicy-fixture",
+    )
+    cached = cached_runner.run(policy_factory=_make_scripted_policy, suite=suite)
+
+    assert len(no_cache) == len(cached)
+    for ea, eb in zip(no_cache, cached, strict=True):
+        assert ea.model_dump() == eb.model_dump()
+
+
+def test_runner_cache_invalidates_on_suite_edit(tmp_path: Path) -> None:
+    """A Suite edit (different axes) must produce a clean miss on the next run."""
+    cache_dir = tmp_path / "cache"
+
+    suite_a = _make_suite(seed=1, episodes_per_cell=1)
+    runner_a = Runner(
+        n_workers=1,
+        env_factory=_make_fast_env,
+        cache_dir=cache_dir,
+        max_steps=_TEST_MAX_STEPS,
+        policy_id="ScriptedPolicy-fixture",
+    )
+    runner_a.run(policy_factory=_make_scripted_policy, suite=suite_a)
+    assert runner_a.cache_stats()["misses"] == suite_a.num_cells()
+
+    # Edit the suite: bump steps from 2 to 3 -> different suite_hash.
+    suite_b = _make_suite(
+        seed=1,
+        episodes_per_cell=1,
+        axes={"lighting_intensity": AxisSpec(low=0.5, high=1.0, steps=3)},
+    )
+    runner_b = Runner(
+        n_workers=1,
+        env_factory=_make_fast_env,
+        cache_dir=cache_dir,
+        max_steps=_TEST_MAX_STEPS,
+        policy_id="ScriptedPolicy-fixture",
+    )
+    runner_b.run(policy_factory=_make_scripted_policy, suite=suite_b)
+    # Every cell of suite_b must miss because suite_hash differs.
+    stats = runner_b.cache_stats()
+    assert stats["hits"] == 0
+    assert stats["misses"] == suite_b.num_cells()
+
+
+def test_runner_cache_invalidates_on_policy_id_change(tmp_path: Path) -> None:
+    """Different policy_id MUST produce a clean miss against the same cache."""
+    cache_dir = tmp_path / "cache"
+    suite = _make_suite(seed=7, episodes_per_cell=1)
+
+    runner_a = Runner(
+        n_workers=1,
+        env_factory=_make_fast_env,
+        cache_dir=cache_dir,
+        max_steps=_TEST_MAX_STEPS,
+        policy_id="policy-v1",
+    )
+    runner_a.run(policy_factory=_make_scripted_policy, suite=suite)
+
+    runner_b = Runner(
+        n_workers=1,
+        env_factory=_make_fast_env,
+        cache_dir=cache_dir,
+        max_steps=_TEST_MAX_STEPS,
+        policy_id="policy-v2",
+    )
+    runner_b.run(policy_factory=_make_scripted_policy, suite=suite)
+    stats = runner_b.cache_stats()
+    # policy-v2 has not been seen before -> all misses.
+    assert stats["hits"] == 0
+    assert stats["misses"] == suite.num_cells()
+
+
+def test_runner_requires_max_steps_with_cache_dir(tmp_path: Path) -> None:
+    """Setting cache_dir without max_steps must error (key would be incomplete)."""
+    with pytest.raises(ValueError, match="max_steps"):
+        Runner(
+            n_workers=1,
+            env_factory=_make_fast_env,
+            cache_dir=tmp_path / "cache",
+            # max_steps deliberately omitted
+        )
+
+
+def test_runner_policy_id_defaults_to_class_name(tmp_path: Path) -> None:
+    """When policy_id is omitted, the Runner must derive it from the policy class."""
+    cache_dir = tmp_path / "cache"
+    suite = _make_suite(seed=8, episodes_per_cell=1)
+
+    # First run with implicit policy_id.
+    runner_a = Runner(
+        n_workers=1,
+        env_factory=_make_fast_env,
+        cache_dir=cache_dir,
+        max_steps=_TEST_MAX_STEPS,
+    )
+    runner_a.run(policy_factory=_make_scripted_policy, suite=suite)
+
+    # Second run with the SAME implicit policy_id (same class) -> 100% hits.
+    runner_b = Runner(
+        n_workers=1,
+        env_factory=_make_fast_env,
+        cache_dir=cache_dir,
+        max_steps=_TEST_MAX_STEPS,
+    )
+    runner_b.run(policy_factory=_make_scripted_policy, suite=suite)
+    assert runner_b.cache_stats()["hits"] == suite.num_cells()
+
+
+def test_cache_stats_zero_when_no_cache_dir() -> None:
+    """cache_stats() returns zeros without a cache so wrappers can call it freely."""
+    runner = Runner(n_workers=1, env_factory=_make_fast_env)
+    assert runner.cache_stats() == {"hits": 0, "misses": 0, "puts": 0}
