@@ -608,3 +608,82 @@ axes:
         # required by genesis-world".
         assert "uv sync --extra genesis" in msg
         assert "pip install 'gauntlet[genesis]'" in msg
+
+
+# --------------------------------------------------------------------- loader
+# Phase 2.5 Task 11 — top-level YAML shape + defence-in-depth.
+
+
+class TestLoaderEdgeCases:
+    """Direct coverage for the loader's ``_validate`` /
+    ``_ensure_backend_registered`` / ``_visual_only_axes_of`` branches
+    that the schema-driven happy-path tests above do not reach.
+    """
+
+    def test_load_suite_empty_yaml_rejected(self, tmp_path: Path) -> None:
+        empty = tmp_path / "empty.yaml"
+        empty.write_text("", encoding="utf-8")
+        with pytest.raises(ValueError, match="empty"):
+            load_suite(empty)
+
+    def test_load_suite_top_level_scalar_rejected(self, tmp_path: Path) -> None:
+        scalar = tmp_path / "scalar.yaml"
+        scalar.write_text("just-a-scalar\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="must be a mapping"):
+            load_suite(scalar)
+
+    def test_load_suite_top_level_list_rejected(self, tmp_path: Path) -> None:
+        ls = tmp_path / "list.yaml"
+        ls.write_text("- a\n- b\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="must be a mapping"):
+            load_suite(ls)
+
+    def test_load_suite_from_string_empty_rejected(self) -> None:
+        with pytest.raises(ValueError, match="empty"):
+            load_suite_from_string("")
+
+    def test_load_suite_from_string_top_level_list_rejected(self) -> None:
+        with pytest.raises(ValueError, match="must be a mapping"):
+            load_suite_from_string("- entry\n")
+
+    def test_ensure_backend_registered_unknown_env_defence_in_depth(self) -> None:
+        """Bypassing the schema validator and feeding an unknown env to
+        ``_ensure_backend_registered`` directly must raise ValueError
+        (schema would have rejected it; this is belt-and-braces)."""
+        from gauntlet.suite.loader import _ensure_backend_registered
+
+        with pytest.raises(ValueError, match="unknown env"):
+            _ensure_backend_registered("definitely-not-an-env")
+
+    def test_visual_only_axes_of_handles_partial(self) -> None:
+        """``_visual_only_axes_of`` unwraps :class:`functools.partial`
+        and reads the underlying class's ``VISUAL_ONLY_AXES``."""
+        import functools
+
+        from gauntlet.suite.loader import _visual_only_axes_of
+
+        class _SentinelEnv:
+            VISUAL_ONLY_AXES = frozenset({"a", "b"})
+
+        wrapped = functools.partial(_SentinelEnv)
+        assert _visual_only_axes_of(wrapped) == frozenset({"a", "b"})
+
+    def test_visual_only_axes_of_handles_missing_attr(self) -> None:
+        """A factory that does not declare ``VISUAL_ONLY_AXES`` returns
+        an empty frozenset rather than blowing up."""
+        from gauntlet.suite.loader import _visual_only_axes_of
+
+        def _bare_factory() -> object:
+            return object()
+
+        assert _visual_only_axes_of(_bare_factory) == frozenset()
+
+    def test_visual_only_axes_of_handles_non_frozenset_attr(self) -> None:
+        """A factory whose ``VISUAL_ONLY_AXES`` is the wrong type (eg a
+        list) is treated as if it had no such attribute."""
+        from gauntlet.suite.loader import _visual_only_axes_of
+
+        class _BadAttr:
+            VISUAL_ONLY_AXES = ["a", "b"]  # not a frozenset
+
+        assert _visual_only_axes_of(_BadAttr) == frozenset()
