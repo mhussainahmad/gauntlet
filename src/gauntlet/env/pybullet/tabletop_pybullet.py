@@ -38,6 +38,7 @@ from gymnasium import spaces
 from numpy.typing import NDArray
 
 import pybullet as p
+from gauntlet.env.base import CameraSpec
 
 __all__ = ["PyBulletTabletopEnv"]
 
@@ -171,6 +172,7 @@ class PyBulletTabletopEnv:
         n_substeps: int = 5,
         render_in_obs: bool = False,
         render_size: tuple[int, int] = _DEFAULT_RENDER_SIZE,
+        cameras: list[CameraSpec] | None = None,
     ) -> None:
         if max_steps <= 0:
             raise ValueError(f"max_steps must be positive; got {max_steps}")
@@ -183,9 +185,21 @@ class PyBulletTabletopEnv:
                     f"render_size must be a (height, width) of positive ints; got {render_size}"
                 )
 
+        # Multi-cam validation runs before any pybullet client is opened.
+        # Same contract as the MuJoCo backend (see CameraSpec docstring).
+        # cameras=[] is treated as cameras=None per RFC §2.
+        self._cameras: tuple[CameraSpec, ...] = tuple(cameras) if cameras else ()
+        self._multi_cam_enabled: bool = bool(self._cameras)
+        if self._multi_cam_enabled:
+            _validate_pybullet_camera_specs(self._cameras)
+
         self._max_steps = max_steps
         self._n_substeps = n_substeps
-        self._render_in_obs = render_in_obs
+        # Multi-cam takes precedence over the legacy render_in_obs flag
+        # (RFC §2). Setting _render_in_obs=False here disables the
+        # legacy single-camera codepath; the multi-cam codepath handles
+        # all rendering and aliases obs['image'] to the first cam.
+        self._render_in_obs = render_in_obs and not self._multi_cam_enabled
         self._render_size: tuple[int, int] = (int(render_size[0]), int(render_size[1]))
 
         # ---- spaces (identical to TabletopEnv; ``image`` only when rendering on) ----
@@ -203,6 +217,21 @@ class PyBulletTabletopEnv:
             # bounds match TabletopEnv(render_in_obs=True) byte-for-byte — VLA
             # adapters (RFC-001, RFC-002) read the same obs["image"] key.
             obs_spaces["image"] = spaces.Box(low=0, high=255, shape=(h, w, 3), dtype=np.uint8)
+        if self._multi_cam_enabled:
+            # Multi-cam advertises a Dict subspace with one Box per spec
+            # plus a top-level 'image' alias for the first cam (matches
+            # MuJoCo's contract — see RFC §2 / TabletopEnv equivalent).
+            per_cam_p: dict[str, gym.spaces.Space[Any]] = {}
+            for spec in self._cameras:
+                ch, cw = spec.size
+                per_cam_p[spec.name] = spaces.Box(
+                    low=0, high=255, shape=(ch, cw, 3), dtype=np.uint8
+                )
+            obs_spaces["images"] = spaces.Dict(per_cam_p)
+            first_h, first_w = self._cameras[0].size
+            obs_spaces["image"] = spaces.Box(
+                low=0, high=255, shape=(first_h, first_w, 3), dtype=np.uint8
+            )
         self.observation_space = spaces.Dict(obs_spaces)
 
         # Projection matrix is constant per instance — fixed intrinsics, no
@@ -219,6 +248,23 @@ class PyBulletTabletopEnv:
             )
         else:
             self._proj_matrix = None
+
+        # Per-spec projection matrices for the multi-cam path. Each spec
+        # may carry its own aspect ratio so a single shared matrix
+        # cannot satisfy them all. View matrices are computed per call
+        # in _render_obs_images_multi (depend on spec.pose only — pose
+        # is fixed at construction so we could cache them too, but the
+        # compute is trivial and per-call keeps the call site clear).
+        self._extra_proj_matrices: dict[str, list[float]] = {}
+        if self._multi_cam_enabled:
+            for spec in self._cameras:
+                ch, cw = spec.size
+                self._extra_proj_matrices[spec.name] = p.computeProjectionMatrixFOV(
+                    fov=_CAM_FOV,
+                    aspect=float(cw) / float(ch),
+                    nearVal=_CAM_NEAR,
+                    farVal=_CAM_FAR,
+                )
 
         # ---- per-session PyBullet client ----
         self._client: int = p.connect(p.DIRECT)
@@ -784,6 +830,12 @@ class PyBulletTabletopEnv:
         }
         if self._render_in_obs:
             obs["image"] = self._render_obs_image()
+        if self._multi_cam_enabled:
+            images = self._render_obs_images_multi()
+            obs["images"] = images  # type: ignore[assignment]
+            # Backwards-compat alias to the first cam's frame — RFC §2.
+            first_name = self._cameras[0].name
+            obs["image"] = images[first_name]
         return obs
 
     def _render_obs_image(self) -> NDArray[np.uint8]:
@@ -835,6 +887,47 @@ class PyBulletTabletopEnv:
         arr = np.asarray(rgb, dtype=np.uint8).reshape(h, w, 4)[:, :, :3]
         return np.ascontiguousarray(arr)
 
+    def _render_obs_images_multi(self) -> dict[str, NDArray[np.uint8]]:
+        """Render every CameraSpec via per-spec view + projection matrices.
+
+        Each spec's pose is converted to a (eye, target, up) triple via
+        :func:`_camera_basis_from_pose` (matches the MuJoCo convention:
+        camera looks along its local ``-Z`` axis, with local ``+Y`` as
+        up, after applying XYZ Euler rotation). Light parameters mirror
+        the single-cam path (``lightDiffuseCoeff`` ←
+        ``self._light_intensity``) so the cosmetic axes still affect
+        every cam consistently. ``object_texture`` is bound at the
+        cube level so it shows up automatically.
+        """
+        out: dict[str, NDArray[np.uint8]] = {}
+        for spec in self._cameras:
+            ch, cw = spec.size
+            eye, target, up = _camera_basis_from_pose(spec.pose)
+            view = p.computeViewMatrix(
+                cameraEyePosition=list(eye),
+                cameraTargetPosition=list(target),
+                cameraUpVector=list(up),
+            )
+            proj = self._extra_proj_matrices[spec.name]
+            _, _, rgb, _, _ = p.getCameraImage(
+                width=cw,
+                height=ch,
+                viewMatrix=view,
+                projectionMatrix=proj,
+                lightDirection=[0.0, 0.0, 1.0],
+                lightColor=[1.0, 1.0, 1.0],
+                lightDiffuseCoeff=float(self._light_intensity),
+                lightAmbientCoeff=_CAM_LIGHT_AMBIENT,
+                lightSpecularCoeff=0.0,
+                shadow=0,
+                flags=p.ER_NO_SEGMENTATION_MASK,
+                renderer=p.ER_TINY_RENDERER,
+                physicsClientId=self._client,
+            )
+            arr = np.asarray(rgb, dtype=np.uint8).reshape(ch, cw, 4)[:, :, :3]
+            out[spec.name] = np.ascontiguousarray(arr)
+        return out
+
     def _build_info(self) -> dict[str, Any]:
         return {
             "success": self._success,
@@ -860,3 +953,64 @@ def _quat_mul_wxyz(a: NDArray[np.float64], b: NDArray[np.float64]) -> NDArray[np
         ],
         dtype=np.float64,
     )
+
+
+# ---------------------------------------------------------- multi-cam helpers
+
+
+def _validate_pybullet_camera_specs(specs: tuple[CameraSpec, ...]) -> None:
+    """Reject invalid CameraSpec lists at construction time.
+
+    Mirrors the MuJoCo backend's contract verbatim — same message
+    formats, same checks. See
+    ``docs/polish-exploration-multi-camera.md`` §2.
+    """
+    seen: set[str] = set()
+    for spec in specs:
+        if not isinstance(spec.name, str) or spec.name == "":
+            raise ValueError(f"camera name must be a non-empty string; got {spec.name!r}")
+        if spec.name in seen:
+            raise ValueError(f"duplicate camera name: {spec.name!r}")
+        seen.add(spec.name)
+        h, w = spec.size
+        if int(h) <= 0 or int(w) <= 0:
+            raise ValueError(
+                f"camera {spec.name!r} size must be (height, width) of positive ints; "
+                f"got {spec.size!r}"
+            )
+        if len(spec.pose) != 6:
+            raise ValueError(
+                f"camera {spec.name!r} pose must be (x, y, z, rx, ry, rz); got {spec.pose!r}"
+            )
+
+
+def _camera_basis_from_pose(
+    pose: tuple[float, float, float, float, float, float],
+) -> tuple[
+    tuple[float, float, float],
+    tuple[float, float, float],
+    tuple[float, float, float],
+]:
+    """Convert a CameraSpec pose to PyBullet ``(eye, target, up)`` triple.
+
+    Pose convention (RFC §2): world-frame ``(x, y, z)`` in metres,
+    XYZ Euler ``(rx, ry, rz)`` in radians. The camera looks along its
+    local ``-Z`` axis with local ``+Y`` as up — same as MuJoCo's
+    ``<camera>`` default. We build a 3x3 rotation matrix from XYZ
+    Euler (R = Rx @ Ry @ Rz), then ``forward = R @ (0, 0, -1)``,
+    ``up = R @ (0, 1, 0)``, and ``target = eye + forward``.
+    """
+    x, y, z, rx, ry, rz = pose
+    cx, sx = float(np.cos(rx)), float(np.sin(rx))
+    cy, sy = float(np.cos(ry)), float(np.sin(ry))
+    cz, sz = float(np.cos(rz)), float(np.sin(rz))
+    rot_x = np.array([[1.0, 0.0, 0.0], [0.0, cx, -sx], [0.0, sx, cx]], dtype=np.float64)
+    rot_y = np.array([[cy, 0.0, sy], [0.0, 1.0, 0.0], [-sy, 0.0, cy]], dtype=np.float64)
+    rot_z = np.array([[cz, -sz, 0.0], [sz, cz, 0.0], [0.0, 0.0, 1.0]], dtype=np.float64)
+    rot = rot_x @ rot_y @ rot_z
+    forward = rot @ np.array([0.0, 0.0, -1.0], dtype=np.float64)
+    up_local = rot @ np.array([0.0, 1.0, 0.0], dtype=np.float64)
+    eye = (float(x), float(y), float(z))
+    target = (eye[0] + float(forward[0]), eye[1] + float(forward[1]), eye[2] + float(forward[2]))
+    up = (float(up_local[0]), float(up_local[1]), float(up_local[2]))
+    return eye, target, up
