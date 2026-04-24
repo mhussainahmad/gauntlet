@@ -103,6 +103,21 @@ Genesis backend, `uv sync --extra genesis` then
 [`examples/evaluate_random_policy_genesis.py`](./examples/evaluate_random_policy_genesis.py)
 drives the same smoke suite against `tabletop-genesis`.
 
+The Suite YAML's `sampling:` key picks the perturbation grid strategy:
+the default `cartesian` enumerates the full Cartesian product of the
+declared axes (the historical behaviour, byte-identical to every
+existing suite), while `latin_hypercube` draws `n_samples` points using
+McKay 1979 Latin Hypercube Sampling — every axis covers `n_samples`
+distinct strata regardless of dimensionality. For five axes at five
+steps, cartesian = 3,125 cells; LHS at `n_samples: 32` covers the same
+hypercube with strictly higher marginal coverage at ~98x fewer
+rollouts. See
+[`examples/suites/tabletop-lhs-smoke.yaml`](./examples/suites/tabletop-lhs-smoke.yaml)
+and [`examples/evaluate_random_policy_lhs.py`](./examples/evaluate_random_policy_lhs.py)
+for an end-to-end demo. Sobol (`sampling: sobol`) is reserved in the
+schema for a follow-up; LHS is the supported quasi-random alternative
+today.
+
 ### Using a real VLA
 
 - Install the HF extras: `uv sync --extra hf` (pulls torch / transformers / pillow; core installs stay torch-free).
