@@ -177,6 +177,16 @@ isaac-dev = [
     {include-group = "dev"},
     "pytest-mock>=3.12,<4",
 ]
+# Security audit tooling (Phase 2.5 Task 16). Pulled by the dedicated
+# `security-audit` and `secret-scan` CI jobs; nothing in src/ or tests/
+# imports these. ``pip-audit`` queries OSV / PyPI for CVEs against the
+# resolved dependency tree; ``detect-secrets`` scans the working tree
+# against a checked-in baseline (.secrets.baseline). Both are pinned to
+# their current major to keep CI reproducible.
+security = [
+    "pip-audit>=2.7,<3",
+    "detect-secrets>=1.4,<2",
+]
 
 [build-system]
 requires = ["uv_build>=0.8.13,<0.9.0"]
