@@ -38,7 +38,14 @@ __all__ = ["Episode"]
 class Episode(BaseModel):
     """Result of one rollout. Pure data; no behaviour."""
 
-    model_config = ConfigDict(extra="forbid")
+    # ``ser_json_inf_nan="strings"`` round-trips ``float('nan')`` /
+    # ``float('inf')`` through JSON as ``"NaN"`` / ``"Infinity"`` /
+    # ``"-Infinity"`` instead of pydantic's default ``null`` (which then
+    # fails revalidation as ``float``). Live Runner-emitted Episodes do
+    # not currently carry non-finite floats, but a third-party env that
+    # returns NaN reward (broken policy, NaN obs from a learned model)
+    # would otherwise produce an unreplayable episodes.json.
+    model_config = ConfigDict(extra="forbid", ser_json_inf_nan="strings")
 
     # Identity / reproducibility.
     suite_name: str
