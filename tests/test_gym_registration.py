@@ -205,3 +205,51 @@ def test_register_envs_reexported_from_top_level() -> None:
 
     assert hasattr(gauntlet, "register_envs")
     assert "register_envs" in gauntlet.__all__
+
+
+def test_env_subpackage_surface_unchanged() -> None:
+    """Backwards-compat regression: ``gauntlet.env`` keeps its public exports.
+
+    The pre-gym-registration ``__all__`` listed exactly these names; the
+    new gym layer must not have removed or renamed any of them. This
+    catches an accidental over-zealous edit to ``src/gauntlet/env/__init__.py``.
+    """
+    import gauntlet.env as env_pkg
+
+    expected = {
+        "AXIS_NAMES",
+        "N_DISTRACTOR_SLOTS",
+        "GauntletEnv",
+        "PerturbationAxis",
+        "TabletopEnv",
+        "axis_for",
+    }
+    assert expected <= set(env_pkg.__all__), (
+        f"missing expected exports: {expected - set(env_pkg.__all__)}"
+    )
+
+
+def test_gym_make_yields_a_working_env() -> None:
+    """End-to-end: ``gym.make`` -> ``reset`` -> ``step`` round-trip.
+
+    The make->reset->step path is what every downstream RL framework
+    actually exercises; pinning it here means a future EnvSpec-level
+    regression (wrong entry_point, wrong kwargs threading, missing
+    TimeLimit wrap) surfaces in the cheap default test job.
+    """
+    import numpy as np
+
+    register_envs()
+    env = gym.make(_TABLETOP_ID)
+    try:
+        obs, info = env.reset(seed=0)
+        assert isinstance(obs, dict)
+        assert isinstance(info, dict)
+        shape = env.action_space.shape
+        assert shape is not None  # narrows to tuple[int, ...] for mypy
+        action = np.zeros(shape, dtype=np.float64)
+        result = env.step(action)
+        # Gymnasium 1.0 step returns a 5-tuple.
+        assert len(result) == 5
+    finally:
+        env.close()
