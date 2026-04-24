@@ -420,6 +420,17 @@ class IsaacSimTabletopEnv:
 
         self.restore_baseline()
 
+        # World reset is FIRST, immediately after restore_baseline,
+        # because Isaac Sim's ``World.reset()`` re-initialises every
+        # dynamic body to its construction-time pose. Calling it AFTER
+        # the seed-driven set_world_pose writes would clobber them
+        # back to (0, 0, _CUBE_REST_Z) and the
+        # ``object_initial_pose_*`` perturbation reads of ``cur_pos``
+        # would see the wrong baseline. The mocked ``_FakeWorld.reset``
+        # is a no-op so the unit tests don't catch this; documented
+        # here so a real-GPU smoke doesn't surface drift later.
+        self._world.reset()
+
         # Re-seed cube XY (identity quat).
         cube_xy = self._rng.uniform(
             low=-_CUBE_INIT_HALFRANGE, high=_CUBE_INIT_HALFRANGE, size=2
@@ -447,13 +458,9 @@ class IsaacSimTabletopEnv:
             orientation=np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64),
         )
 
-        # World reset — Kit-side invalidation of physics velocities so
-        # the next step is a clean slate.
-        self._world.reset()
-
-        # Apply queued perturbations on top of seed-driven state. Step
-        # 6 lands the seven branches; until then this is a no-op
-        # unless a future commit wires set_perturbation. RFC-005 §3.2.
+        # Apply queued perturbations on top of seed-driven state.
+        # Per the Protocol's contract (RFC-005 §3.2): the queue is
+        # the input to the next reset, so we drain after applying.
         if self._pending_perturbations:
             self._apply_pending_perturbations()
             self._pending_perturbations = {}

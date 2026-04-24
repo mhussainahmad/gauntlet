@@ -328,6 +328,11 @@ ignore_missing_imports = true
 # genesis — lets mypy import-check env/isaac/* even when the [isaac]
 # extra isn't installed (which is the case on every CI runner — the
 # wheel resolves but Kit needs a GPU; see RFC-009 §4.4).
+#
+# omni / pxr are reserved for the rendering follow-up RFC (camera +
+# lighting + USD material wiring); the state-only first cut only
+# touches `isaacsim` + `isaacsim.core.api`. Kept here pre-emptively
+# so the rendering RFC adds zero pyproject.toml lines.
 [[tool.mypy.overrides]]
 module = [
     "isaacsim",
