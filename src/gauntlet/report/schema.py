@@ -45,7 +45,7 @@ class AxisBreakdown(BaseModel):
     ascending). Keys are float-normalized — see module docstring.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", ser_json_inf_nan="strings")
 
     name: str
     rates: dict[float, float]
@@ -61,7 +61,7 @@ class CellBreakdown(BaseModel):
     the model is robust to hand-constructed Episode lists.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", ser_json_inf_nan="strings")
 
     cell_index: int
     perturbation_config: dict[str, float]
@@ -87,7 +87,7 @@ class FailureCluster(BaseModel):
     ``failure_rate`` descending for stable presentation.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", ser_json_inf_nan="strings")
 
     axes: dict[str, float]
     n_episodes: int
@@ -110,7 +110,7 @@ class Heatmap2D(BaseModel):
       y_values[y_index]``. Cells with no episodes are ``float("nan")``.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", ser_json_inf_nan="strings")
 
     axis_x: str
     axis_y: str
@@ -127,7 +127,7 @@ class Report(BaseModel):
     deliberately breakdown-first (§6).
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", ser_json_inf_nan="strings")
 
     suite_name: str
     # Optional for Phase-1 compat: old report JSONs (pre RFC-005) do
