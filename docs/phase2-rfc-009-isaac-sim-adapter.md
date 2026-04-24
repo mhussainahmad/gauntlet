@@ -138,7 +138,7 @@ cut, the rejection happens for free. No loader code changes.
 # workstation, not the CI runner. CI tests use a sys.modules-injected
 # fake `isaacsim` namespace and do NOT install this extra (RFC-009 §8).
 isaac = [
-    "isaacsim>=4.5,<5",
+    "isaacsim>=5.0,<6",
 ]
 
 [dependency-groups]
@@ -150,13 +150,40 @@ isaac-dev = [
 
 ### 4.2 Pin rationale
 
-- `isaacsim>=4.5,<5` — the 4.5 floor is the first release that
-  publishes 3.11/3.12 wheels; the one-major ceiling matches `[hf]`
-  (`<5`), `[lerobot]` (`<1`), `[pybullet]` (`<4`), `[genesis]`
-  (`<0.5`). Catches surprise breakage at the extras seam early.
+- `isaacsim>=5.0,<6` — the 4.x line is **cp310-only** on the NVIDIA
+  index, so it cannot satisfy the project's `requires-python = ">=3.11"`
+  floor. 5.0 is the first release that publishes cp311 wheels; 6.x
+  jumped to cp312-only and is incompatible with 3.11. The one-major
+  ceiling matches `[hf]` (`<5`), `[lerobot]` (`<1`), `[pybullet]`
+  (`<4`), `[genesis]` (`<0.5`).
 - No `torch` in `[isaac]`. Isaac Sim ships its own torch through the
   `isaacsim-core` transitive dep; we do not need to declare it.
 - No `numpy` / `gymnasium` in `[isaac]` — both already pinned in core.
+
+### 4.2a NVIDIA package index — `tool.uv` configuration
+
+The PyPI placeholders for `isaacsim` and its `isaacsim-*` /
+`omniverse-kit` transitives are wheel-stub shims that download the
+actual binaries from NVIDIA's index at install time. uv's resolver
+needs to see the NVIDIA index too, otherwise `uv lock` fails trying to
+build the placeholder. So `pyproject.toml` declares:
+
+```toml
+[[tool.uv.index]]
+name = "nvidia"
+url = "https://pypi.nvidia.com/"
+explicit = true
+
+[tool.uv.sources]
+isaacsim = { index = "nvidia" }
+# ...one entry per isaacsim-* + omniverse-kit transitive
+```
+
+The `explicit = true` flag prevents the NVIDIA index from leaking into
+the resolution of unrelated packages — only packages explicitly
+sourced via `tool.uv.sources` consult that index. CI builds that do
+NOT install the `[isaac]` extra are unaffected (the index is named
+but never consulted because no listed package is needed).
 
 ### 4.3 Core-dep ceilings — no changes needed
 
@@ -503,7 +530,7 @@ slice it adds.
 
 1. Exploration doc (`docs/phase2-exploration-task9-isaac-sim-adapter.md`). **Landed.**
 2. RFC (this document).
-3. `pyproject.toml`: `[isaac]` extra (`isaacsim>=4.5,<5`), `isaac-dev`
+3. `pyproject.toml`: `[isaac]` extra (`isaacsim>=5.0,<6`), `isaac-dev`
    dev group, `isaac` pytest marker, `[[tool.mypy.overrides]]` for
    `isaacsim`, `omni.*`, `pxr.*`. No code yet.
 4. `src/gauntlet/env/isaac/__init__.py` (lazy guard +
@@ -537,7 +564,7 @@ slice it adds.
 
 **Making now:**
 
-- `isaacsim>=4.5,<5` pin (one-major ceiling; matches the cadence of
+- `isaacsim>=5.0,<6` pin (one-major ceiling; matches the cadence of
   the other extras).
 - State-only first cut; cosmetic axes flagged `VISUAL_ONLY_AXES`.
 - Mock-driven CI tests in `tests/isaac/` running in the default job

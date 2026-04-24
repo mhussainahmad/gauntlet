@@ -22,9 +22,10 @@ every other decision in this doc.
 | `isaacsim` is on PyPI (since Isaac Sim 4.x, ~2024) | https://pypi.org/project/isaacsim/ |
 | Hard CUDA / GPU runtime requirement | Wraps Omniverse Kit, which requires NVIDIA RTX-class GPU + ≥525 driver. Even `import isaacsim` triggers Kit bootstrap that probes for a GPU. |
 | Footprint | `isaacsim` is a small shim (~1 MB) that pulls `isaacsim-kernel`, `isaacsim-core`, `isaacsim-app`, `isaacsim-asset`, ... — full install is ~15 GB once Kit and its asset cache are on disk. |
-| `Requires-Python` | 3.10 / 3.11 only on Isaac Sim 4.x; 3.11 on 4.5+. |
+| `Requires-Python` | 4.x = cp310 only; 5.x = cp311 only; 6.x = cp312 only. Each major bumps the supported Python by exactly one minor. |
 | `pip install isaacsim` on a CPU runner | Wheels resolve, but every meaningful import (`from isaacsim import SimulationApp` and below) raises a Kit bootstrap error or segfaults probing for the GPU. |
 | Comparison vs other extras' install footprint | `[hf]` ~3 GB (torch + transformers); `[lerobot]` ~4 GB; `[pybullet]` ~50 MB; `[genesis]` ~1 GB. `[isaac]` is the heaviest by an order of magnitude. |
+| Wheel distribution | `isaacsim` and every `isaacsim-*` / `omniverse-kit` transitive on PyPI is a wheel-stub placeholder; the actual wheel lives on the NVIDIA index `https://pypi.nvidia.com/`. uv's resolver needs that index registered via `tool.uv.sources` (see RFC-009 §4.2a). |
 
 **Consequence:** unlike `[genesis]` and `[pybullet]`, the `[isaac]` extra
 cannot be tested end-to-end on `ubuntu-latest`. We pick a different
@@ -36,16 +37,20 @@ formalises this.
 
 ## Q2: Python matrix
 
-| Python | `isaacsim` 4.5+ wheel | CI strategy |
+| Python | `isaacsim` 5.x wheel | CI strategy |
 |---|---|---|
-| 3.11 | wheel published | Default-job mocked tests (no `isaacsim` install). |
-| 3.12 | wheel published on Isaac Sim 4.5+ | Default-job mocked tests. |
+| 3.10 | NO (4.x only) | N/A — project floor is 3.11. |
+| 3.11 | YES (5.0, 5.1) | Default-job mocked tests (no `isaacsim` install). |
+| 3.12 | NO (only 6.x ships cp312) | Default-job mocked tests; `uv sync --extra isaac` will fail to find a wheel. |
 | 3.13 | not yet published | N/A. |
 
 Because the `[isaac]` extra never gets installed in CI under this PR's
-scope, the matrix point is moot for pin-validation purposes — the pin
-`isaacsim>=4.5,<5` gates only `uv sync --extra isaac` on a developer's
-GPU workstation.
+scope, the 3.12 mismatch is documented but not blocking — the pin
+`isaacsim>=5.0,<6` gates only `uv sync --extra isaac` on a developer's
+GPU workstation, and that workstation will pin its Python at 3.11.
+
+When the project's Python floor moves up to 3.12+ we will need to
+revisit the pin to allow 6.x.
 
 ---
 
@@ -212,7 +217,7 @@ because Isaac Sim doesn't have an undeclared transitive runtime dep).
 
 **Modified files:**
 
-* `pyproject.toml` — `[isaac]` extra (`isaacsim>=4.5,<5`); `[dependency-groups] isaac-dev`; `[tool.pytest.ini_options]` markers += `isaac`; `[[tool.mypy.overrides]]` for `isaacsim`, `omni.*`, `pxr.*`. The default `lint-typecheck-test` job's `-m "not …"` exclusion grows by `and not isaac`.
+* `pyproject.toml` — `[isaac]` extra (`isaacsim>=5.0,<6`); `[dependency-groups] isaac-dev`; `[tool.pytest.ini_options]` markers += `isaac`; `[[tool.mypy.overrides]]` for `isaacsim`, `omni.*`, `pxr.*`. The default `lint-typecheck-test` job's `-m "not …"` exclusion grows by `and not isaac`.
 * `src/gauntlet/suite/schema.py` — `BUILTIN_BACKEND_IMPORTS["tabletop-isaac"] = "gauntlet.env.isaac"`.
 * `src/gauntlet/suite/loader.py` — `_EXTRA_FOR_MODULE["gauntlet.env.isaac"] = "isaac"`.
 * `.github/workflows/ci.yml` — new `isaac-tests` placeholder job (continue-on-error). Default job's pytest exclusion list grows.
@@ -230,7 +235,7 @@ because Isaac Sim doesn't have an undeclared transitive runtime dep).
 
 ## Q8: Risk register
 
-1. **Isaac Sim 4.x -> 5 API churn.** Pin `isaacsim>=4.5,<5` (same one-major
+1. **Isaac Sim 4.x -> 5 API churn.** Pin `isaacsim>=5.0,<6` (same one-major
    ceiling as `[hf]`, `[lerobot]`, `[pybullet]`). When 5 lands, revisit.
 2. **Mock-based tests can drift from real behaviour.** Mitigation: the
    surface is small (~10 symbols, §Q4.1); per-axis tests assert on
