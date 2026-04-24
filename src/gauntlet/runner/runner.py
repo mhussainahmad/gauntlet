@@ -65,12 +65,14 @@ import numpy as np
 from gauntlet.env.base import GauntletEnv
 from gauntlet.env.registry import get_env_factory, registered_envs
 from gauntlet.policy.base import Policy
+from gauntlet.runner.cache import EpisodeCache
 from gauntlet.runner.episode import Episode
 from gauntlet.runner.worker import (
     VideoConfig,
     WorkerInitArgs,
     WorkItem,
     execute_one,
+    extract_env_seed,
     pool_initializer,
     run_work_item,
 )
@@ -98,6 +100,9 @@ class Runner:
         video_dir: Path | None = None,
         video_fps: int = 30,
         record_only_failures: bool = False,
+        cache_dir: Path | None = None,
+        policy_id: str | None = None,
+        max_steps: int | None = None,
     ) -> None:
         """Configure the runner.
 
@@ -158,10 +163,38 @@ class Runner:
                 rollout because success is unknown until
                 ``info["success"]`` arrives; only the *write* is gated.
                 Default ``False`` — every episode gets an MP4.
+            cache_dir: Optional directory for the file-per-Episode
+                rollout cache (see :class:`gauntlet.runner.cache.EpisodeCache`
+                and ``docs/polish-exploration-incremental-cache.md``).
+                When ``None`` (the default) no cache is constructed, no
+                cache lookups happen, and the hot path is byte-identical
+                to pre-PR behaviour. When set, the Runner computes a
+                content-addressed key per (suite, axis_config, env_seed,
+                policy_id, max_steps) cell, returns cached Episodes
+                straight from disk on a hit, and writes fresh ones via
+                ``cache.put`` on a miss. Trajectory NPZs and MP4 videos
+                are NOT replayed on a hit — the cache returns Episode
+                objects only.
+            policy_id: Caller-supplied policy identifier baked into the
+                cache key. When ``cache_dir`` is set and ``policy_id is
+                None`` the Runner falls back to
+                ``policy_factory().__class__.__name__`` (constructed
+                once on the parent process at the start of
+                :meth:`run`). Users who swap weights inside the same
+                policy class (e.g. SmolVLA checkpoint A vs B) MUST
+                pass an explicit ``policy_id`` or the cache will
+                silently return stale rollouts.
+            max_steps: Per-episode env step cap echoed into the cache
+                key. Required when ``cache_dir`` is set because every
+                backend bakes ``max_steps`` into its constructor and
+                :class:`GauntletEnv` does not expose a public getter;
+                an honest cache key needs the value as input. Ignored
+                when ``cache_dir is None``.
 
         Raises:
             ValueError: If ``n_workers < 1``, ``start_method != "spawn"``,
-                or ``video_fps`` is not a positive int.
+                ``video_fps`` is not a positive int, or ``cache_dir`` is
+                set without ``max_steps``.
         """
         if n_workers < 1:
             raise ValueError(
@@ -176,6 +209,15 @@ class Runner:
             )
         if record_video and (not isinstance(video_fps, int) or video_fps <= 0):
             raise ValueError(f"video_fps must be a positive int; got {video_fps!r}.")
+        # Cache requires an explicit max_steps because the cache key
+        # depends on it and GauntletEnv does not expose a public getter.
+        # See ``docs/polish-exploration-incremental-cache.md`` §2.
+        if cache_dir is not None and max_steps is None:
+            raise ValueError(
+                "cache_dir is set but max_steps is None; the cache key depends on "
+                "max_steps and GauntletEnv does not expose it. Pass max_steps "
+                "explicitly (matching the value baked into env_factory)."
+            )
         self._n_workers = n_workers
         self._env_factory = env_factory
         self._start_method = start_method
@@ -184,6 +226,13 @@ class Runner:
         self._video_dir = video_dir
         self._video_fps = video_fps
         self._record_only_failures = record_only_failures
+        self._cache_dir = cache_dir
+        self._policy_id = policy_id
+        self._max_steps = max_steps
+        # Lazily constructed on the first ``run`` call when caching is
+        # enabled. Held on the instance so :meth:`cache_stats` can be
+        # called by callers (and by the CLI) after the run completes.
+        self._cache: EpisodeCache | None = None
 
     # ------------------------------------------------------------------
     # Public entry point.
@@ -252,14 +301,50 @@ class Runner:
             video_config.video_dir.mkdir(parents=True, exist_ok=True)
 
         work_items = self._build_work_items(suite)
-        if self._n_workers == 1:
-            episodes = self._run_in_process(
-                env_factory, policy_factory, work_items, video_config=video_config
+
+        # Cache lookup happens BEFORE dispatch — only cache misses go to
+        # the executor. ``cache_dir is None`` short-circuits the entire
+        # block: no EpisodeCache is constructed, no per-cell key
+        # computation runs, and the dispatch path is byte-identical to
+        # the pre-PR behaviour.
+        cached_episodes: list[Episode] = []
+        items_to_run: list[WorkItem] = work_items
+        cache_keys: dict[tuple[int, int], str] = {}
+        if self._cache_dir is not None:
+            self._cache = EpisodeCache(root=self._cache_dir)
+            resolved_policy_id = self._resolve_policy_id(policy_factory)
+            assert self._max_steps is not None  # narrowed by __init__ guard
+            cached_episodes, items_to_run, cache_keys = self._partition_by_cache(
+                self._cache,
+                work_items,
+                suite=suite,
+                policy_id=resolved_policy_id,
+                max_steps=self._max_steps,
             )
+
+        if items_to_run:
+            if self._n_workers == 1:
+                fresh = self._run_in_process(
+                    env_factory, policy_factory, items_to_run, video_config=video_config
+                )
+            else:
+                fresh = self._run_pool(
+                    env_factory, policy_factory, items_to_run, video_config=video_config
+                )
         else:
-            episodes = self._run_pool(
-                env_factory, policy_factory, work_items, video_config=video_config
-            )
+            fresh = []
+
+        # Persist newly-rolled Episodes to the cache (a no-op when the
+        # cache is disabled; cache_keys is empty in that case).
+        if self._cache is not None:
+            for episode in fresh:
+                key = cache_keys.get((episode.cell_index, episode.episode_index))
+                if key is not None:
+                    self._cache.put(key, episode)
+
+        # Combine cached + freshly-rolled episodes; the sort below
+        # restores the canonical (cell_index, episode_index) ordering.
+        episodes = cached_episodes + fresh
 
         # Stable output order — independent of worker completion order.
         episodes.sort(key=lambda ep: (ep.cell_index, ep.episode_index))
@@ -333,6 +418,79 @@ class Runner:
                     )
                 )
         return items
+
+    # ------------------------------------------------------------------
+    # Cache helpers.
+    # ------------------------------------------------------------------
+
+    def _resolve_policy_id(self, policy_factory: Callable[[], Policy]) -> str:
+        """Return the caller-supplied ``policy_id`` or a class-name fallback.
+
+        When the user passed an explicit ``policy_id`` to
+        :meth:`__init__`, return it verbatim — no factory call needed.
+        Otherwise call ``policy_factory()`` once on the parent process
+        and use the resulting policy's class name. The factory call is a
+        side-effecting one (e.g. it may load a torch checkpoint), but
+        this is the only way to derive a default ID; users with
+        expensive factories who know the class is stable should pass an
+        explicit ``policy_id`` to avoid the construction.
+        """
+        if self._policy_id is not None:
+            return self._policy_id
+        sample = policy_factory()
+        return type(sample).__name__
+
+    def _partition_by_cache(
+        self,
+        cache: EpisodeCache,
+        work_items: list[WorkItem],
+        *,
+        suite: Suite,
+        policy_id: str,
+        max_steps: int,
+    ) -> tuple[list[Episode], list[WorkItem], dict[tuple[int, int], str]]:
+        """Split work items into (cache hits, cache misses, key lookup table).
+
+        For each WorkItem, derives the env seed via :func:`extract_env_seed`
+        (pure; no env construction), computes the cache key via
+        :meth:`EpisodeCache.make_key`, and asks the cache for the
+        Episode. Hits are returned in the first list (sorted by the
+        Runner's outer ``run`` method); misses are returned as the
+        items_to_run list along with a ``{(cell, ep): key}`` lookup so
+        the post-dispatch ``cache.put`` loop knows which key to use.
+        """
+        hits: list[Episode] = []
+        misses: list[WorkItem] = []
+        keys: dict[tuple[int, int], str] = {}
+        for item in work_items:
+            env_seed = extract_env_seed(item.episode_seq)
+            key = EpisodeCache.make_key(
+                suite,
+                axis_config=item.perturbation_values,
+                seed=env_seed,
+                episodes_per_cell=item.episodes_per_cell,
+                max_steps=max_steps,
+                env_name=suite.env,
+                policy_id=policy_id,
+            )
+            cached = cache.get(key)
+            if cached is not None:
+                hits.append(cached)
+            else:
+                misses.append(item)
+                keys[(item.cell_index, item.episode_index)] = key
+        return hits, misses, keys
+
+    def cache_stats(self) -> dict[str, int]:
+        """Return the in-process cache hit / miss / put counters.
+
+        When caching is disabled (``cache_dir=None``) the Runner has no
+        cache to query; this returns zeros for parity with the active
+        path.
+        """
+        if self._cache is None:
+            return {"hits": 0, "misses": 0, "puts": 0}
+        return self._cache.stats()
 
     # ------------------------------------------------------------------
     # Execution paths.
