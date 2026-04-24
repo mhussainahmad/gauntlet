@@ -467,10 +467,15 @@ axes:
     def test_schema_rejects_unknown_env_names(self) -> None:
         """Anything outside registered_envs() | BUILTIN_BACKEND_IMPORTS
         must still be rejected at schema-validation time.
+
+        ``tabletop-mystery`` is an obviously-fake env name picked so it
+        cannot collide with any current or future built-in backend
+        (``tabletop-isaac`` joined ``BUILTIN_BACKEND_IMPORTS`` in
+        RFC-009, which was the previous canary value here).
         """
         bad = """
 name: x
-env: tabletop-isaac
+env: tabletop-mystery
 episodes_per_cell: 1
 axes:
   lighting_intensity:
@@ -481,10 +486,11 @@ axes:
         with pytest.raises(ValidationError) as excinfo:
             load_suite_from_string(bad)
         msg = str(excinfo.value)
-        assert "tabletop-isaac" in msg
+        assert "tabletop-mystery" in msg
         # Error includes the sorted list of known keys.
         assert "tabletop" in msg
         assert "tabletop-pybullet" in msg
+        assert "tabletop-isaac" in msg
 
     _GENESIS_YAML = """
 name: genesis-smoke

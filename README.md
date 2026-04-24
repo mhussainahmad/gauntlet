@@ -24,24 +24,36 @@ observability. The public surface is still unstable.
 
 ## Backends
 
-Gauntlet ships three simulator backends. The Suite YAML's `env:` key
+Gauntlet ships four simulator backends. The Suite YAML's `env:` key
 is the dispatch: `tabletop` uses MuJoCo (default, ships in the core
-install); `tabletop-pybullet` and `tabletop-genesis` each live behind
-an optional extra.
+install); `tabletop-pybullet`, `tabletop-genesis`, and
+`tabletop-isaac` each live behind an optional extra.
 
 | `env:` slug          | Simulator | Install                                  | Observations |
 |----------------------|-----------|------------------------------------------|--------------|
 | `tabletop`           | MuJoCo    | `uv sync` (core)                         | State + render-on-demand |
 | `tabletop-pybullet`  | PyBullet  | `uv sync --extra pybullet`               | State + render-on-demand |
-| `tabletop-genesis`   | Genesis   | `uv sync --extra genesis`                | State-only (rendering follow-up) |
+| `tabletop-genesis`   | Genesis   | `uv sync --extra genesis`                | State + render-on-demand |
+| `tabletop-isaac`     | Isaac Sim | `uv sync --extra isaac` (GPU required)   | State-only (rendering follow-up) |
 
-The three backends share action/observation spaces byte-for-byte and
+The four backends share action/observation spaces byte-for-byte and
 the canonical 7 perturbation axes. They are **not** numerically
 identical: same policy + same seed on `tabletop` vs `tabletop-pybullet`
-vs `tabletop-genesis` produces semantically similar but numerically
-different trajectories. Running `gauntlet compare` across backends
-measures simulator drift, not policy regression; the CLI requires
-`--allow-cross-backend` to proceed.
+vs `tabletop-genesis` vs `tabletop-isaac` produces semantically similar
+but numerically different trajectories. Running `gauntlet compare`
+across backends measures simulator drift, not policy regression; the
+CLI requires `--allow-cross-backend` to proceed.
+
+The `tabletop-isaac` backend wraps NVIDIA Omniverse Kit and **requires
+a CUDA-capable RTX-class GPU at runtime**. The `[isaac]` extra resolves
+on CPU-only machines but the Kit bootstrap inside `IsaacSimTabletopEnv.__init__`
+fails without a GPU. CI tests use a `sys.modules`-injected fake
+`isaacsim` namespace and do NOT install this extra; live execution
+needs a developer GPU workstation. The state-only first cut declares
+the four cosmetic axes (`lighting_intensity`, `camera_offset_x`,
+`camera_offset_y`, `object_texture`) `VISUAL_ONLY_AXES` so cosmetic-only
+sweeps are rejected at suite-load time on this backend until the
+rendering follow-up RFC lands.
 
 Image observations are available on all three backends via
 `render_in_obs=True` / `render_size=(H, W)` on the env constructor
@@ -60,9 +72,11 @@ for the full PyBullet backend design,
 [`docs/phase2-rfc-006-pybullet-rendering.md`](./docs/phase2-rfc-006-pybullet-rendering.md)
 for PyBullet's image-observation follow-up,
 [`docs/phase2-rfc-007-genesis-adapter.md`](./docs/phase2-rfc-007-genesis-adapter.md)
-for the Genesis backend design, and
+for the Genesis backend design,
 [`docs/phase2-rfc-008-genesis-rendering.md`](./docs/phase2-rfc-008-genesis-rendering.md)
-for the Genesis image-observation follow-up.
+for the Genesis image-observation follow-up, and
+[`docs/phase2-rfc-009-isaac-sim-adapter.md`](./docs/phase2-rfc-009-isaac-sim-adapter.md)
+for the Isaac Sim backend design.
 
 ## Quickstart
 

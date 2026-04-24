@@ -336,6 +336,11 @@ def test_image_space_matches_mujoco() -> None:
     g = GenesisTabletopEnv(render_in_obs=True, render_size=(64, 64))
     m = TabletopEnv(render_in_obs=True, render_size=(64, 64))
     try:
+        # Cast through the runtime-checked Dict so mypy --strict knows
+        # ``.spaces`` is available; the env Protocol declares
+        # ``observation_space: gym.spaces.Space[Any]`` (no .spaces attr
+        # on the base Space) so the narrowing is needed once per
+        # backend in the test layer.
         assert isinstance(g.observation_space, Dict)
         assert isinstance(m.observation_space, Dict)
         g_img = g.observation_space.spaces["image"]

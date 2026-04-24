@@ -1,0 +1,22 @@
+# tabletop-isaac-smoke — Isaac Sim backend analogue of tabletop-smoke.
+#
+# 3 cube-X initial poses x 2 distractor counts = 6 cells, 4 episodes per
+# cell = 24 rollouts. State-affecting axes only — the four cosmetic axes
+# (lighting_intensity, camera_offset_{x,y}, object_texture) are declared
+# VISUAL_ONLY on the state-only first cut (RFC-009 §6.6), so a sweep
+# using them is rejected at load time by the Suite loader's
+# "all-axes-cosmetic" guard. Once the rendering follow-up RFC lands,
+# mirrors of tabletop-smoke's cosmetic-axis YAML become legal on
+# tabletop-isaac too.
+
+name: tabletop-isaac-smoke
+env: tabletop-isaac
+seed: 0
+episodes_per_cell: 4
+axes:
+  object_initial_pose_x:
+    low: -0.05
+    high: 0.05
+    steps: 3
+  distractor_count:
+    values: [0, 3]
