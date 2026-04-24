@@ -118,6 +118,18 @@ for an end-to-end demo. Sobol (`sampling: sobol`) is reserved in the
 schema for a follow-up; LHS is the supported quasi-random alternative
 today.
 
+Once you have multiple runs (different seeds, policy revisions, or
+backends), `gauntlet aggregate <runs-dir> --out fleet/` rolls every
+`report.json` recursively under `<runs-dir>` into a single fleet
+meta-report — `fleet/fleet_report.json` plus a self-contained
+`fleet/fleet_report.html` leading with the persistent failure
+clusters that survive across runs (clusters appearing in at least
+`--persistence-threshold` of the runs, default `0.5`). See
+[`examples/aggregate_runs.py`](./examples/aggregate_runs.py) for the
+equivalent invocation via the Python API and
+[`docs/phase3-rfc-019-fleet-aggregate.md`](./docs/phase3-rfc-019-fleet-aggregate.md)
+for the algorithm.
+
 ### Using a real VLA
 
 - Install the HF extras: `uv sync --extra hf` (pulls torch / transformers / pillow; core installs stay torch-free).
