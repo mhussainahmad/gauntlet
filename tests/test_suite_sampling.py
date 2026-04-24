@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import itertools
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -232,3 +233,98 @@ axes:
         # directly; iterating the sampler would be wasteful.
         suite = load_suite_from_string(self._LHS_YAML)
         assert suite.num_cells() == suite.n_samples
+
+
+# ============================================================ runner integration
+
+
+def _make_fast_env() -> Any:
+    """Module-level env factory (picklable under spawn) for the Runner smoke.
+
+    ``Any`` matches the local-test idiom in :mod:`tests.test_runner` —
+    the concrete type is :class:`gauntlet.env.tabletop.TabletopEnv` and
+    the Runner expects a :class:`Callable[[], GauntletEnv]`, but the
+    project doesn't import the env type into test annotations to keep
+    the import surface tight.
+    """
+    from gauntlet.env.tabletop import TabletopEnv
+
+    return TabletopEnv(max_steps=5)
+
+
+def _make_random_policy() -> Any:
+    """Module-level policy factory; the Runner re-seeds via ``policy.reset(rng)``."""
+    from gauntlet.policy.random import RandomPolicy
+
+    return RandomPolicy(action_dim=7, seed=None)
+
+
+class TestRunnerWithLHS:
+    """End-to-end smoke: Runner consumes an LHS Suite without modification.
+
+    The Runner does ``list(suite.cells())`` and then derives per-episode
+    seeds from ``suite.seed`` independent of the sampler. These tests
+    pin that the LHS path runs through the unchanged Runner producing
+    the expected episode count, with each episode's perturbation_config
+    matching its originating LHS cell.
+    """
+
+    _LHS_RUNNER_YAML = """
+name: lhs-runner-smoke
+env: tabletop
+seed: 11
+sampling: latin_hypercube
+n_samples: 8
+episodes_per_cell: 2
+axes:
+  lighting_intensity:
+    low: 0.3
+    high: 1.5
+  camera_offset_x:
+    low: -0.05
+    high: 0.05
+"""
+
+    def test_runner_produces_n_samples_times_eps_episodes(self) -> None:
+        # Runner is purely an entry point downstream of Suite.cells();
+        # the LHS path must produce exactly n_samples * eps_per_cell
+        # Episodes regardless of the sampling strategy.
+        from gauntlet.runner import Runner
+
+        suite = load_suite_from_string(self._LHS_RUNNER_YAML)
+        assert suite.n_samples is not None  # validator-guaranteed for LHS
+        runner = Runner(n_workers=1, env_factory=_make_fast_env)
+        episodes = runner.run(policy_factory=_make_random_policy, suite=suite)
+        assert len(episodes) == suite.n_samples * suite.episodes_per_cell == 16
+
+        # Sorted by (cell_index, episode_index) — Runner's stable
+        # output contract, untouched by this PR.
+        keys = [(ep.cell_index, ep.episode_index) for ep in episodes]
+        assert keys == sorted(keys)
+        for ep in episodes:
+            assert ep.suite_name == "lhs-runner-smoke"
+            assert ep.cell_index in range(suite.num_cells())
+            assert ep.episode_index in range(suite.episodes_per_cell)
+
+    def test_runner_perturbation_config_matches_lhs_cell(self) -> None:
+        # The Runner stores the originating cell's perturbation values
+        # on every Episode. For LHS, that mapping must be the LHS cell
+        # produced by Suite.cells(), with all per-axis values inside
+        # the declared ranges.
+        from gauntlet.runner import Runner
+
+        suite = load_suite_from_string(self._LHS_RUNNER_YAML)
+        runner = Runner(n_workers=1, env_factory=_make_fast_env)
+        episodes = runner.run(policy_factory=_make_random_policy, suite=suite)
+
+        cell_values = {cell.index: dict(cell.values) for cell in suite.cells()}
+        for ep in episodes:
+            assert ep.perturbation_config == cell_values[ep.cell_index]
+            for axis_name, value in ep.perturbation_config.items():
+                spec = suite.axes[axis_name]
+                assert spec.low is not None
+                assert spec.high is not None
+                # u in [0, 1) -> value < high; allow == high only as a
+                # floating-point safety net (the algorithm cannot reach
+                # u == 1.0).
+                assert spec.low <= value <= spec.high
