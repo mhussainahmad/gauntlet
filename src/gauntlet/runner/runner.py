@@ -67,6 +67,7 @@ from gauntlet.env.registry import get_env_factory, registered_envs
 from gauntlet.policy.base import Policy
 from gauntlet.runner.episode import Episode
 from gauntlet.runner.worker import (
+    VideoConfig,
     WorkerInitArgs,
     WorkItem,
     execute_one,
@@ -93,6 +94,10 @@ class Runner:
         env_factory: Callable[[], GauntletEnv] | None = None,
         start_method: str = "spawn",
         trajectory_dir: Path | None = None,
+        record_video: bool = False,
+        video_dir: Path | None = None,
+        video_fps: int = 30,
+        record_only_failures: bool = False,
     ) -> None:
         """Configure the runner.
 
@@ -124,9 +129,39 @@ class Runner:
                 *after* the :class:`Episode` is built, so the Episode
                 list returned by :meth:`run` is the same in both cases.
                 The directory is created on :meth:`run` entry.
+            record_video: When ``True`` the runner buffers ``obs["image"]``
+                per step and writes one MP4 per episode via
+                :class:`gauntlet.runner.video.VideoWriter`. The env MUST
+                expose ``obs["image"]`` (i.e. constructed with
+                ``render_in_obs=True``); otherwise a clear
+                :class:`ValueError` is raised inside the worker on the
+                first reset. Requires the optional ``[video]`` extra
+                (``pip install "gauntlet[video]"``); the :class:`VideoWriter`
+                lazy-imports ``imageio`` and surfaces a clear ``ImportError``
+                with the install hint if the extra is missing. Default
+                ``False`` keeps in-memory + on-disk behaviour byte-
+                identical to the pre-PR runner.
+            video_dir: Directory to write per-episode MP4s into. Ignored
+                unless ``record_video=True``. Defaults to
+                ``trajectory_dir / "videos"`` when ``trajectory_dir`` is
+                set, else falls back to ``Path("videos")``. The
+                :attr:`gauntlet.runner.Episode.video_path` field is the
+                MP4 path *relative* to ``video_dir.parent`` so the HTML
+                report can embed ``<video src="videos/...mp4">`` without
+                a web server. For the embed to work the user must keep
+                the HTML report alongside the videos directory.
+            video_fps: Output framerate for the MP4 encoder. Must be a
+                positive integer. Default 30.
+            record_only_failures: Opt-in flag that suppresses MP4 writes
+                for ``success=True`` episodes (saves disk on long
+                sweeps). The frame buffer still grows during the
+                rollout because success is unknown until
+                ``info["success"]`` arrives; only the *write* is gated.
+                Default ``False`` — every episode gets an MP4.
 
         Raises:
-            ValueError: If ``n_workers < 1`` or ``start_method != "spawn"``.
+            ValueError: If ``n_workers < 1``, ``start_method != "spawn"``,
+                or ``video_fps`` is not a positive int.
         """
         if n_workers < 1:
             raise ValueError(
@@ -139,10 +174,16 @@ class Runner:
             raise ValueError(
                 f"start_method must be 'spawn'; got {start_method!r}. MuJoCo is not fork-safe."
             )
+        if record_video and (not isinstance(video_fps, int) or video_fps <= 0):
+            raise ValueError(f"video_fps must be a positive int; got {video_fps!r}.")
         self._n_workers = n_workers
         self._env_factory = env_factory
         self._start_method = start_method
         self._trajectory_dir = trajectory_dir
+        self._record_video = record_video
+        self._video_dir = video_dir
+        self._video_fps = video_fps
+        self._record_only_failures = record_only_failures
 
     # ------------------------------------------------------------------
     # Public entry point.
@@ -203,11 +244,22 @@ class Runner:
         if self._trajectory_dir is not None:
             self._trajectory_dir.mkdir(parents=True, exist_ok=True)
 
+        # Resolve the video config in the parent process so workers
+        # never have to mkdir or pick a default path. ``None`` keeps
+        # the byte-identical opt-out path through ``execute_one``.
+        video_config = self._resolve_video_config()
+        if video_config is not None:
+            video_config.video_dir.mkdir(parents=True, exist_ok=True)
+
         work_items = self._build_work_items(suite)
         if self._n_workers == 1:
-            episodes = self._run_in_process(env_factory, policy_factory, work_items)
+            episodes = self._run_in_process(
+                env_factory, policy_factory, work_items, video_config=video_config
+            )
         else:
-            episodes = self._run_pool(env_factory, policy_factory, work_items)
+            episodes = self._run_pool(
+                env_factory, policy_factory, work_items, video_config=video_config
+            )
 
         # Stable output order — independent of worker completion order.
         episodes.sort(key=lambda ep: (ep.cell_index, ep.episode_index))
@@ -286,11 +338,36 @@ class Runner:
     # Execution paths.
     # ------------------------------------------------------------------
 
+    def _resolve_video_config(self) -> VideoConfig | None:
+        """Build the per-run video configuration, or ``None`` if disabled.
+
+        Resolved once in the parent process so workers receive a
+        ready-to-use config (no path-defaulting in the worker hot
+        path). Default ``video_dir`` strategy mirrors the
+        ``trajectory_dir / "videos"`` convention so a single
+        ``Runner(record_video=True, trajectory_dir=...)`` Just Works.
+        """
+        if not self._record_video:
+            return None
+        if self._video_dir is not None:
+            video_dir = self._video_dir
+        elif self._trajectory_dir is not None:
+            video_dir = self._trajectory_dir / "videos"
+        else:
+            video_dir = Path("videos")
+        return VideoConfig(
+            video_dir=video_dir,
+            fps=self._video_fps,
+            record_only_failures=self._record_only_failures,
+        )
+
     def _run_in_process(
         self,
         env_factory: Callable[[], GauntletEnv],
         policy_factory: Callable[[], Policy],
         work_items: list[WorkItem],
+        *,
+        video_config: VideoConfig | None,
     ) -> list[Episode]:
         """Single-process fast path. Loads the env once, reuses it.
 
@@ -301,7 +378,13 @@ class Runner:
         env = env_factory()
         try:
             return [
-                execute_one(env, policy_factory, item, trajectory_dir=self._trajectory_dir)
+                execute_one(
+                    env,
+                    policy_factory,
+                    item,
+                    trajectory_dir=self._trajectory_dir,
+                    video_config=video_config,
+                )
                 for item in work_items
             ]
         finally:
@@ -312,6 +395,8 @@ class Runner:
         env_factory: Callable[[], GauntletEnv],
         policy_factory: Callable[[], Policy],
         work_items: list[WorkItem],
+        *,
+        video_config: VideoConfig | None,
     ) -> list[Episode]:
         """Multiprocessing path. ``spawn`` start method only.
 
@@ -325,6 +410,7 @@ class Runner:
             env_factory=env_factory,
             policy_factory=policy_factory,
             trajectory_dir=self._trajectory_dir,
+            video_config=video_config,
         )
         with ctx.Pool(
             processes=self._n_workers,

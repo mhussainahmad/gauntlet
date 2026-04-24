@@ -49,7 +49,7 @@ jobs:
         run: uv run mypy
 
       - name: Run tests (excludes extras-gated markers)
-        run: uv run pytest -m "not hf and not lerobot and not monitor and not pybullet and not genesis and not ros2 and not isaac"
+        run: uv run pytest -m "not hf and not lerobot and not monitor and not pybullet and not genesis and not ros2 and not isaac and not video"
 
   hf-tests:
     name: hf tests (py${{ matrix.python-version }})
@@ -130,6 +130,38 @@ jobs:
 
       - name: Run monitor-marked tests
         run: uv run pytest -m monitor
+
+  video-tests:
+    # Polish task — rollout MP4 video recording. The [video] extra pulls
+    # imageio[ffmpeg], which bundles a static ffmpeg binary so no system
+    # ffmpeg is needed. The job mirrors monitor-tests / pybullet-tests:
+    # install the partner extra + dev group, then run only marker-gated
+    # tests under tests/video/. The default job excludes the ``video``
+    # marker so this is the sole runner for those tests.
+    name: video-tests (imageio[ffmpeg], py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Sync dependencies (with [video] extra + video-dev group)
+        run: uv sync --extra video --group video-dev --python ${{ matrix.python-version }}
+
+      - name: Run video-marked tests
+        run: uv run pytest -m video tests/video/ -q
 
   pybullet-tests:
     name: pybullet backend tests (py${{ matrix.python-version }})
