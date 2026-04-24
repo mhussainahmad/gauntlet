@@ -26,6 +26,15 @@ Extensibility:
   is unbounded so it round-trips Python's ``SeedSequence.entropy``, which
   can exceed 64 bits). The Runner uses it to record ``master_seed`` for
   reproducibility of None-seed runs.
+* ``video_path`` (Polish "rollout MP4 video recording") is an optional
+  string carrying the relative path of an MP4 dumped by the runner when
+  the user opts in via ``Runner(record_video=True)``. The default is
+  ``None`` so old JSONs (pre-PR Episode dicts) load cleanly under the
+  field default. A *new* Episode always emits ``"video_path": null``
+  when no video is recorded, which is semantically inert; an older
+  ``gauntlet`` reader that lacks the field WILL reject the JSON because
+  of ``extra="forbid"`` — that is the standard schema-addition trade-off
+  documented here so it does not surprise downstream consumers.
 """
 
 from __future__ import annotations
@@ -65,3 +74,14 @@ class Episode(BaseModel):
     # seed echo, etc.). Task 7 will add reporting helpers that read keys
     # from here without changing the schema above.
     metadata: dict[str, float | int | str | bool] = Field(default_factory=dict)
+
+    # Optional path to an MP4 recording of this episode. Populated only
+    # when the user opts in via ``Runner(record_video=True)``. Stored as
+    # a string (not :class:`pathlib.Path`) so the schema round-trips
+    # losslessly through pydantic's JSON mode. The path is always
+    # *relative* — typically ``"videos/episode_cell{NNNN}_ep{NNNN}_seed
+    # {S}.mp4"`` relative to the run output directory — so the HTML
+    # report can embed it via ``<video src="{video_path}">`` without a
+    # web server. Default ``None`` keeps the field semantically inert
+    # for the byte-identical opt-out path.
+    video_path: str | None = None

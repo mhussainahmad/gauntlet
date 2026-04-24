@@ -115,6 +115,18 @@ ros2 = []
 isaac = [
     "isaacsim>=5.0,<6",
 ]
+# Independent extra for the Polish "rollout MP4 video recording" feature.
+# imageio>=2.34 is the first release with the v3 API stabilised; the
+# [ffmpeg] extra pulls ``imageio-ffmpeg`` which bundles a static ffmpeg
+# binary so users do NOT need a system ffmpeg install. CPU-only,
+# manylinux/macOS/Windows wheels. Lazy-imported inside
+# :class:`gauntlet.runner.video.VideoWriter` so the default
+# (extras-free) job never sees imageio at import time. Optional —
+# ``Runner(record_video=False)`` (the default) does not touch this
+# extra.
+video = [
+    "imageio[ffmpeg]>=2.34,<3",
+]
 
 [project.scripts]
 gauntlet = "gauntlet.cli:app"
@@ -174,6 +186,14 @@ ros2-dev = [
 # in conftest.py rather than pytest-mock fixtures, but having
 # pytest-mock available keeps future test additions trivial.
 isaac-dev = [
+    {include-group = "dev"},
+    "pytest-mock>=3.12,<4",
+]
+# CI-only group for the video pytest job — pulls dev + the partner
+# [video] extra at the workflow level. pytest-mock is included for
+# parity with the other backend dev groups so future test additions
+# can mock at module boundaries without an extra group bump.
+video-dev = [
     {include-group = "dev"},
     "pytest-mock>=3.12,<4",
 ]
@@ -401,6 +421,18 @@ module = [
 ]
 ignore_missing_imports = true
 
+# imageio (and its bundled imageio-ffmpeg backend) ships type stubs only
+# for a subset of its public surface — the v3 ``imread`` / ``imwrite``
+# helpers we use are typed as ``Any`` even when the package is
+# installed. The [video] extra is opt-in (default jobs never install
+# it) so the import-check on ``gauntlet.runner.video`` must succeed in
+# both states; ignore_missing_imports covers the not-installed default
+# job, and the strict-mode ``Any``-narrowing inside ``video.py`` is the
+# normal FFI-boundary carve-out per spec §6.
+[[tool.mypy.overrides]]
+module = ["imageio", "imageio.*", "imageio_ffmpeg", "imageio_ffmpeg.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 minversion = "8.0"
 addopts = [
@@ -419,6 +451,7 @@ markers = [
     "genesis: tests that require the [genesis] extra (genesis-world>=0.4, torch)",
     "ros2: tests that require the [ros2] extra (rclpy mocked at the module boundary)",
     "isaac: tests that require a real Isaac Sim install (isaacsim>=5.0) and a CUDA GPU; the default tests/isaac/ suite is mock-driven and unmarked",
+    "video: tests that require the [video] extra (imageio[ffmpeg]>=2.34) for MP4 rollout recording",
 ]
 
 [tool.coverage.run]

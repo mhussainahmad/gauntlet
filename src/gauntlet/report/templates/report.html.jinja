@@ -155,6 +155,28 @@ Data-embed conventions:
     font-weight: 600;
     padding: 4px 0;
   }
+  /* Polish: rollout MP4 video recording. Each video element is sized
+     to thumbnail width (240px) so the failure-clusters table stays
+     scannable. ``preload="metadata"`` keeps the page lightweight —
+     the browser fetches just the MP4 header until the user clicks
+     play. ``muted`` is required to autoplay-on-hover in some
+     browsers; we leave autoplay off here so the user is in charge. */
+  .video-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .video-list video {
+    width: 240px;
+    max-width: 100%;
+    border-radius: 4px;
+    background: #000;
+  }
+  .video-empty {
+    color: var(--fg-muted);
+    font-style: italic;
+    font-size: 0.85rem;
+  }
 </style>
 </head>
 <body>
@@ -187,6 +209,13 @@ Data-embed conventions:
 </section>
 
 {# ─── 2. Failure clusters — leads the report, per §6 ─── #}
+{# When ANY cluster has at least one ``video_paths`` entry, we render
+   a "Failed-rollout videos" column (Polish "rollout MP4 video
+   recording" feature). The column is suppressed entirely when no
+   cluster carries video — keeps the no-video report visually
+   identical to the pre-PR layout. #}
+{% set any_cluster_video = report.failure_clusters
+   and report.failure_clusters | selectattr('video_paths') | list | length > 0 %}
 <section>
   <h2>Where it failed</h2>
   {% if report.failure_clusters %}
@@ -198,6 +227,7 @@ Data-embed conventions:
           <th class="num">n</th>
           <th class="num">Failure rate</th>
           <th class="num">Lift (×)</th>
+          {% if any_cluster_video %}<th>Failed-rollout videos</th>{% endif %}
         </tr>
       </thead>
       <tbody>
@@ -215,6 +245,21 @@ Data-embed conventions:
           <td class="num">{{ cluster.n_episodes }}</td>
           <td class="num">{{ '%.1f'|format(cluster.failure_rate * 100) }}%</td>
           <td class="num">{{ '%.2f'|format(cluster.lift) }}×</td>
+          {% if any_cluster_video %}
+          <td>
+            {% if cluster.video_paths %}
+            <div class="video-list">
+              {% for path in cluster.video_paths %}
+              <video controls preload="metadata" muted>
+                <source src="{{ path }}" type="video/mp4">
+              </video>
+              {% endfor %}
+            </div>
+            {% else %}
+            <span class="video-empty">no video</span>
+            {% endif %}
+          </td>
+          {% endif %}
         </tr>
         {% endfor %}
       </tbody>
@@ -285,6 +330,11 @@ Data-embed conventions:
 {% endif %}
 
 {# ─── 5. Per-cell wall-of-numbers (collapsed by §6) ─── #}
+{# Same conditional-column pattern as the failure-clusters table: when
+   ANY per-cell row carries video, render an extra column; otherwise
+   the table is byte-identical to pre-PR for backwards-compat tests. #}
+{% set any_cell_video = report.per_cell
+   and report.per_cell | selectattr('video_paths') | list | length > 0 %}
 <section>
   <details>
     <summary>Per-cell breakdown ({{ report.per_cell|length }} cells) — expand for the full table</summary>
@@ -296,6 +346,7 @@ Data-embed conventions:
             <th>Perturbation config</th>
             <th class="num">n</th>
             <th class="num">Success rate</th>
+            {% if any_cell_video %}<th>Rollout videos</th>{% endif %}
           </tr>
         </thead>
         <tbody>
@@ -312,6 +363,21 @@ Data-embed conventions:
             </td>
             <td class="num">{{ cell.n_episodes }}</td>
             <td class="num">{{ '%.1f'|format(cell.success_rate * 100) }}%</td>
+            {% if any_cell_video %}
+            <td>
+              {% if cell.video_paths %}
+              <div class="video-list">
+                {% for path in cell.video_paths %}
+                <video controls preload="metadata" muted>
+                  <source src="{{ path }}" type="video/mp4">
+                </video>
+                {% endfor %}
+              </div>
+              {% else %}
+              <span class="video-empty">no video</span>
+              {% endif %}
+            </td>
+            {% endif %}
           </tr>
           {% endfor %}
         </tbody>

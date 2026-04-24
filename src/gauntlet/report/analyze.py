@@ -115,6 +115,12 @@ def _per_cell_breakdowns(episodes: list[Episode]) -> list[CellBreakdown]:
     ``cell_index`` ascending. Cell-id collisions across distinct configs
     (which the Runner never produces) become separate entries — the
     sort key is just the index, so order is still stable.
+
+    ``video_paths`` is populated from ``Episode.video_path`` for any
+    episodes that carry one (Polish "rollout video recording"
+    feature). Order matches the input ``episodes`` enumeration order
+    so re-running the analysis on the same Episode list is byte-
+    identical.
     """
     groups: dict[tuple[int, frozenset[tuple[str, float]]], list[Episode]] = defaultdict(list)
     configs: dict[tuple[int, frozenset[tuple[str, float]]], dict[str, float]] = {}
@@ -130,6 +136,7 @@ def _per_cell_breakdowns(episodes: list[Episode]) -> list[CellBreakdown]:
         eps = groups[key]
         n = len(eps)
         n_success = sum(1 for e in eps if e.success)
+        videos = [e.video_path for e in eps if e.video_path is not None]
         rows.append(
             CellBreakdown(
                 cell_index=key[0],
@@ -137,6 +144,7 @@ def _per_cell_breakdowns(episodes: list[Episode]) -> list[CellBreakdown]:
                 n_episodes=n,
                 n_success=n_success,
                 success_rate=n_success / n,
+                video_paths=videos,
             )
         )
     return rows
@@ -170,6 +178,12 @@ def _failure_clusters(
     for axis_a, axis_b in itertools.combinations(axis_names, 2):
         # (value_a, value_b) -> (n_total, n_success)
         pair_counts: dict[tuple[float, float], list[int]] = defaultdict(lambda: [0, 0])
+        # (value_a, value_b) -> [video_path, ...] for failed episodes
+        # only. Tracked separately so the cluster surfaces *actionable*
+        # videos: the "failed cluster" table is the first place a human
+        # looks when reading a report. Successful videos belong on the
+        # per-cell row, not here.
+        pair_videos: dict[tuple[float, float], list[str]] = defaultdict(list)
         for ep in episodes:
             if axis_a not in ep.perturbation_config or axis_b not in ep.perturbation_config:
                 continue
@@ -179,6 +193,8 @@ def _failure_clusters(
             bucket[0] += 1
             if ep.success:
                 bucket[1] += 1
+            elif ep.video_path is not None:
+                pair_videos[(va, vb)].append(ep.video_path)
 
         for (va, vb), (n_total, n_success) in pair_counts.items():
             if n_total < min_cluster_size:
@@ -193,6 +209,7 @@ def _failure_clusters(
                     n_success=n_success,
                     failure_rate=failure_rate,
                     lift=failure_rate / baseline_failure_rate,
+                    video_paths=list(pair_videos.get((va, vb), [])),
                 )
             )
 

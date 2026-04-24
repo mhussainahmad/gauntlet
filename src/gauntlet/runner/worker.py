@@ -57,8 +57,10 @@ from numpy.typing import NDArray
 from gauntlet.env.base import GauntletEnv
 from gauntlet.policy.base import Policy, ResettablePolicy
 from gauntlet.runner.episode import Episode
+from gauntlet.runner.video import VideoWriter, video_path_for
 
 __all__ = [
+    "VideoConfig",
     "WorkItem",
     "WorkerInitArgs",
     "execute_one",
@@ -68,6 +70,41 @@ __all__ = [
     "trajectory_path_for",
     "write_trajectory_npz",
 ]
+
+
+# ----------------------------------------------------------------------------
+# Video recording configuration — opt-in side-channel.
+# ----------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class VideoConfig:
+    """Per-run video recording configuration.
+
+    All fields are picklable so the Runner can ship one ``VideoConfig``
+    across the spawn boundary into every worker. ``video_dir`` is
+    resolved by the Runner (relative paths are anchored to the run
+    output dir before serialisation).
+
+    Attributes:
+        video_dir: Directory for per-episode MP4s. The Runner mkdirs it
+            once on entry.
+        fps: Output framerate handed to :class:`VideoWriter`.
+        record_only_failures: When True, only ``success=False``
+            episodes get an MP4. The frame buffer is built either way
+            because success is unknown until the rollout ends; only the
+            *write* is suppressed.
+        relative_to: When set, ``Episode.video_path`` is the MP4 path
+            relative to this anchor. Defaults to ``video_dir.parent``,
+            which makes the embed-from-HTML path
+            ``"videos/episode_*.mp4"`` work when the HTML lives next to
+            the videos directory.
+    """
+
+    video_dir: Path
+    fps: int = 30
+    record_only_failures: bool = False
+    relative_to: Path | None = None
 
 
 # ----------------------------------------------------------------------------
@@ -154,6 +191,14 @@ class WorkerInitArgs:
     # byte-identical to Phase 1. When a Path is supplied the worker emits
     # one NPZ per episode following the ``cell_NNNN_ep_NNNN.npz`` scheme.
     trajectory_dir: Path | None = None
+    # Optional per-episode MP4 video config. ``None`` means "no video"
+    # — the runner stays byte-identical to the pre-PR behaviour. When
+    # set, every worker accumulates ``obs["image"]`` per step and
+    # writes one MP4 per episode (or only failures when
+    # ``record_only_failures=True``). Requires the env to expose
+    # ``obs["image"]`` (i.e. ``render_in_obs=True``); enforced at the
+    # first reset.
+    video_config: VideoConfig | None = None
 
 
 # Worker-local cache. Populated by ``pool_initializer``; read by
@@ -182,6 +227,7 @@ def pool_initializer(args: WorkerInitArgs) -> None:
     _WORKER_STATE["env"] = env
     _WORKER_STATE["policy_factory"] = args.policy_factory
     _WORKER_STATE["trajectory_dir"] = args.trajectory_dir
+    _WORKER_STATE["video_config"] = args.video_config
 
 
 # ----------------------------------------------------------------------------
@@ -270,6 +316,7 @@ def execute_one(
     item: WorkItem,
     *,
     trajectory_dir: Path | None = None,
+    video_config: VideoConfig | None = None,
 ) -> Episode:
     """Drive one (cell, episode) rollout to completion.
 
@@ -300,6 +347,17 @@ def execute_one(
     :class:`Episode` is built, so the in-memory Episode is byte-identical
     to the ``trajectory_dir=None`` path. The NPZ write is a pure
     side-effect outside the determinism contract.
+
+    Video capture contract (Polish, additive):
+    When ``video_config`` is a :class:`VideoConfig`, the worker captures
+    ``obs["image"]`` per step (requires the env was constructed with
+    ``render_in_obs=True`` — checked at the first reset) and writes one
+    MP4 per episode after the :class:`Episode` is built. The
+    :attr:`Episode.video_path` field is populated with the relative
+    path. ``record_only_failures=True`` suppresses the *write* but the
+    buffer still grows during the rollout. The default
+    ``video_config=None`` keeps in-memory memory and disk I/O byte-
+    identical to the pre-PR behaviour.
     """
     env.restore_baseline()
     for name, value in item.perturbation_values.items():
@@ -324,6 +382,20 @@ def execute_one(
         for k in obs:
             obs_buffer[k] = []
 
+    # Video frame buffer. Allocated only when ``video_config`` is set;
+    # the env-side contract (``render_in_obs=True``) is checked here
+    # using the public observation keys, never the backend's private
+    # attribute, so MuJoCo / PyBullet / Genesis backends are all
+    # supported uniformly. Record_only_failures still requires the
+    # buffer because success is not known until the rollout ends.
+    record_video = video_config is not None
+    frame_buffer: list[NDArray[np.uint8]] = []
+    if record_video and "image" not in obs:
+        raise ValueError(
+            "record_video=True requires the env to expose obs['image']; "
+            "construct with render_in_obs=True"
+        )
+
     total_reward = 0.0
     step_count = 0
     terminated = False
@@ -339,11 +411,47 @@ def execute_one(
             for k, v in obs.items():
                 obs_buffer[k].append(np.asarray(v, dtype=np.float64).copy())
             action_buffer.append(np.asarray(action, dtype=np.float64).copy())
+        if record_video:
+            # Defensive copy so a subsequent env.step that recycles the
+            # render buffer cannot mutate what we will encode later.
+            frame_buffer.append(np.asarray(obs["image"], dtype=np.uint8).copy())
         obs, reward, terminated, truncated, info = env.step(action)
         total_reward += float(reward)
         step_count += 1
 
     success = bool(info.get("success", False))
+
+    # Compute the video path BEFORE Episode construction so the field
+    # can be set in the same constructor call (keeping the schema
+    # write-once). The path is None unless we will actually write a
+    # file — i.e. video_config is set AND (record_only_failures is
+    # False OR the rollout failed) AND the rollout produced at least
+    # one frame. A T=0 rollout has nothing to encode; the Episode
+    # honestly carries ``video_path=None`` so downstream HTML never
+    # links a missing file.
+    relative_video_path: str | None = None
+    will_write_video = (
+        video_config is not None
+        and (not video_config.record_only_failures or not success)
+        and bool(frame_buffer)
+    )
+    if video_config is not None and will_write_video:
+        absolute = video_path_for(
+            video_config.video_dir,
+            cell_index=item.cell_index,
+            episode_index=item.episode_index,
+            seed=env_seed,
+        )
+        anchor = video_config.relative_to or video_config.video_dir.parent
+        try:
+            relative_video_path = str(absolute.relative_to(anchor))
+        except ValueError:
+            # ``video_dir`` is not under ``relative_to``; fall back to
+            # the absolute path string. The HTML embed will still work
+            # if the user opens the file from the same machine, and
+            # the user was warned in the Runner docstring.
+            relative_video_path = str(absolute)
+
     episode = Episode(
         suite_name=item.suite_name,
         cell_index=item.cell_index,
@@ -360,6 +468,7 @@ def execute_one(
             "n_cells": int(item.n_cells),
             "episodes_per_cell": int(item.episodes_per_cell),
         },
+        video_path=relative_video_path,
     )
 
     if record_trajectory:
@@ -387,6 +496,20 @@ def execute_one(
             episode_index=item.episode_index,
         )
 
+    if video_config is not None and will_write_video:
+        # Re-derive the absolute path here so this branch does not have
+        # to thread it through the Episode construction block above.
+        # ``will_write_video`` already guards on a non-empty buffer +
+        # the record_only_failures policy, so the encode is always
+        # safe to call.
+        absolute = video_path_for(
+            video_config.video_dir,
+            cell_index=item.cell_index,
+            episode_index=item.episode_index,
+            seed=env_seed,
+        )
+        VideoWriter(fps=video_config.fps).write(absolute, frame_buffer)
+
     return episode
 
 
@@ -412,4 +535,14 @@ def run_work_item(item: WorkItem) -> Episode:
     # pre-Phase-2 form; default to None so the key-missing path is the
     # byte-identical one.
     trajectory_dir: Path | None = _WORKER_STATE.get("trajectory_dir")
-    return execute_one(env, policy_factory, item, trajectory_dir=trajectory_dir)
+    # ``video_config`` is the Polish-task addition. Same key-missing
+    # safety net as ``trajectory_dir``: a worker initialised by an
+    # older code path runs without video recording.
+    video_config: VideoConfig | None = _WORKER_STATE.get("video_config")
+    return execute_one(
+        env,
+        policy_factory,
+        item,
+        trajectory_dir=trajectory_dir,
+        video_config=video_config,
+    )
