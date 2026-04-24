@@ -167,3 +167,41 @@ def test_heavy_backend_modules_not_imported_by_register_envs() -> None:
         f"subprocess failed: stdout={result.stdout!r} stderr={result.stderr!r}"
     )
     assert "OK" in result.stdout
+
+
+def test_bare_import_gauntlet_registers_all_ids() -> None:
+    """A bare ``import gauntlet`` registers every shipped backend.
+
+    Run in a clean subprocess: the in-session module cache already has
+    ``gauntlet`` loaded from the test-collection step, so an in-process
+    assertion would tautologically pass. The subprocess proves the
+    registration side effect actually fires from a cold ``import``.
+    """
+    script = (
+        "import gymnasium as gym\n"
+        "import gauntlet  # noqa: F401\n"
+        f"ids = {list(_ALL_IDS)!r}\n"
+        "missing = [env_id for env_id in ids if env_id not in gym.envs.registry]\n"
+        "if missing:\n"
+        "    print('MISSING:' + ','.join(missing))\n"
+        "    raise SystemExit(1)\n"
+        "print('OK')\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, (
+        f"subprocess failed: stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    assert "OK" in result.stdout
+
+
+def test_register_envs_reexported_from_top_level() -> None:
+    """``from gauntlet import register_envs`` is the public surface."""
+    import gauntlet
+
+    assert hasattr(gauntlet, "register_envs")
+    assert "register_envs" in gauntlet.__all__

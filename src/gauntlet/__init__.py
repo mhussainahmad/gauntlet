@@ -46,6 +46,15 @@ written against.
 
 from __future__ import annotations
 
+from gauntlet.env.gym_registration import register_envs
+
 __version__ = "0.1.0"
 
-__all__ = ["__version__"]
+# Register the four shipped backends with gymnasium's global registry on
+# package import — the standard gymnasium-ecosystem convention. Heavy
+# backends use string ``entry_point``s so this call does NOT pull in
+# pybullet / genesis / isaacsim. Idempotent: safe to call again from
+# tests, multiprocessing workers, or user code.
+register_envs()
+
+__all__ = ["__version__", "register_envs"]
