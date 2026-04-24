@@ -67,7 +67,11 @@ def _categorical_axis_yaml(draw: st.DrawFn) -> str:
 @st.composite
 def _well_formed_suite_yaml(draw: st.DrawFn) -> str:
     """Generate a YAML string that the loader should parse successfully."""
-    name = draw(st.text(alphabet="abcdefghijklmnopqrstuvwxyz_-", min_size=1, max_size=20))
+    # Wrap the name in double quotes so YAML always parses it as a
+    # string — bareword names like ``null`` / ``true`` would otherwise
+    # be coerced to None / bool by ``yaml.safe_load``.
+    raw_name = draw(st.text(alphabet="abcdefghijklmnopqrstuvwxyz_-", min_size=1, max_size=20))
+    name = f'"{raw_name}"'
     env = draw(_ENV_NAME)
     eps = draw(st.integers(min_value=1, max_value=3))
     seed = draw(st.one_of(st.none(), st.integers(min_value=0, max_value=2**31 - 1)))
