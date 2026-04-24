@@ -123,11 +123,21 @@ def test_empty_value_raises_override_error(name: str) -> None:
 @settings(max_examples=50, deadline=timedelta(seconds=2))
 def test_non_float_rhs_raises_override_error(name: str, junk: str) -> None:
     """A non-float RHS must surface as :class:`OverrideError`, not
-    bare :class:`ValueError` from Python's ``float`` builtin."""
+    bare :class:`ValueError` from Python's ``float`` builtin.
+
+    The parser strips whitespace around each half before parsing, so a
+    purely-whitespace junk string would actually trip the empty-RHS
+    branch instead of the float branch — also an acceptable failure
+    mode (both raise ``OverrideError``)."""
     spec = f"{name}={junk}"
     # Skip cases where the junk happens to contain '=' — that hits a
     # different branch (covered by test_multiple_equals_*).
     if "=" in junk:
+        return
+    if junk.strip() == "":
+        # Stripping leaves an empty RHS — caught by the empty-value branch.
+        with pytest.raises(OverrideError, match="must be non-empty"):
+            parse_override(spec)
         return
     with pytest.raises(OverrideError, match="not a valid float"):
         parse_override(spec)
