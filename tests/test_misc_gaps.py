@@ -18,7 +18,6 @@ second.
 from __future__ import annotations
 
 import json
-import os
 import sys
 import textwrap
 from pathlib import Path
@@ -56,52 +55,59 @@ def test_parse_override_rejects_whitespace_only_string() -> None:
 # ──────────────────────────────────────────────────────────────────────
 
 
-@pytest.mark.skipif(
-    os.geteuid() == 0,
-    reason="root bypasses POSIX file permissions; chmod-0 would not block reads.",
-)
-def test_run_unreadable_suite_file_surfaces_os_error(runner: CliRunner, tmp_path: Path) -> None:
-    """A suite file that exists but cannot be opened (chmod 000) surfaces
-    the OSError branch in ``cli.run`` as ``could not read file``."""
-    suite_path = tmp_path / "no-read.yaml"
+def test_run_os_error_reading_suite_surfaces_clean_message(
+    runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``cli.run`` wraps any ``OSError`` raised by ``load_suite`` (eg. a
+    permission error or I/O failure on a real file) into the documented
+    ``could not read file`` user-facing error.
+
+    Patching the loader's :mod:`yaml` module is more reliable than
+    ``chmod 000`` because typer's ``Argument`` does its own readability
+    check on the path BEFORE our code runs and rejects an unreadable
+    file with exit code 2 — which would mean the OSError branch in
+    ``cli.run`` never executes.
+    """
+    suite_path = tmp_path / "real.yaml"
     suite_path.write_text("name: x\nenv: tabletop\n", encoding="utf-8")
-    suite_path.chmod(0o000)
     out_dir = tmp_path / "out"
 
-    try:
-        result = runner.invoke(
-            app,
-            [
-                "run",
-                str(suite_path),
-                "-p",
-                "random",
-                "-o",
-                str(out_dir),
-                "--env-max-steps",
-                "5",
-            ],
-        )
-        assert result.exit_code != 0
-        # Either branch (OSError on the read OR "could not read file"
-        # path) is acceptable — both surface the file's name.
-        assert str(suite_path) in result.stderr or "read" in result.stderr.lower()
-    finally:
-        suite_path.chmod(0o644)
+    from gauntlet.suite import loader as loader_mod
+
+    def _raise_os_error(*args: object, **kwargs: object) -> object:
+        raise PermissionError("simulated read failure")
+
+    monkeypatch.setattr(loader_mod, "yaml", type("Y", (), {"safe_load": _raise_os_error}))
+
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            str(suite_path),
+            "-p",
+            "random",
+            "-o",
+            str(out_dir),
+            "--env-max-steps",
+            "5",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "could not read file" in result.stderr
 
 
-@pytest.mark.skipif(
-    os.geteuid() == 0,
-    reason="root bypasses POSIX file permissions; chmod-0 would not block reads.",
-)
-def test_replay_unreadable_suite_file_surfaces_os_error(runner: CliRunner, tmp_path: Path) -> None:
-    """The replay subcommand has its own OSError branch on suite read.
-    Same chmod trick, same expected user-facing error shape."""
-    suite_path = tmp_path / "no-read.yaml"
+def test_replay_os_error_reading_suite_surfaces_clean_message(
+    runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same OSError-rewrap contract as ``run``, but on the replay
+    command's own ``except OSError`` branch (line 888-889)."""
+    from gauntlet.suite import loader as loader_mod
+
+    suite_path = tmp_path / "real.yaml"
     suite_path.write_text(
         textwrap.dedent(
             """\
-            name: replay-no-read
+            name: replay-os-error
             env: tabletop
             seed: 1
             episodes_per_cell: 1
@@ -113,10 +119,9 @@ def test_replay_unreadable_suite_file_surfaces_os_error(runner: CliRunner, tmp_p
         encoding="utf-8",
     )
 
-    # Need a real episodes.json so we get past the earlier guards.
     eps_path = tmp_path / "eps.json"
     ep = Episode(
-        suite_name="replay-no-read",
+        suite_name="replay-os-error",
         cell_index=0,
         episode_index=0,
         seed=0,
@@ -129,27 +134,98 @@ def test_replay_unreadable_suite_file_surfaces_os_error(runner: CliRunner, tmp_p
     )
     eps_path.write_text(json.dumps([ep.model_dump(mode="json")]) + "\n", encoding="utf-8")
 
-    suite_path.chmod(0o000)
-    try:
-        result = runner.invoke(
-            app,
-            [
-                "replay",
-                str(eps_path),
-                "--suite",
-                str(suite_path),
-                "--policy",
-                "scripted",
-                "--episode-id",
-                "0:0",
-                "--env-max-steps",
-                "5",
-            ],
-        )
-        assert result.exit_code != 0
-        assert str(suite_path) in result.stderr or "read" in result.stderr.lower()
-    finally:
-        suite_path.chmod(0o644)
+    def _raise_os_error(*args: object, **kwargs: object) -> object:
+        raise PermissionError("simulated read failure")
+
+    monkeypatch.setattr(loader_mod, "yaml", type("Y", (), {"safe_load": _raise_os_error}))
+
+    result = runner.invoke(
+        app,
+        [
+            "replay",
+            str(eps_path),
+            "--suite",
+            str(suite_path),
+            "--policy",
+            "scripted",
+            "--episode-id",
+            "0:0",
+            "--env-max-steps",
+            "5",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "could not read file" in result.stderr
+
+
+# ──────────────────────────────────────────────────────────────────────
+# CLI replay: malformed --override (lines 901-902 — the OverrideError
+# rewrap branch the existing replay tests do not exercise).
+# ──────────────────────────────────────────────────────────────────────
+
+
+def test_replay_cli_rejects_malformed_override_spec(runner: CliRunner, tmp_path: Path) -> None:
+    """An override missing the ``=`` separator triggers the
+    ``OverrideError`` re-raise path inside ``cli.replay``."""
+    from gauntlet.policy.scripted import ScriptedPolicy
+    from gauntlet.runner import Runner
+    from gauntlet.suite.schema import AxisSpec, Suite
+
+    def _env() -> object:
+        from gauntlet.env.tabletop import TabletopEnv
+
+        return TabletopEnv(max_steps=20)
+
+    suite = Suite(
+        name="malformed-override",
+        env="tabletop",
+        seed=11,
+        episodes_per_cell=1,
+        axes={"lighting_intensity": AxisSpec(values=[0.5])},
+    )
+    real_runner = Runner(n_workers=1, env_factory=_env)  # type: ignore[arg-type]
+    eps = real_runner.run(policy_factory=ScriptedPolicy, suite=suite)
+    eps_path = tmp_path / "eps.json"
+    eps_path.write_text(
+        json.dumps([e.model_dump(mode="json") for e in eps]),
+        encoding="utf-8",
+    )
+
+    suite_yaml = tmp_path / "suite.yaml"
+    suite_yaml.write_text(
+        textwrap.dedent(
+            """\
+            name: malformed-override
+            env: tabletop
+            seed: 11
+            episodes_per_cell: 1
+            axes:
+              lighting_intensity:
+                values: [0.5]
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "replay",
+            str(eps_path),
+            "--suite",
+            str(suite_yaml),
+            "--policy",
+            "scripted",
+            "--episode-id",
+            "0:0",
+            "--override",
+            "no-equals-sign",
+            "--env-max-steps",
+            "5",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "AXIS=VALUE" in result.stderr or "exactly one '='" in result.stderr
 
 
 # ──────────────────────────────────────────────────────────────────────
