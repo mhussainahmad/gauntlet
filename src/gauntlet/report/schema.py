@@ -59,6 +59,12 @@ class CellBreakdown(BaseModel):
     The Runner guarantees that all episodes sharing a ``cell_index``
     also share their ``perturbation_config``; we still group on both so
     the model is robust to hand-constructed Episode lists.
+
+    ``video_paths`` is the list of per-episode MP4 paths that the
+    Polish "rollout video recording" feature populates when
+    ``Runner(record_video=True)`` is used. Default is an empty list so
+    pre-PR Episode dicts (which have no ``video_path`` field) round-
+    trip through ``build_report`` unchanged.
     """
 
     model_config = ConfigDict(extra="forbid", ser_json_inf_nan="strings")
@@ -68,6 +74,7 @@ class CellBreakdown(BaseModel):
     n_episodes: int
     n_success: int
     success_rate: float
+    video_paths: list[str] = []
 
 
 class FailureCluster(BaseModel):
@@ -85,6 +92,10 @@ class FailureCluster(BaseModel):
     ``lift`` is ``failure_rate / baseline_failure_rate``; the
     ``failure_clusters`` list is sorted by ``lift`` descending then
     ``failure_rate`` descending for stable presentation.
+
+    ``video_paths`` is the list of MP4 paths for the failed episodes
+    inside this cluster, populated when ``Runner(record_video=True)``.
+    Default empty list — pre-PR reports round-trip unchanged.
     """
 
     model_config = ConfigDict(extra="forbid", ser_json_inf_nan="strings")
@@ -94,6 +105,7 @@ class FailureCluster(BaseModel):
     n_success: int
     failure_rate: float
     lift: float
+    video_paths: list[str] = []
 
 
 class Heatmap2D(BaseModel):
