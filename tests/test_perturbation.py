@@ -443,3 +443,90 @@ class TestSamplerReproducibility:
             v = axis.sample(rng)
             assert v == float(int(v))
             assert 0 <= int(v) <= N_DISTRACTOR_SLOTS
+
+
+# ----------------------------------------------------------- sampler factories
+# Phase 2.5 Task 11 — direct unit tests for the low-level make_*_sampler
+# error / int-rounding paths in ``env.perturbation.base``.
+
+
+class TestSamplerFactories:
+    """Direct tests for the make_continuous / make_int / make_categorical
+    factories. The high-level axis constructors (``lighting_intensity`` etc.)
+    already exercise the happy paths — this fills in the inverted-bound
+    rejections and the ``int`` rounding behaviour."""
+
+    def test_make_continuous_sampler_rejects_inverted_bounds(self) -> None:
+        from gauntlet.env.perturbation.base import make_continuous_sampler
+
+        with pytest.raises(ValueError, match="low must be <= high"):
+            make_continuous_sampler(low=2.0, high=1.0)
+
+    def test_make_continuous_sampler_returns_value_in_range(self) -> None:
+        from gauntlet.env.perturbation.base import make_continuous_sampler
+
+        sampler = make_continuous_sampler(low=-0.5, high=0.5)
+        rng = np.random.default_rng(0)
+        for _ in range(30):
+            v = sampler(rng)
+            assert -0.5 <= v <= 0.5
+
+    def test_make_int_sampler_rejects_inverted_bounds(self) -> None:
+        from gauntlet.env.perturbation.base import make_int_sampler
+
+        with pytest.raises(ValueError, match="low must be <= high"):
+            make_int_sampler(low=10, high=5)
+
+    def test_make_int_sampler_returns_floats_with_integer_values(self) -> None:
+        from gauntlet.env.perturbation.base import make_int_sampler
+
+        sampler = make_int_sampler(low=0, high=3)
+        rng = np.random.default_rng(0)
+        for _ in range(40):
+            v = sampler(rng)
+            assert v == float(int(v))
+            assert 0 <= int(v) <= 3
+
+    def test_make_int_sampler_inclusive_high(self) -> None:
+        from gauntlet.env.perturbation.base import make_int_sampler
+
+        sampler = make_int_sampler(low=0, high=2)
+        rng = np.random.default_rng(0)
+        seen = {int(sampler(rng)) for _ in range(200)}
+        # All three values reachable; high is inclusive.
+        assert seen == {0, 1, 2}
+
+    def test_make_categorical_sampler_rejects_empty(self) -> None:
+        from gauntlet.env.perturbation.base import make_categorical_sampler
+
+        with pytest.raises(ValueError, match="at least one"):
+            make_categorical_sampler(())
+
+    def test_make_categorical_sampler_returns_one_of_choices(self) -> None:
+        from gauntlet.env.perturbation.base import make_categorical_sampler
+
+        sampler = make_categorical_sampler((1.5, 2.5, 3.5))
+        rng = np.random.default_rng(0)
+        seen = {sampler(rng) for _ in range(60)}
+        assert seen.issubset({1.5, 2.5, 3.5})
+
+    def test_perturbation_axis_sample_delegates_to_sampler(self) -> None:
+        """The ``PerturbationAxis.sample`` convenience wrapper just calls
+        the bound sampler — verify with a tiny custom sampler that
+        returns a constant."""
+        from gauntlet.env.perturbation.base import (
+            AXIS_KIND_CONTINUOUS,
+            PerturbationAxis,
+        )
+
+        def _const_sampler(rng: np.random.Generator) -> float:
+            return 7.0
+
+        axis = PerturbationAxis(
+            name="x",
+            kind=AXIS_KIND_CONTINUOUS,
+            sampler=_const_sampler,
+            low=0.0,
+            high=10.0,
+        )
+        assert axis.sample(np.random.default_rng(0)) == 7.0
