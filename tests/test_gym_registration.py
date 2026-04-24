@@ -27,6 +27,9 @@ appear here.
 
 from __future__ import annotations
 
+import subprocess
+import sys
+
 import gymnasium as gym
 
 from gauntlet.env.gym_registration import (
@@ -36,6 +39,16 @@ from gauntlet.env.gym_registration import (
 from gauntlet.env.tabletop import TabletopEnv
 
 _TABLETOP_ID: str = "gauntlet/Tabletop-v0"
+_PYBULLET_ID: str = "gauntlet/TabletopPyBullet-v0"
+_GENESIS_ID: str = "gauntlet/TabletopGenesis-v0"
+_ISAAC_ID: str = "gauntlet/TabletopIsaac-v0"
+
+_ALL_IDS: tuple[str, ...] = (_TABLETOP_ID, _PYBULLET_ID, _GENESIS_ID, _ISAAC_ID)
+_HEAVY_BACKEND_MODULES: tuple[str, ...] = (
+    "gauntlet.env.pybullet",
+    "gauntlet.env.genesis",
+    "gauntlet.env.isaac",
+)
 
 
 def test_make_tabletop_constructs_mujoco_env() -> None:
@@ -94,3 +107,63 @@ def test_internal_registry_unchanged() -> None:
     # The MuJoCo backend has always self-registered under ``"tabletop"``;
     # the gym layer must not have moved or removed that entry.
     assert "tabletop" in registered_envs()
+
+
+def test_all_four_ids_registered() -> None:
+    """Every shipped backend has a ``gauntlet/Tabletop<...>-v0`` id."""
+    register_envs()
+    for env_id in _ALL_IDS:
+        assert env_id in gym.envs.registry, f"{env_id} missing from gym registry"
+
+
+def test_heavy_backend_specs_use_string_entry_points() -> None:
+    """String entry_points are required for lazy resolution of the heavy extras.
+
+    A direct class reference would force the optional-extra import at
+    registration time and re-introduce the ImportError that the lazy
+    pattern exists to avoid.
+    """
+    register_envs()
+    for env_id in (_PYBULLET_ID, _GENESIS_ID, _ISAAC_ID):
+        spec = gym.envs.registry[env_id]
+        assert isinstance(spec.entry_point, str), (
+            f"{env_id} entry_point is {type(spec.entry_point)!r}; must be a string for lazy import."
+        )
+        # The string must point at the real module:class — sanity check
+        # that the colon-separator convention is honoured.
+        assert ":" in spec.entry_point
+
+
+def test_heavy_backend_modules_not_imported_by_register_envs() -> None:
+    """``register_envs()`` must NOT pull pybullet / genesis / isaac into sys.modules.
+
+    Run in a clean subprocess so an earlier collection-time import (or a
+    prior test in the same session) cannot mask a regression. The check
+    is the whole point of the string-entry_point design — if any of the
+    three heavy subpackages appears in ``sys.modules`` after
+    ``import gauntlet``, a user without the corresponding extra will hit
+    an ImportError just from importing the package.
+    """
+    script = (
+        "import sys\n"
+        "import gauntlet  # noqa: F401\n"
+        "from gauntlet.env.gym_registration import register_envs\n"
+        "register_envs()\n"
+        "leaked = [m for m in "
+        f"{list(_HEAVY_BACKEND_MODULES)!r}"
+        " if m in sys.modules]\n"
+        "if leaked:\n"
+        "    print('LEAKED:' + ','.join(leaked))\n"
+        "    sys.exit(1)\n"
+        "print('OK')\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, (
+        f"subprocess failed: stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    assert "OK" in result.stdout

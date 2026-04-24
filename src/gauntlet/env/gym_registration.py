@@ -103,5 +103,24 @@ def register_envs() -> None:
         "gauntlet.env.tabletop:TabletopEnv",
         max_episode_steps=_DEFAULT_MAX_EPISODE_STEPS,
     )
+    # Heavy backends — string entry_points keep the [pybullet] / [genesis] /
+    # [isaac] subpackages OUT of sys.modules at registration time. Gymnasium
+    # resolves the import lazily inside ``gym.make(...)`` so the install-hint
+    # ImportError surfaces only when the user actually constructs the env.
+    _register_one(
+        "gauntlet/TabletopPyBullet-v0",
+        "gauntlet.env.pybullet.tabletop_pybullet:PyBulletTabletopEnv",
+        max_episode_steps=_DEFAULT_MAX_EPISODE_STEPS,
+    )
+    _register_one(
+        "gauntlet/TabletopGenesis-v0",
+        "gauntlet.env.genesis.tabletop_genesis:GenesisTabletopEnv",
+        max_episode_steps=_DEFAULT_MAX_EPISODE_STEPS,
+    )
+    _register_one(
+        "gauntlet/TabletopIsaac-v0",
+        "gauntlet.env.isaac.tabletop_isaac:IsaacSimTabletopEnv",
+        max_episode_steps=_DEFAULT_MAX_EPISODE_STEPS,
+    )
 
     _REGISTERED = True
