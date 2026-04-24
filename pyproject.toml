@@ -131,6 +131,37 @@ video = [
 [project.scripts]
 gauntlet = "gauntlet.cli:app"
 
+# Plugin discovery groups (Polish "plugin system" task).
+# See docs/polish-exploration-plugin-system.md for the full design.
+#
+# Gauntlet eats its own dogfood here: the four built-in policy adapters
+# and four built-in env backends register themselves as entry points
+# under the same groups third-party packages use. After
+# ``uv pip install -e .`` (or any pip install) the entries materialise
+# in ``importlib.metadata.entry_points()`` and
+# ``gauntlet.plugins.discover_*_plugins()`` returns them alongside any
+# real third-party plugins. The collision check in
+# ``gauntlet.plugins.warn_on_collision`` is identity-based, so the
+# dogfooded entries (which load the same class object the built-in
+# table holds) never warn.
+#
+# Heavy backends (huggingface / lerobot / pybullet / genesis / isaac)
+# stay behind their existing optional extras — the entry-point string
+# is registered but ``ep.load()`` only fires when a user references the
+# name. A user without the [hf] extra never imports torch just because
+# ``entry_points()`` is called.
+[project.entry-points."gauntlet.policies"]
+random = "gauntlet.policy.random:RandomPolicy"
+scripted = "gauntlet.policy.scripted:ScriptedPolicy"
+huggingface = "gauntlet.policy.huggingface:HuggingFacePolicy"
+lerobot = "gauntlet.policy.lerobot:LeRobotPolicy"
+
+[project.entry-points."gauntlet.envs"]
+tabletop = "gauntlet.env.tabletop:TabletopEnv"
+tabletop-pybullet = "gauntlet.env.pybullet.tabletop_pybullet:PyBulletTabletopEnv"
+tabletop-genesis = "gauntlet.env.genesis.tabletop_genesis:GenesisTabletopEnv"
+tabletop-isaac = "gauntlet.env.isaac.tabletop_isaac:IsaacSimTabletopEnv"
+
 [project.urls]
 Homepage = "https://github.com/gauntlet-eval/gauntlet"
 Issues = "https://github.com/gauntlet-eval/gauntlet/issues"
