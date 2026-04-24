@@ -195,6 +195,25 @@ class TestMultiCameraObs:
         finally:
             env.close()
 
+    def test_image_alias_is_independent_copy(self) -> None:
+        # Pin the defensive-copy contract: an in-place mutation of
+        # obs['image'] (a normalisation pass, a tensor conversion that
+        # aliases the buffer, etc.) MUST NOT corrupt
+        # obs['images'][first]. Without the .copy() in _build_obs the
+        # two would share storage and the mutation below would leak.
+        env = self._build()
+        try:
+            obs, _ = env.reset(seed=0)
+            assert obs["image"] is not obs["images"]["wrist"]
+            assert not np.shares_memory(obs["image"], obs["images"]["wrist"])
+            # Mutate every byte of the alias to a sentinel and confirm
+            # the per-cam entry is unchanged.
+            original = obs["images"]["wrist"].copy()
+            obs["image"].fill(123)
+            np.testing.assert_array_equal(obs["images"]["wrist"], original)
+        finally:
+            env.close()
+
     def test_step_preserves_multi_camera_contract(self) -> None:
         env = self._build()
         try:

@@ -709,13 +709,16 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         if self._multi_cam_enabled:
             images = self._render_obs_images()
             obs["images"] = images  # type: ignore[assignment]
-            # Legacy single-camera alias — first spec wins. Defensive copy
-            # because ``obs["images"][first]`` is the same array; some
-            # callers in-place mutate ``obs["image"]`` (e.g. the runner's
-            # video buffer at runner/worker.py:417 already calls .copy()
-            # but not every consumer does).
+            # Legacy single-camera alias — first spec wins. Defensive
+            # copy: without ``.copy()`` ``obs["image"]`` and
+            # ``obs["images"][first]`` would be the same ndarray, and
+            # any consumer that in-place mutates ``obs["image"]`` (a
+            # normalisation pass, an aliasing tensor conversion, etc.)
+            # would silently corrupt the per-cam dict. The runner's
+            # video buffer at runner/worker.py:417 already takes its
+            # own .copy() but not every downstream is so disciplined.
             first_name = self._cameras[0].name
-            obs["image"] = images[first_name]
+            obs["image"] = images[first_name].copy()
         return obs
 
     def _render_obs_image(self) -> NDArray[np.uint8]:

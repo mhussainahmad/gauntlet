@@ -834,8 +834,12 @@ class PyBulletTabletopEnv:
             images = self._render_obs_images_multi()
             obs["images"] = images  # type: ignore[assignment]
             # Backwards-compat alias to the first cam's frame — RFC §2.
+            # Defensive copy for the same reason the MuJoCo backend
+            # makes one in TabletopEnv._build_obs: prevents an in-place
+            # mutation of ``obs["image"]`` by a downstream consumer
+            # from silently corrupting ``obs["images"][first]``.
             first_name = self._cameras[0].name
-            obs["image"] = images[first_name]
+            obs["image"] = images[first_name].copy()
         return obs
 
     def _render_obs_image(self) -> NDArray[np.uint8]:

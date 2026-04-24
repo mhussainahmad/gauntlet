@@ -145,6 +145,22 @@ class TestMultiCameraObsPyBullet:
         finally:
             env.close()
 
+    def test_image_alias_is_independent_copy(self) -> None:
+        # Same defensive-copy contract as the MuJoCo backend — an in-
+        # place mutation of obs['image'] must not corrupt the per-cam
+        # entry. Pinned so a future refactor cannot regress the
+        # aliasing contract silently.
+        env = PyBulletTabletopEnv(cameras=_two_specs())
+        try:
+            obs, _ = env.reset(seed=0)
+            assert obs["image"] is not obs["images"]["wrist"]
+            assert not np.shares_memory(obs["image"], obs["images"]["wrist"])
+            original = obs["images"]["wrist"].copy()
+            obs["image"].fill(123)
+            np.testing.assert_array_equal(obs["images"]["wrist"], original)
+        finally:
+            env.close()
+
     def test_step_preserves_multi_camera_contract(self) -> None:
         env = PyBulletTabletopEnv(cameras=_two_specs())
         try:
