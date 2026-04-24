@@ -219,7 +219,24 @@ def _install_fake_isaacsim(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     for name, module in fakes.items():
         monkeypatch.setitem(sys.modules, name, module)
 
+    # The env registry is a process-global dict; re-importing
+    # ``gauntlet.env.isaac`` after the cache flush above re-runs
+    # ``register_env("tabletop-isaac", ...)`` which raises if the key
+    # is already present. Pop the key now so the next import installs
+    # cleanly. ``monkeypatch.setitem`` on a key the dict doesn't have
+    # yet would still set it, so we use direct dict manipulation +
+    # an addfinalizer to restore the registry at fixture teardown.
+    from gauntlet.env.registry import _REGISTRY  # type: ignore[attr-defined]
+
+    saved = _REGISTRY.pop("tabletop-isaac", None)
+
+    def _restore() -> None:
+        _REGISTRY.pop("tabletop-isaac", None)
+        if saved is not None:
+            _REGISTRY["tabletop-isaac"] = saved
+
     yield
+    _restore()
 
 
 # Public helpers re-exposed so individual test files import them

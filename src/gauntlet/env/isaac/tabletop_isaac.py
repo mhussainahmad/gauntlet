@@ -30,11 +30,10 @@ small ``VisualCuboid`` whose pose is overwritten via
 ``set_world_pose`` each control step. Same shape Genesis (RFC-007 §5)
 and PyBullet (RFC-005 §7.1) chose.
 
-Step 4 (this file): scaffold only — constants, ``__init__``,
-``observation_space`` / ``action_space``, ``AXIS_NAMES`` /
-``VISUAL_ONLY_AXES``, and method stubs that raise
-:class:`NotImplementedError`. Steps 5 and 6 land the body and the
-seven perturbation branches.
+Step 5 lands the body of ``reset`` / ``step`` / ``_build_obs`` (full
+state-only rollout loop); step 6 lands the seven perturbation
+branches inside ``set_perturbation`` / ``_apply_pending_perturbations``
++ the ``restore_baseline`` body.
 """
 
 from __future__ import annotations
@@ -93,6 +92,44 @@ _DISTRACTOR_BASELINE_XY: NDArray[np.float64] = np.array(
 )
 _DISTRACTOR_REST_Z: float = _TABLE_TOP_Z + _DISTRACTOR_HALF
 _DISTRACTOR_HIDDEN_Z: float = -10.0  # below the plane, out of reach
+
+
+def _axis_angle_to_quat(axis_angle: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Rodrigues-style axis-angle -> wxyz quat. Zero angle returns identity.
+
+    Matches the Genesis adapter's helper byte-for-byte. Used by
+    :meth:`IsaacSimTabletopEnv._apply_ee_command` to compose a small
+    per-step rotation increment into the EE's current orientation.
+    """
+    angle = float(np.linalg.norm(axis_angle))
+    if angle == 0.0:
+        return np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64)
+    axis = axis_angle / angle
+    s = float(np.sin(angle * 0.5))
+    c = float(np.cos(angle * 0.5))
+    return np.array([c, axis[0] * s, axis[1] * s, axis[2] * s], dtype=np.float64)
+
+
+def _quat_mul(a: NDArray[np.float64], b: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Hamilton product ``a * b`` in wxyz order. Matches Genesis."""
+    aw, ax, ay, az = a
+    bw, bx, by, bz = b
+    return np.array(
+        [
+            aw * bw - ax * bx - ay * by - az * bz,
+            aw * bx + ax * bw + ay * bz - az * by,
+            aw * by - ax * bz + ay * bw + az * bx,
+            aw * bz + ax * by - ay * bx + az * bw,
+        ],
+        dtype=np.float64,
+    )
+
+
+def _normalize_quat(q: NDArray[np.float64]) -> NDArray[np.float64]:
+    n = float(np.linalg.norm(q))
+    if n == 0.0:
+        return np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64)
+    return q / n
 
 
 class IsaacSimTabletopEnv:
@@ -282,6 +319,88 @@ class IsaacSimTabletopEnv:
 
         self._closed: bool = False
 
+    # --------------------------------------------------------------- helpers
+
+    def _prim_pos(self, prim: Any) -> NDArray[np.float64]:
+        """Read a prim's world position via ``get_world_pose``.
+
+        Isaac Sim 5.x returns ``(position, orientation)`` from
+        ``get_world_pose``; we discard the orientation and return a
+        copy so downstream mutation of the obs dict cannot leak into
+        Kit's internal state.
+        """
+        pos, _ = prim.get_world_pose()
+        return np.asarray(pos, dtype=np.float64).reshape(3)
+
+    def _prim_quat(self, prim: Any) -> NDArray[np.float64]:
+        """Read a prim's world orientation (wxyz). RFC-009 §7.5."""
+        _, quat = prim.get_world_pose()
+        return np.asarray(quat, dtype=np.float64).reshape(4)
+
+    def _build_obs(self) -> dict[str, NDArray[Any]]:
+        return {
+            "cube_pos": self._prim_pos(self._cube),
+            "cube_quat": self._prim_quat(self._cube),
+            "ee_pos": self._prim_pos(self._ee),
+            "gripper": np.array([self._gripper_state], dtype=np.float64),
+            "target_pos": self._target_pos.copy(),
+        }
+
+    def _build_info(self) -> dict[str, Any]:
+        return {
+            "success": self._success,
+            "grasped": self._grasped,
+            "step": self._step_count,
+        }
+
+    @staticmethod
+    def _xy_distance(a: NDArray[np.float64], b: NDArray[np.float64]) -> float:
+        return float(np.linalg.norm(a[:2] - b[:2]))
+
+    def _apply_ee_command(
+        self,
+        linear: NDArray[np.float64],
+        angular: NDArray[np.float64],
+    ) -> None:
+        """Translate + rotate the kinematic EE by small per-step deltas.
+
+        Same control surface the Genesis adapter uses (see
+        ``GenesisTabletopEnv._apply_ee_command``): position is updated
+        by ``MAX_LINEAR_STEP`` * normalised input; orientation
+        accumulates a small rotation increment via
+        :func:`_axis_angle_to_quat` + Hamilton product.
+        """
+        cur_pos = self._prim_pos(self._ee)
+        new_pos = cur_pos + linear * self.MAX_LINEAR_STEP
+
+        axis_angle = angular * self.MAX_ANGULAR_STEP
+        new_quat = self._prim_quat(self._ee)
+        if float(np.linalg.norm(axis_angle)) > 0.0:
+            dq = _axis_angle_to_quat(axis_angle)
+            new_quat = _normalize_quat(_quat_mul(dq, new_quat))
+
+        self._ee.set_world_pose(
+            position=new_pos.astype(np.float64, copy=False),
+            orientation=new_quat.astype(np.float64, copy=False),
+        )
+
+    def _update_grasp_state(self) -> None:
+        """Snap grasp flag based on gripper command + EE-cube proximity."""
+        if self._gripper_state == self.GRIPPER_OPEN:
+            self._grasped = False
+            return
+        ee = self._prim_pos(self._ee)
+        cube = self._prim_pos(self._cube)
+        dist = float(np.linalg.norm(ee - cube))
+        if dist <= self.GRASP_RADIUS:
+            self._grasped = True
+
+    def _snap_cube_to_ee(self) -> None:
+        """Overwrite cube pose with the EE pose post-physics (grasp sim)."""
+        ee_pos = self._prim_pos(self._ee)
+        ee_quat = self._prim_quat(self._ee)
+        self._cube.set_world_pose(position=ee_pos, orientation=ee_quat)
+
     # ----------------------------------------------------------------- gym API
 
     def reset(
@@ -290,17 +409,98 @@ class IsaacSimTabletopEnv:
         seed: int | None = None,
         options: dict[str, Any] | None = None,
     ) -> tuple[dict[str, NDArray[Any]], dict[str, Any]]:
-        """Deterministic reset — body lands in step 5."""
-        del seed, options
-        raise NotImplementedError("IsaacSimTabletopEnv.reset lands in step 5 of RFC-009 §12")
+        """Deterministic reset.
+
+        ``seed`` is the only entropy source. Ordering per RFC-005 §3.2
+        (the Protocol's contract): ``restore_baseline`` -> seed-driven
+        randomisation -> apply queued perturbations -> clear queue.
+        """
+        del options
+        self._rng = np.random.default_rng(seed)
+
+        self.restore_baseline()
+
+        # Re-seed cube XY (identity quat).
+        cube_xy = self._rng.uniform(
+            low=-_CUBE_INIT_HALFRANGE, high=_CUBE_INIT_HALFRANGE, size=2
+        ).astype(np.float64)
+        self._cube.set_world_pose(
+            position=np.array([cube_xy[0], cube_xy[1], _CUBE_REST_Z], dtype=np.float64),
+            orientation=np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64),
+        )
+
+        # Re-seed target XY (independent of cube).
+        target_xy = self._rng.uniform(
+            low=-_TARGET_HALFRANGE, high=_TARGET_HALFRANGE, size=2
+        ).astype(np.float64)
+        self._target_pos = np.array([target_xy[0], target_xy[1], _TABLE_TOP_Z], dtype=np.float64)
+        self._target.set_world_pose(
+            position=np.array([target_xy[0], target_xy[1], _TABLE_TOP_Z + 0.001], dtype=np.float64),
+            orientation=np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64),
+        )
+
+        # Reset EE to hover above cube start.
+        self._ee.set_world_pose(
+            position=np.array(
+                [cube_xy[0], cube_xy[1], _CUBE_REST_Z + _EE_REST_OFFSET_Z], dtype=np.float64
+            ),
+            orientation=np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64),
+        )
+
+        # World reset — Kit-side invalidation of physics velocities so
+        # the next step is a clean slate.
+        self._world.reset()
+
+        # Apply queued perturbations on top of seed-driven state. Step
+        # 6 lands the seven branches; until then this is a no-op
+        # unless a future commit wires set_perturbation. RFC-005 §3.2.
+        if self._pending_perturbations:
+            self._apply_pending_perturbations()
+            self._pending_perturbations = {}
+
+        self._step_count = 0
+        self._grasped = False
+        self._gripper_state = self.GRIPPER_OPEN
+        self._success = False
+
+        return self._build_obs(), self._build_info()
 
     def step(
         self,
         action: NDArray[np.float64],
     ) -> tuple[dict[str, NDArray[Any]], float, bool, bool, dict[str, Any]]:
-        """Advance one control step — body lands in step 5."""
-        del action
-        raise NotImplementedError("IsaacSimTabletopEnv.step lands in step 5 of RFC-009 §12")
+        """Advance one control step.
+
+        Pipeline (matches Genesis): clip -> update EE pose ->
+        update grasp state -> ``world.step`` -> if grasped, snap cube
+        to EE -> build obs / reward / flags.
+        """
+        a = np.asarray(action, dtype=np.float64).reshape(-1)
+        if a.shape != (7,):
+            raise ValueError(f"action must have shape (7,); got {a.shape}")
+        a = np.clip(a, -1.0, 1.0).astype(np.float64, copy=False)
+
+        self._apply_ee_command(a[0:3], a[3:6])
+
+        self._gripper_state = self.GRIPPER_OPEN if a[6] > 0.0 else self.GRIPPER_CLOSED
+        self._update_grasp_state()
+
+        # ``render=False`` keeps the headless step path fast — no
+        # rasterisation cost on the state-only first cut.
+        self._world.step(render=False)
+
+        if self._grasped:
+            self._snap_cube_to_ee()
+
+        self._step_count += 1
+        cube_pos = self._prim_pos(self._cube)
+        if self._xy_distance(cube_pos, self._target_pos) <= self.TARGET_RADIUS:
+            self._success = True
+
+        terminated = self._success
+        truncated = (not terminated) and self._step_count >= self._max_steps
+        reward = -float(self._xy_distance(cube_pos, self._target_pos))
+        return self._build_obs(), reward, terminated, truncated, self._build_info()
 
     def set_perturbation(self, name: str, value: float) -> None:
         """Queue an axis-value pair — full validation lands in step 6."""
@@ -310,9 +510,37 @@ class IsaacSimTabletopEnv:
         )
 
     def restore_baseline(self) -> None:
-        """Restore observable baseline state — body lands in step 6."""
+        """Restore observable baseline state — body lands in step 6.
+
+        Until step 6 lands the full body, ``reset`` calls
+        ``restore_baseline`` and gets a minimal first-cut: hide every
+        distractor at ``_DISTRACTOR_HIDDEN_Z`` and reset the cosmetic
+        shadow attributes. Perturbation branches are step 6's
+        responsibility.
+        """
+        for i, d in enumerate(self._distractors):
+            xy = _DISTRACTOR_BASELINE_XY[i]
+            d.set_world_pose(
+                position=np.array(
+                    [float(xy[0]), float(xy[1]), _DISTRACTOR_HIDDEN_Z], dtype=np.float64
+                ),
+                orientation=np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64),
+            )
+        # Visual-axis shadows revert to neutral so a prior episode's
+        # cosmetic perturbation doesn't leak.
+        self._light_intensity = 1.0
+        self._cam_offset = np.zeros(2, dtype=np.float64)
+        self._texture_choice = 0
+
+    def _apply_pending_perturbations(self) -> None:
+        """Apply ``self._pending_perturbations`` to the scene.
+
+        Step 6 lands the seven branches. Until then this raises so a
+        sneaky enqueue + reset path doesn't silently no-op (which
+        would mask a missing wire-up).
+        """
         raise NotImplementedError(
-            "IsaacSimTabletopEnv.restore_baseline lands in step 6 of RFC-009 §12"
+            "IsaacSimTabletopEnv._apply_pending_perturbations lands in step 6 of RFC-009 §12"
         )
 
     def close(self) -> None:
