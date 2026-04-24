@@ -278,3 +278,85 @@ jobs:
         continue-on-error: true
         run: |
           uv run pytest -m isaac --co -q || [ $? -eq 5 ]
+
+  security-audit:
+    # Phase 2.5 Task 16 — dependency CVE scan. ``pip-audit`` queries the
+    # OSV database for known CVEs against the project's resolved
+    # dependency tree (PyPI metadata + transitive deps). This is a HARD
+    # GATE: any new CVE in a dependency we ship fails the build.
+    #
+    # OSV is preferred over the PyPI vuln service because OSV aggregates
+    # multiple sources (GHSA, NVD, OSV-direct) and does not require
+    # authentication. The ``--strict`` flag makes pip-audit treat
+    # warnings (e.g. "skipped a dependency without metadata") as errors;
+    # this catches resolver flakes that would otherwise mask a missed
+    # scan.
+    name: security-audit (pip-audit, OSV)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python 3.11
+        run: uv python install 3.11
+
+      # Resolve a venv from pyproject.toml so pip-audit sees the same
+      # dep tree gauntlet itself ships. ``--no-extras`` keeps the audit
+      # surface to the core dependencies; the per-extra deps (torch,
+      # genesis, isaacsim) are audited in their own backend jobs by
+      # virtue of being installed there.
+      - name: Sync core dependencies (no extras)
+        run: uv sync --dev --python 3.11
+
+      # Project-mode pip-audit: scans the resolved dependency tree for
+      # the gauntlet project at the given path. ``--vulnerability-service
+      # osv`` queries the OSV database; ``--strict`` turns dependency-
+      # resolution warnings into errors so a partial scan never silently
+      # passes. If a CVE lands in a pinned dep, the fix is to either
+      # bump the dep in pyproject.toml or document a deferral in the
+      # PR body and pass --ignore-vuln <ID> with a link.
+      - name: Audit dependencies for known CVEs
+        run: uvx pip-audit --strict --vulnerability-service osv .
+
+  secret-scan:
+    # Phase 2.5 Task 16 — secret-leak scan. ``detect-secrets`` greps the
+    # working tree against a configurable plugin set (AWS keys, JWTs,
+    # high-entropy strings, etc.) and compares findings against a
+    # checked-in ``.secrets.baseline``. Any finding NOT in the baseline
+    # fails the job.
+    #
+    # To accept a future false positive, re-run ``uvx detect-secrets
+    # scan > .secrets.baseline`` from a clean tree and commit the diff
+    # with a justification. The baseline must never include a real
+    # credential (the audit step exists for this reason).
+    name: secret-scan (detect-secrets)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Need the full history so the hook scans every changed file
+          # in the PR's commits, not just the head tree.
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python 3.11
+        run: uv python install 3.11
+
+      # detect-secrets-hook is the CI-gate entry point: it accepts a list
+      # of filenames + a baseline and exits non-zero on any new finding.
+      # We pass every git-tracked file so the gate catches secrets in
+      # newly-added files (which never appear in a diff-only scan).
+      - name: Scan tracked files against baseline
+        run: |
+          git ls-files | xargs uvx --from detect-secrets detect-secrets-hook \
+            --baseline .secrets.baseline
