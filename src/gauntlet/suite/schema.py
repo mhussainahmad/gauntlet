@@ -33,7 +33,7 @@ from __future__ import annotations
 import itertools
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -42,10 +42,27 @@ from gauntlet.env.registry import registered_envs
 
 __all__ = [
     "BUILTIN_BACKEND_IMPORTS",
+    "SAMPLING_MODES",
     "AxisSpec",
+    "SamplingMode",
     "Suite",
     "SuiteCell",
 ]
+
+
+# Public type alias so the loader / Sampler dispatch / docs all key off
+# the same string set. Adding a new mode requires touching this literal
+# and ``gauntlet.suite.sampling.build_sampler`` together — by design.
+SamplingMode = Literal["cartesian", "latin_hypercube", "sobol"]
+
+# Tuple form of the same set, used by validators that need a runtime
+# ``in`` check (Pydantic narrows ``Literal`` in the model but the
+# loader's defence-in-depth path benefits from a plain tuple).
+SAMPLING_MODES: Final[tuple[SamplingMode, ...]] = (
+    "cartesian",
+    "latin_hypercube",
+    "sobol",
+)
 
 
 # Backends that register themselves on import but do NOT import at package
@@ -141,16 +158,19 @@ class AxisSpec(BaseModel):
                 "axis spec: must specify either {low, high, steps} or {values}",
             )
         if has_continuous:
-            # All three must be present together — partial specs are
-            # ambiguous (no sensible default for missing endpoints).
-            missing = [
-                name
-                for name, val in (("low", self.low), ("high", self.high), ("steps", self.steps))
-                if val is None
+            # ``low`` and ``high`` are always required together for the
+            # continuous shape — there is no sensible default for a
+            # missing endpoint. ``steps`` is optional at the AxisSpec
+            # layer (the parent :class:`Suite` enforces it for
+            # ``sampling == "cartesian"``); this lets a non-cartesian
+            # YAML write ``{low: 0.3, high: 1.5}`` without dummy steps.
+            endpoint_missing = [
+                name for name, val in (("low", self.low), ("high", self.high)) if val is None
             ]
-            if missing:
+            if endpoint_missing:
                 raise ValueError(
-                    f"axis spec: continuous shape requires low, high, steps; missing {missing}",
+                    "axis spec: continuous shape requires low, high, steps; "
+                    f"missing {endpoint_missing}",
                 )
             # Type-narrowing for mypy: validated above.
             assert self.low is not None
@@ -226,6 +246,15 @@ class Suite(BaseModel):
     episodes_per_cell: int
     seed: int | None = None
     axes: dict[str, AxisSpec]
+    # See ``docs/polish-exploration-lhs-sampling.md``. Default preserves
+    # the historical Cartesian-grid enumeration for every existing YAML.
+    sampling: SamplingMode = "cartesian"
+    # Required for ``sampling != "cartesian"`` and forbidden for
+    # ``sampling == "cartesian"`` — enforced by ``_check_sampling_inputs``
+    # below. Sample budget for LHS / Sobol; ignored (must be unset) for
+    # the Cartesian path because the cell count is the product of
+    # per-axis ``steps`` there.
+    n_samples: int | None = None
 
     # ------------------------------------------------------------------
     # Field-level checks.
@@ -273,6 +302,69 @@ class Suite(BaseModel):
                 f"axes: unknown axis name(s) {unknown}; legal names are: {legal}",
             )
         return v
+
+    @field_validator("n_samples")
+    @classmethod
+    def _n_samples_positive(cls, v: int | None) -> int | None:
+        # Field-level: only that the integer is positive when provided.
+        # The cross-field "required for non-cartesian, forbidden for
+        # cartesian" rule lives in ``_check_sampling_inputs``.
+        if v is not None and v < 1:
+            raise ValueError(f"n_samples must be >= 1; got {v}")
+        return v
+
+    # ------------------------------------------------------------------
+    # Cross-field validation (sampling mode <-> per-axis steps and
+    # n_samples). Runs after the per-field validators so error messages
+    # mention only one axis at a time.
+    # ------------------------------------------------------------------
+
+    @model_validator(mode="after")
+    def _check_sampling_inputs(self) -> Suite:
+        if self.sampling == "cartesian":
+            # n_samples is meaningless for Cartesian (cell count is the
+            # axis-step product). Reject explicitly so a user who ports
+            # an LHS YAML to cartesian without removing n_samples sees
+            # a clear error rather than silent ignore.
+            if self.n_samples is not None:
+                raise ValueError(
+                    "sampling=cartesian: n_samples must be omitted "
+                    "(grid size is the product of per-axis steps); "
+                    f"got n_samples={self.n_samples}",
+                )
+            # Every continuous axis must specify ``steps`` for the
+            # Cartesian grid to be well-defined. The :class:`AxisSpec`
+            # layer permits ``{low, high}`` without ``steps`` so
+            # non-cartesian YAMLs can omit the redundant field; the
+            # parent Suite enforces it back here for the cartesian
+            # path. Categorical axes (``values``) are unaffected.
+            for axis_name, spec in self.axes.items():
+                is_continuous = spec.values is None
+                if is_continuous and spec.steps is None:
+                    raise ValueError(
+                        f"axis spec: continuous shape requires low, high, "
+                        f"steps; missing ['steps'] on axis {axis_name!r} "
+                        "(required for sampling=cartesian)",
+                    )
+        else:
+            # LHS / Sobol: n_samples is required and steps is forbidden
+            # (an LHS YAML that names ``steps`` is confused — the LHS
+            # budget is ``n_samples``, not the per-axis grid count).
+            if self.n_samples is None:
+                raise ValueError(
+                    f"sampling={self.sampling}: n_samples is required "
+                    "(it sets the sample budget; the cell count of an "
+                    "LHS / Sobol suite is independent of per-axis steps)",
+                )
+            for axis_name, spec in self.axes.items():
+                if spec.steps is not None:
+                    raise ValueError(
+                        f"axis spec: sampling={self.sampling} forbids "
+                        f"per-axis steps; got steps={spec.steps} on axis "
+                        f"{axis_name!r}. Drop the steps key — LHS / Sobol "
+                        "sample size is set by the suite-level n_samples.",
+                    )
+        return self
 
     # ------------------------------------------------------------------
     # Cell enumeration. Cartesian product over per-axis enumerations,

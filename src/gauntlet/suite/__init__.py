@@ -21,13 +21,17 @@ from __future__ import annotations
 from gauntlet.suite.loader import load_suite as load_suite
 from gauntlet.suite.loader import load_suite_from_string as load_suite_from_string
 from gauntlet.suite.schema import BUILTIN_BACKEND_IMPORTS as BUILTIN_BACKEND_IMPORTS
+from gauntlet.suite.schema import SAMPLING_MODES as SAMPLING_MODES
 from gauntlet.suite.schema import AxisSpec as AxisSpec
+from gauntlet.suite.schema import SamplingMode as SamplingMode
 from gauntlet.suite.schema import Suite as Suite
 from gauntlet.suite.schema import SuiteCell as SuiteCell
 
 __all__ = [
     "BUILTIN_BACKEND_IMPORTS",
+    "SAMPLING_MODES",
     "AxisSpec",
+    "SamplingMode",
     "Suite",
     "SuiteCell",
     "load_suite",
