@@ -131,6 +131,11 @@ dev = [
     "mypy>=1.11,<2",
     "types-pyyaml>=6.0,<7",
     "pandas-stubs>=2.2,<3",
+    # Property-based / fuzz testing (Phase 2.5 Task 13). Pinned to the
+    # 6.x major: hypothesis 7 is not yet released; the floor is well
+    # above the latest API-stable line. Used only by tests/test_property_*
+    # and tests/test_fuzz_*; no src/ import.
+    "hypothesis>=6,<7",
 ]
 # CI-only group so the HF pytest job can pull dev + hf together.
 hf-dev = [
