@@ -1,1 +1,187 @@
-/* dashboard.css scaffolding — full styles arrive in step 5. */
+/* Gauntlet self-contained dashboard stylesheet (RFC 020 §5).
+ *
+ * Plain CSS, no build step, no framework. The dashboard ships as a
+ * static HTML artefact opened from the local filesystem; this file
+ * is shutil-copied verbatim into ``<out>/dashboard.css`` by
+ * ``gauntlet.dashboard.build``.
+ *
+ * Token vocabulary mirrors ``src/gauntlet/report/templates/report.html.jinja``
+ * so a reader of either file sees the same names. See ``DESIGN.md``
+ * (project root) for the descriptive-name version of the same tokens
+ * and the rules that govern any future additions.
+ *
+ * Design-system rules enforced here:
+ * - Flat by default (no box-shadow on cards / inputs / tables).
+ * - Tabular numerals on every numeric value (.num, .metric-value).
+ * - 5% Color Budget — saturated colour only on the pass/fail/warn dot,
+ *   the time-series trace, and chart bars. Chrome stays low-chroma.
+ * - prefers-reduced-motion respected for non-Chart.js transitions.
+ */
+
+:root {
+  --fg: #1a1a1a;
+  --fg-muted: #555;
+  --bg: #fafafa;
+  --card-bg: #ffffff;
+  --border: #e1e1e1;
+  --table-head: #f0f0f0;
+  --pass: #2ca02c;
+  --fail: #d62728;
+  --warn: #f0ad4e;
+  --trace: #1f77b4;
+  --no-data: #d0d0d0;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+               "Helvetica Neue", Arial, sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+  margin: 0;
+  padding: 24px;
+  line-height: 1.4;
+}
+
+h1, h2, h3 { margin: 0 0 8px; }
+h1 { font-size: 1.6rem; font-weight: 600; line-height: 1.2; }
+h2 { font-size: 1.25rem; font-weight: 600; margin-top: 32px; line-height: 1.3; }
+h3 { font-size: 1rem; font-weight: 600; }
+
+section { margin-bottom: 24px; }
+
+.page-header { margin-bottom: 24px; }
+.page-header h1 { margin-bottom: 4px; }
+
+.subtle {
+  color: var(--fg-muted);
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+}
+
+/* --- Cards (flat, hairline-bordered, on Page White over Paper) --- */
+
+.card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px 20px;
+}
+
+/* --- Summary metric tiles (label above value) --- */
+
+.summary-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px 32px;
+}
+
+.metric-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-muted);
+}
+
+.metric-value {
+  font-size: 1.5rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+  line-height: 1.2;
+}
+.metric-value .subtle { font-size: 0.85rem; font-weight: 400; }
+
+/* --- Filter bar (native <select> with on-brand chrome) --- */
+
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 24px;
+  align-items: center;
+}
+.filter-bar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-muted);
+}
+.filter-bar select {
+  background: var(--card-bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  transition: border-color 150ms ease-out, box-shadow 150ms ease-out;
+}
+.filter-bar select:focus-visible {
+  outline: none;
+  border-color: var(--trace);
+  box-shadow: 0 0 0 2px rgba(31, 119, 180, 0.25);
+}
+.filter-bar select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* --- Chart cards & row --- */
+
+.chart-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+}
+.chart-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+}
+.chart-card canvas { max-width: 100%; height: 220px !important; }
+
+/* --- Tables (the dashboard's per-run roster + any future data table) --- */
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.9rem;
+}
+th, td {
+  border-bottom: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+th { background: var(--table-head); font-weight: 600; }
+tbody tr:hover { background: var(--bg); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* --- Empty state (silent; no hand-holding copy) --- */
+
+.empty-state {
+  color: var(--fg-muted);
+  font-style: italic;
+  padding: 16px 20px;
+}
+
+/* --- Reduced motion --- */
+
+@media (prefers-reduced-motion: reduce) {
+  .filter-bar select { transition: none; }
+}
