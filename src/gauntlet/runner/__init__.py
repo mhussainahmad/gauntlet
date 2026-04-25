@@ -21,22 +21,32 @@ from __future__ import annotations
 
 from gauntlet.runner.episode import Episode as Episode
 from gauntlet.runner.provenance import (
+    SUITE_PROVENANCE_HASH_VERSION as SUITE_PROVENANCE_HASH_VERSION,
+)
+from gauntlet.runner.provenance import (
     capture_gauntlet_version as capture_gauntlet_version,
 )
 from gauntlet.runner.provenance import capture_git_commit as capture_git_commit
+from gauntlet.runner.provenance import compute_env_asset_shas as compute_env_asset_shas
 from gauntlet.runner.provenance import compute_suite_hash as compute_suite_hash
+from gauntlet.runner.provenance import (
+    compute_suite_provenance_hash as compute_suite_provenance_hash,
+)
 from gauntlet.runner.runner import Runner as Runner
 from gauntlet.runner.worker import TrajectoryFormat as TrajectoryFormat
 from gauntlet.runner.worker import WorkItem as WorkItem
 from gauntlet.runner.worker import execute_one as execute_one
 
 __all__ = [
+    "SUITE_PROVENANCE_HASH_VERSION",
     "Episode",
     "Runner",
     "TrajectoryFormat",
     "WorkItem",
     "capture_gauntlet_version",
     "capture_git_commit",
+    "compute_env_asset_shas",
     "compute_suite_hash",
+    "compute_suite_provenance_hash",
     "execute_one",
 ]

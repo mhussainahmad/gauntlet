@@ -3,11 +3,11 @@
 See ``docs/polish-exploration-incremental-cache.md`` for the design and
 the open-question rationale.
 
-Cache key composition::
+Cache key composition (B-40)::
 
     key_dict = {
         "suite_name":       suite.name,
-        "suite_hash":       sha256(Suite.model_dump_json(round_trip=True)),
+        "suite_hash":       compute_suite_provenance_hash(suite),  # 16-char blake2b
         "env_name":         suite.env,
         "policy_id":        <caller-supplied or class-name fallback>,
         "axis_config":      {axis_name: float},
@@ -19,6 +19,16 @@ Cache key composition::
     key = sha256(
         json.dumps(key_dict, sort_keys=True, separators=(",", ":"))
     ).hexdigest()
+
+The ``suite_hash`` field is the B-40 suite-level provenance hash —
+a 16-char blake2b digest that bakes in ``gauntlet.__version__`` and
+the env asset SHAs. Two suites that differ only in YAML key order or
+whitespace cache-hit; a gauntlet version bump or asset edit
+correctly invalidates. ANTI-FEATURE: a behaviour-changing release
+silently invalidates every cache entry. See
+:mod:`gauntlet.runner.provenance` for the design rationale and the
+graceful "stale cache, re-run" path keyed off
+``SUITE_PROVENANCE_HASH_VERSION``.
 
 Storage layout::
 
@@ -38,6 +48,11 @@ Backwards-compatibility contract:
   write leaves the cache in a consistent state.
 * Corrupt cache files (``JSONDecodeError`` / ``ValidationError``)
   count as misses; the file is overwritten on the next ``put``.
+* B-40 cache-key migration: :meth:`EpisodeCache.make_legacy_key`
+  reproduces the pre-B-40 derivation (full-sha256 ``compute_suite_hash``
+  in place of the new blake2b hash). The Runner consults it on miss
+  for one release so a developer's existing cache directory keeps
+  serving hits across the upgrade boundary.
 """
 
 from __future__ import annotations
@@ -52,6 +67,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from gauntlet.runner.episode import Episode
+from gauntlet.runner.provenance import compute_suite_hash, compute_suite_provenance_hash
 from gauntlet.suite.schema import Suite
 
 __all__ = ["CACHE_SCHEMA_VERSION", "EpisodeCache"]
@@ -99,6 +115,44 @@ class EpisodeCache:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _compose_key(
+        *,
+        suite: Suite,
+        suite_hash: str,
+        axis_config: Mapping[str, float],
+        seed: int,
+        episodes_per_cell: int,
+        max_steps: int,
+        env_name: str,
+        policy_id: str,
+    ) -> str:
+        """Compose the canonical-JSON key around a caller-supplied ``suite_hash``.
+
+        Shared between :meth:`make_key` (B-40 hash) and
+        :meth:`make_legacy_key` (pre-B-40 sha256). The split lets the
+        Runner derive both digests off a single Suite without
+        re-walking the env asset tree per cell — call ``make_key``
+        once for puts, fall back to ``make_legacy_key`` once on miss.
+        """
+        # Defensive ``dict(...)`` copy + value coercion to plain floats:
+        # numpy scalar floats would otherwise serialise differently across
+        # Python versions and break key stability.
+        axis_payload = {k: float(v) for k, v in dict(axis_config).items()}
+        key_dict = {
+            "suite_name": suite.name,
+            "suite_hash": suite_hash,
+            "env_name": env_name,
+            "policy_id": policy_id,
+            "axis_config": axis_payload,
+            "seed": int(seed),
+            "episodes_per_cell": int(episodes_per_cell),
+            "max_steps": int(max_steps),
+            "schema_version": CACHE_SCHEMA_VERSION,
+        }
+        canonical = json.dumps(key_dict, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    @staticmethod
     def make_key(
         suite: Suite,
         *,
@@ -117,10 +171,21 @@ class EpisodeCache:
         distinct episodes, each with its own env seed; the cache stores
         one Episode per key.
 
+        B-40: the ``suite_hash`` component is now
+        :func:`gauntlet.runner.provenance.compute_suite_provenance_hash`
+        — a 16-char blake2b digest that bakes in
+        ``gauntlet.__version__`` and the env asset SHAs. Two suites
+        with identical semantics but reordered YAML keys hash to the
+        same suite_hash and therefore the same cache key; a gauntlet
+        version bump invalidates by design. The pre-B-40 derivation
+        is preserved in :meth:`make_legacy_key` for one-release
+        back-compat (the Runner consults it on miss).
+
         Args:
-            suite: The originating :class:`Suite`. ``model_dump_json``
-                is hashed to derive the ``suite_hash`` field of the
-                key — silent suite edits invalidate the cache.
+            suite: The originating :class:`Suite`. The B-40 provenance
+                hash is computed from this — silent suite edits, env
+                asset changes, and gauntlet version bumps all
+                invalidate the cache.
             axis_config: ``{axis_name: float}`` for this cell. Defensively
                 copied before serialisation.
             seed: Per-episode env seed (uint32).
@@ -139,25 +204,55 @@ class EpisodeCache:
             64-char lowercase hex SHA256 digest of the canonical-JSON
             key. Stable across Python invocations.
         """
-        suite_json = suite.model_dump_json(round_trip=True)
-        suite_hash = hashlib.sha256(suite_json.encode("utf-8")).hexdigest()
-        # Defensive ``dict(...)`` copy + value coercion to plain floats:
-        # numpy scalar floats would otherwise serialise differently across
-        # Python versions and break key stability.
-        axis_payload = {k: float(v) for k, v in dict(axis_config).items()}
-        key_dict = {
-            "suite_name": suite.name,
-            "suite_hash": suite_hash,
-            "env_name": env_name,
-            "policy_id": policy_id,
-            "axis_config": axis_payload,
-            "seed": int(seed),
-            "episodes_per_cell": int(episodes_per_cell),
-            "max_steps": int(max_steps),
-            "schema_version": CACHE_SCHEMA_VERSION,
-        }
-        canonical = json.dumps(key_dict, sort_keys=True, separators=(",", ":"))
-        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        suite_hash = compute_suite_provenance_hash(suite)
+        return EpisodeCache._compose_key(
+            suite=suite,
+            suite_hash=suite_hash,
+            axis_config=axis_config,
+            seed=seed,
+            episodes_per_cell=episodes_per_cell,
+            max_steps=max_steps,
+            env_name=env_name,
+            policy_id=policy_id,
+        )
+
+    @staticmethod
+    def make_legacy_key(
+        suite: Suite,
+        *,
+        axis_config: Mapping[str, float],
+        seed: int,
+        episodes_per_cell: int,
+        max_steps: int,
+        env_name: str,
+        policy_id: str,
+    ) -> str:
+        """Pre-B-40 cache key derivation, kept for one-release back-compat.
+
+        Reproduces the historical key composition that used
+        :func:`gauntlet.runner.provenance.compute_suite_hash` (full
+        sha256 over the Suite payload, no gauntlet version, no env
+        asset SHAs). Called on cache *miss* by the Runner so an
+        existing on-disk cache directory written before the B-40
+        upgrade keeps serving hits across the boundary.
+
+        DO NOT call ``put`` under a legacy key — writes go through
+        :meth:`make_key` so a future read finds the new digest. The
+        legacy entries age out organically as suites change; the
+        next major release can drop this method entirely and treat
+        any pre-existing legacy entries as a clean miss + re-roll.
+        """
+        suite_hash = compute_suite_hash(suite)
+        return EpisodeCache._compose_key(
+            suite=suite,
+            suite_hash=suite_hash,
+            axis_config=axis_config,
+            seed=seed,
+            episodes_per_cell=episodes_per_cell,
+            max_steps=max_steps,
+            env_name=env_name,
+            policy_id=policy_id,
+        )
 
     # ------------------------------------------------------------------
     # Get / put — the hot path.
@@ -197,6 +292,47 @@ class EpisodeCache:
             self._stats.misses += 1
             return None
         self._stats.hits += 1
+        return episode
+
+    def has(self, key: str) -> bool:
+        """Return whether a cache entry exists at *key*.
+
+        Side-effect-free: does NOT touch the hit / miss counters.
+        Used by the Runner's B-40 back-compat path to check whether a
+        legacy-keyed entry is worth reading without double-counting
+        the lookup against the new-key miss the caller already
+        recorded.
+        """
+        return self._path_for(key).is_file()
+
+    def get_legacy(self, key: str) -> Episode | None:
+        """Read a pre-B-40 cache entry without touching the miss counter.
+
+        The Runner's back-compat path probes :meth:`has` first to
+        confirm the legacy file exists, then calls this. A
+        ``ValidationError`` / ``JSONDecodeError`` here is silently
+        swallowed — corrupt legacy entries fall through to the
+        normal "re-roll and overwrite under the new key" flow. The
+        ``hits`` counter is incremented on a successful read so the
+        end-of-run report reflects "an uncached work item was
+        served from disk", consistent with the new-key path.
+        """
+        path = self._path_for(key)
+        if not path.is_file():
+            return None
+        try:
+            raw = path.read_text(encoding="utf-8")
+            payload = json.loads(raw)
+            episode = Episode.model_validate(payload)
+        except (OSError, json.JSONDecodeError, ValidationError):
+            return None
+        self._stats.hits += 1
+        # Re-classify the new-key miss the caller already recorded:
+        # the public counter promises "uncached work items", not
+        # "filesystem lookups", and a successful legacy hit means
+        # this work item was in fact cached.
+        if self._stats.misses > 0:
+            self._stats.misses -= 1
         return episode
 
     def put(self, key: str, episode: Episode) -> None:
