@@ -8,6 +8,7 @@ from gauntlet.policy.base import Action as Action
 from gauntlet.policy.base import Observation as Observation
 from gauntlet.policy.base import Policy as Policy
 from gauntlet.policy.base import ResettablePolicy as ResettablePolicy
+from gauntlet.policy.base import SamplablePolicy as SamplablePolicy
 from gauntlet.policy.random import RandomPolicy as RandomPolicy
 from gauntlet.policy.registry import PolicySpecError as PolicySpecError
 from gauntlet.policy.registry import resolve_policy_factory as resolve_policy_factory
@@ -30,6 +31,7 @@ __all__ = [
     "PolicySpecError",
     "RandomPolicy",
     "ResettablePolicy",
+    "SamplablePolicy",
     "ScriptedPolicy",
     "resolve_policy_factory",
 ]

@@ -239,6 +239,14 @@ Data-embed conventions:
    and report.failure_clusters
    | rejectattr('mean_actuator_energy', 'none')
    | list | length > 0 %}
+{# B-18: render the action-consistency column only when at least one
+   cluster carries the mode-collapse measurement (i.e. a sampleable
+   policy run with --measure-action-consistency). Mirrors the
+   actuator-energy conditional-column pattern above. #}
+{% set any_cluster_action_var = report.failure_clusters
+   and report.failure_clusters
+   | rejectattr('mean_action_variance', 'none')
+   | list | length > 0 %}
 <section>
   <h2>Where it failed</h2>
   {% if report.failure_clusters %}
@@ -256,6 +264,7 @@ Data-embed conventions:
           <th class="num">Failure rate</th>
           <th class="num">Lift (×)</th>
           {% if any_cluster_energy %}<th class="num">Energy / peak τ</th>{% endif %}
+          {% if any_cluster_action_var %}<th class="num">Action var (B-18)</th>{% endif %}
           {% if any_cluster_video %}<th>Failed-rollout videos</th>{% endif %}
         </tr>
       </thead>
@@ -296,6 +305,19 @@ Data-embed conventions:
             {% else %}
             <span class="ci">/ -</span>
             {% endif %}
+          </td>
+          {% endif %}
+          {% if any_cluster_action_var %}
+          {# B-18: action-mode-collapse metric. ``-`` for greedy
+             policies (no SamplablePolicy support) and for runs that
+             did not opt into --measure-action-consistency; never
+             ``0.00`` (which would mean true mode collapse). #}
+          <td class="num">
+            {%- if cluster.mean_action_variance is not none -%}
+              {{ '%.4f'|format(cluster.mean_action_variance) }}
+            {%- else -%}
+              <span class="ci">-</span>
+            {%- endif -%}
           </td>
           {% endif %}
           {% if any_cluster_video %}

@@ -16,6 +16,7 @@ bodies. If a third VLA adapter lands, revisit via a helper module.
 
 from __future__ import annotations
 
+import copy
 import warnings
 from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -320,6 +321,64 @@ class LeRobotPolicy:
         """
         del rng
         self._policy.reset()  # RFC §4 "Action chunk queue" — critical.
+
+    def act_n(self, obs: Observation, n: int = 8) -> Sequence[Action]:
+        """Sample ``n`` independent diffusion-policy actions for ``obs`` (B-18).
+
+        State-preserving (B-18 :class:`gauntlet.policy.SamplablePolicy`
+        contract): the underlying SmolVLA action-chunk queue is
+        snapshotted via :func:`copy.deepcopy` before sampling and
+        restored after, so a B-18 mode-collapse measurement does not
+        consume rollout queue entries (which would silently shift the
+        rollout's actions by one chunk position).
+
+        Each draw calls :meth:`_policy.reset` to flush the queue, then
+        :meth:`_policy.select_action` to populate a fresh chunk and
+        dequeue its first action — diffusion's stochastic noise gives
+        independent samples per call. Best-effort: if the lerobot
+        internal queue attribute name shifts between releases the
+        snapshot becomes a no-op and the rollout's queue is rebuilt at
+        the next ``act``; we accept that over crashing the run.
+        """
+        if n < 1:
+            raise ValueError(f"n must be >= 1; got {n}")
+        frame = self._build_frame(obs)
+        batch = self._preprocess(frame)
+        # Snapshot the chunk-queue attribute. lerobot exposes it as
+        # ``_action_queue`` (a ``collections.deque``). deepcopy is safe
+        # for plain Python deques and returns a fully detached clone.
+        snapshot: Any = None
+        queue_attr = getattr(self._policy, "_action_queue", None)
+        if queue_attr is not None:
+            try:
+                snapshot = copy.deepcopy(queue_attr)
+            except Exception:
+                snapshot = None
+        samples: list[Action] = []
+        try:
+            for _ in range(n):
+                self._policy.reset()
+                raw = self._policy.select_action(batch)
+                post = self._postprocess(raw)
+                tensor: Any = post
+                if hasattr(tensor, "detach"):
+                    tensor = tensor.detach()
+                if hasattr(tensor, "to"):
+                    tensor = tensor.to(device="cpu", dtype=self._torch.float32)
+                if hasattr(tensor, "numpy"):
+                    arr = np.asarray(tensor.numpy(), dtype=np.float64).reshape(-1)
+                else:
+                    arr = np.asarray(tensor, dtype=np.float64).reshape(-1)
+                samples.append(self._action_remap(arr))
+        finally:
+            if snapshot is not None and queue_attr is not None:
+                # Restore the original queue so the rollout's next
+                # ``act`` continues from the cached chunk position.
+                try:
+                    self._policy._action_queue = snapshot
+                except Exception:
+                    self._policy.reset()
+        return samples
 
     # ---- private helpers -------------------------------------------------
 
