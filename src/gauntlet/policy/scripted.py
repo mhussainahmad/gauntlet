@@ -49,6 +49,12 @@ class ScriptedPolicy:
         *,
         loop: bool = False,
     ) -> None:
+        """Bind a ``(steps, action_dim)`` trajectory for open-loop playback.
+
+        ``trajectory=None`` selects :data:`DEFAULT_PICK_AND_PLACE_TRAJECTORY`.
+        ``loop=True`` wraps the cursor at the end of the sequence; the
+        default holds the last frame.
+        """
         traj = (
             DEFAULT_PICK_AND_PLACE_TRAJECTORY.copy()
             if trajectory is None

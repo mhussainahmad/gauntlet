@@ -77,6 +77,7 @@ class RealSimRenderer(Protocol):
         viewpoint: Pose,
         intrinsics: CameraIntrinsics,
     ) -> np.ndarray:  # pragma: no cover -- structural; implementations supply behaviour
+        """Render *scene* from *viewpoint* and return an HxWx3 ``uint8`` RGB image."""
         ...
 
 

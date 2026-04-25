@@ -93,6 +93,12 @@ class Ros2EpisodePublisher:
         node_name: str = _DEFAULT_NODE_NAME,
         qos_depth: int = _DEFAULT_QOS_DEPTH,
     ) -> None:
+        """Initialise rclpy (idempotent), create the node, bind the publisher.
+
+        Raises:
+            ValueError: on empty ``topic`` / ``node_name`` or
+                ``qos_depth < 1``.
+        """
         if not topic:
             raise ValueError("topic must be a non-empty string")
         if not node_name:

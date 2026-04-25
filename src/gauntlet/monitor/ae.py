@@ -104,6 +104,12 @@ class StateAutoencoder(nn.Module):
     """
 
     def __init__(self, *, input_dim: int = INPUT_DIM, latent_dim: int = 8) -> None:
+        """Build the symmetric encoder/decoder MLPs.
+
+        ``input_dim`` defaults to the flattened proprio width (14);
+        callers training over a different feature set pass it
+        explicitly. ``latent_dim`` controls the bottleneck.
+        """
         super().__init__()
         if input_dim <= 0:
             raise ValueError(f"input_dim must be positive; got {input_dim}")

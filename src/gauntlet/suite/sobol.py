@@ -267,11 +267,24 @@ class SobolSampler:
     """
 
     def __init__(self, *, skip: int = 1) -> None:
+        """Bind ``skip`` (number of leading sequence points to discard).
+
+        Raises:
+            ValueError: if ``skip < 0``.
+        """
         if skip < 0:
             raise ValueError(f"skip must be >= 0; got {skip}")
         self._skip = skip
 
     def sample(self, suite: Suite, rng: np.random.Generator) -> list[SuiteCell]:
+        """Emit ``suite.n_samples`` Joe-Kuo Sobol cells.
+
+        ``rng`` is accepted for protocol conformance and ignored — the
+        Sobol sequence is fully deterministic.
+
+        Raises:
+            ValueError: when ``suite.n_samples is None``.
+        """
         from gauntlet.suite.schema import SuiteCell
 
         del rng  # Sobol is deterministic; no entropy consumed.
