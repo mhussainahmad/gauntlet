@@ -138,6 +138,20 @@ isaac = [
 video = [
     "imageio[ffmpeg]>=2.34,<3",
 ]
+# Independent extra for B-23 "Parquet trajectory dumps" — the shared,
+# language-agnostic format for non-Python users (a fleet operator with
+# a Tableau seat) to query trajectory data alongside DuckDB / pandas /
+# polars / Arrow Flight. pyarrow ships ~80 MB wheels so it MUST stay
+# behind an opt-in extra; the default install path is byte-identical
+# to no-extra (`Runner.run(trajectory_format="npz")` — the default —
+# never imports pyarrow). Lazy-imported inside
+# :func:`gauntlet.runner.parquet.write_parquet`; missing extra raises
+# a clean :class:`ImportError` with the install hint on first call.
+# Lower bound 15.0 is the first release with the stable
+# ``pyarrow.parquet.write_table`` v2 API and full Python 3.12 wheels.
+parquet = [
+    "pyarrow>=15.0,<22",
+]
 
 [project.scripts]
 gauntlet = "gauntlet.cli:app"
@@ -502,6 +516,17 @@ ignore_missing_imports = true
 module = ["imageio", "imageio.*", "imageio_ffmpeg", "imageio_ffmpeg.*"]
 ignore_missing_imports = true
 
+# pyarrow ships partial type stubs (the parquet writer surface used by
+# ``gauntlet.runner.parquet`` is typed as ``Any`` even when installed).
+# The [parquet] extra is opt-in (default jobs never install it) so the
+# import-check on ``gauntlet.runner.parquet`` must succeed in both
+# states; ignore_missing_imports covers the not-installed default job,
+# and the strict-mode ``Any``-narrowing inside ``parquet.py`` is the
+# normal FFI-boundary carve-out per spec §6 (mirrors imageio above).
+[[tool.mypy.overrides]]
+module = ["pyarrow", "pyarrow.*"]
+ignore_missing_imports = true
+
 # ---------- ``disallow_any_explicit`` per-module carve-outs ----------
 #
 # The two buckets below relax the project-wide
@@ -585,6 +610,10 @@ module = [
     # gymnasium info dict, imageio.imwrite typed Any in stubs.
     "gauntlet.runner.video",
     "gauntlet.runner.worker",
+    # B-23 — pyarrow ``Table`` / ``write_table`` are typed Any in the
+    # partial pyarrow stubs (and absent entirely on the default extras-
+    # free job, see ``[[tool.mypy.overrides]]`` for ``pyarrow``).
+    "gauntlet.runner.parquet",
     # ``yaml.safe_load`` returns ``Any`` (yaml stubs do not narrow).
     "gauntlet.suite.loader",
     # External calibration-JSON ingest — ``json.loads`` of a user-
@@ -627,6 +656,7 @@ markers = [
     "ros2: tests that require the [ros2] extra (rclpy mocked at the module boundary)",
     "isaac: tests that require a real Isaac Sim install (isaacsim>=5.0) and a CUDA GPU; the default tests/isaac/ suite is mock-driven and unmarked",
     "video: tests that require the [video] extra (imageio[ffmpeg]>=2.34) for MP4 rollout recording",
+    "parquet: tests that require the [parquet] extra (pyarrow>=15.0) for trajectory Parquet dumps (B-23)",
     "render: tests that exercise the offscreen mujoco GL renderer and need a working EGL/OSMesa stack; deselected by default CI runners where mujoco.Renderer aborts at the C level (no DISPLAY, no GPU)",
 ]
 
