@@ -363,6 +363,38 @@ for the full design and
 [`examples/evaluate_multi_camera.py`](./examples/evaluate_multi_camera.py)
 for a worked example.
 
+## Extending gauntlet
+
+Third-party policies and envs plug into gauntlet through Python's
+standard `importlib.metadata` entry-point mechanism — any
+pip-installable package can register itself without modifying
+gauntlet's source. Two groups are read by `gauntlet.plugins`:
+
+| Entry-point group   | Registers                                                               |
+|---------------------|-------------------------------------------------------------------------|
+| `gauntlet.policies` | A class (or zero-arg callable) returning a `gauntlet.policy.base.Policy` |
+| `gauntlet.envs`     | A class returning a `gauntlet.env.base.GauntletEnv`                      |
+
+A plugin author writes the adapter, then declares it in their own
+`pyproject.toml`:
+
+```toml
+[project.entry-points."gauntlet.policies"]
+sb3 = "my_gauntlet_plugin.sb3_adapter:SBAdapter"
+```
+
+After `pip install my-gauntlet-plugin`, `gauntlet run ... --policy sb3`
+resolves through the plugin path. Built-in adapters always win on
+collision; failed entry-point loads are wrapped in a
+`RuntimeWarning` and dropped from the registry — gauntlet itself
+stays operational. See
+[`docs/plugin-development.md`](./docs/plugin-development.md) for the
+full how-to (writing a Policy / Env plugin, constructor-argument
+patterns, testing) and
+[`docs/polish-exploration-plugin-system.md`](./docs/polish-exploration-plugin-system.md)
+for the design note (precedence rules, lazy discovery, collision
+handling).
+
 ## Development
 
 ```bash
@@ -379,16 +411,22 @@ uv run pytest
 
 ```
 src/gauntlet/
-  policy/    # Policy adapter protocol + reference wrappers (Random, Scripted, HF, LeRobot)
-  env/       # Parameterized envs — MuJoCo (core) + PyBullet ([pybullet] extra) + Genesis ([genesis] extra)
-  suite/     # YAML-defined perturbation grid suites
-  runner/    # Parallel rollout orchestration + seed management
-  report/    # Failure analysis + HTML/JSON generation
-  monitor/   # Runtime drift detection + action-entropy ([monitor] extra)
-  replay/    # Single-episode replay with axis overrides
-  ros2/      # ROS 2 publisher + recorder ([ros2] extra; rclpy via apt/Docker)
-  diff/      # Structured per-axis report deltas powering `gauntlet diff`
-  cli.py     # gauntlet run / report / compare / diff / monitor / replay / ros2
+  policy/      # Policy adapter protocol + reference wrappers (Random, Scripted, HF, LeRobot)
+  env/         # Parameterized envs — MuJoCo (core) + PyBullet/Genesis/Isaac (extras)
+  suite/       # YAML-defined perturbation grid suites (cartesian / LHS / Sobol)
+  runner/      # Parallel rollout orchestration + seed management + cache
+  report/      # Per-run failure analysis + HTML/JSON generation
+  monitor/     # Runtime drift detection + action-entropy ([monitor] extra)
+  replay/      # Single-episode replay with axis overrides
+  ros2/        # ROS 2 publisher + recorder ([ros2] extra; rclpy via apt/Docker)
+  diff/        # Structured per-axis report deltas powering `gauntlet diff`
+  aggregate/   # Fleet-wide failure-mode clustering across many runs
+  dashboard/   # Self-contained static SPA indexing every report.json
+  realsim/     # Real-to-sim scene ingestion + RealSimRenderer Protocol (renderer deferred)
+  plugins.py   # Entry-point discovery for third-party policies / envs
+  cli.py       # gauntlet run / report / compare / diff / aggregate /
+               # realsim / monitor / replay / ros2
+               # (dashboard ships as a Python API — see ## Fleet dashboard)
 ```
 
 ## License
