@@ -234,6 +234,13 @@ class WorkerInitArgs:
     # rollout byte-identical to the pre-PR path. Greedy policies are
     # honestly skipped (Episode.action_variance is ``None``).
     measure_action_consistency: bool = False
+    # B-30: optional per-rollout actuator-energy budget (joule-equivalent
+    # units). When set AND the env publishes actuator telemetry, the
+    # worker compares the rollout's accumulated ``actuator_energy``
+    # against this threshold and writes the boolean into
+    # :attr:`Episode.energy_over_budget`. ``None`` (the default) keeps
+    # the field ``None`` on every Episode, byte-identical to pre-B-30.
+    energy_budget: float | None = None
 
 
 # Worker-local cache shape. ``total=False`` because pre-init reads
@@ -250,6 +257,7 @@ class _WorkerState(TypedDict, total=False):
     trajectory_format: TrajectoryFormat
     video_config: VideoConfig | None
     measure_action_consistency: bool
+    energy_budget: float | None
 
 
 # Worker-local cache. Populated by ``pool_initializer``; read by
@@ -279,6 +287,7 @@ def pool_initializer(args: WorkerInitArgs) -> None:
     _WORKER_STATE["trajectory_format"] = args.trajectory_format
     _WORKER_STATE["video_config"] = args.video_config
     _WORKER_STATE["measure_action_consistency"] = args.measure_action_consistency
+    _WORKER_STATE["energy_budget"] = args.energy_budget
 
 
 # ----------------------------------------------------------------------------
@@ -370,6 +379,7 @@ def execute_one(
     trajectory_format: TrajectoryFormat = "npz",
     video_config: VideoConfig | None = None,
     measure_action_consistency: bool = False,
+    energy_budget: float | None = None,
 ) -> Episode:
     """Drive one (cell, episode) rollout to completion.
 
@@ -486,6 +496,15 @@ def execute_one(
     )
     variance_sum = 0.0
     variance_count = 0
+    # B-30 safety-violation accumulators. ``safety_observed`` flips True
+    # the first time the env publishes any of the three per-step safety
+    # keys; backends that publish nothing leave it False and the
+    # Episode carries ``None`` for all three counted fields. Mirrors
+    # the actuator-telemetry "MuJoCo first, others None" contract.
+    safety_observed = False
+    n_collisions_acc = 0
+    n_joint_excursions_acc = 0
+    n_workspace_excursions_acc = 0
     while not (terminated or truncated):
         if sample_policy is not None and step_count % CONSISTENCY_STRIDE == 0:
             # Sample N actions for the current obs (state-preserving on
@@ -533,6 +552,25 @@ def execute_one(
             torque_norm_samples += 1
             if t > torque_norm_peak:
                 torque_norm_peak = t
+        # B-30 safety telemetry. Each key is independent — an env may
+        # publish collisions but not workspace bounds, etc. ``safety_observed``
+        # flips on the first of any present key so partial-coverage envs
+        # still get tagged as "telemetry surfaced" rather than ``None``
+        # across the board.
+        col_delta = info.get("safety_n_collisions_delta")
+        joint_violation = info.get("safety_joint_limit_violation")
+        workspace_violation = info.get("safety_workspace_excursion")
+        if col_delta is not None:
+            safety_observed = True
+            n_collisions_acc += int(col_delta)
+        if joint_violation is not None:
+            safety_observed = True
+            if bool(joint_violation):
+                n_joint_excursions_acc += 1
+        if workspace_violation is not None:
+            safety_observed = True
+            if bool(workspace_violation):
+                n_workspace_excursions_acc += 1
 
     # Resolve the B-18 action-variance scalar. ``None`` covers three
     # honest cases: (a) the user did not opt in via
@@ -556,6 +594,24 @@ def execute_one(
         actuator_energy = energy_total
         mean_torque_norm = torque_norm_sum / torque_norm_samples
         peak_torque_norm = torque_norm_peak
+
+    # B-30 safety-violation field resolution. ``safety_observed`` False
+    # collapses every counted field to ``None`` (not ``0``) — distinct
+    # backends that publish nothing must not look like backends that
+    # publish "zero violations". ``energy_over_budget`` is a derived
+    # bool: present only when both an ``energy_budget`` is configured
+    # AND the env publishes torque telemetry (so we have a real
+    # ``actuator_energy`` to compare against).
+    n_collisions: int | None = None
+    n_joint_limit_excursions: int | None = None
+    n_workspace_excursions: int | None = None
+    if safety_observed:
+        n_collisions = int(n_collisions_acc)
+        n_joint_limit_excursions = int(n_joint_excursions_acc)
+        n_workspace_excursions = int(n_workspace_excursions_acc)
+    energy_over_budget: bool | None = None
+    if energy_budget is not None and actuator_energy is not None:
+        energy_over_budget = bool(actuator_energy > energy_budget)
 
     success = bool(info.get("success", False))
 
@@ -611,6 +667,10 @@ def execute_one(
         mean_torque_norm=mean_torque_norm,
         peak_torque_norm=peak_torque_norm,
         action_variance=action_variance,
+        n_collisions=n_collisions,
+        n_joint_limit_excursions=n_joint_limit_excursions,
+        energy_over_budget=energy_over_budget,
+        n_workspace_excursions=n_workspace_excursions,
     )
 
     if record_trajectory:
@@ -708,6 +768,9 @@ def run_work_item(item: WorkItem) -> Episode:
     # B-18 mode-collapse opt-in. Default ``False`` keeps the rollout
     # byte-identical for workers initialised by pre-B-18 code paths.
     measure = bool(_WORKER_STATE.get("measure_action_consistency", False))
+    # B-30 actuator-energy budget. ``None`` keeps Episode.energy_over_budget
+    # ``None`` for workers initialised by pre-B-30 code paths.
+    energy_budget: float | None = _WORKER_STATE.get("energy_budget")
     return execute_one(
         env,
         policy_factory,
@@ -716,4 +779,5 @@ def run_work_item(item: WorkItem) -> Episode:
         trajectory_format=trajectory_format,
         video_config=video_config,
         measure_action_consistency=measure,
+        energy_budget=energy_budget,
     )

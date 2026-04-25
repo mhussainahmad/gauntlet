@@ -161,6 +161,20 @@ class FailureCluster(BaseModel):
     # ``0.0`` (which would mean true mode collapse).
     mean_action_variance: float | None = None
 
+    # B-30: per-cluster aggregates of the safety-violation telemetry on
+    # :class:`gauntlet.runner.Episode`. Each field is the cluster mean
+    # across the episodes that *did* report a value — episodes whose
+    # backend left the field ``None`` are dropped from both numerator
+    # and denominator (same partial-coverage handling as the actuator
+    # trio above). ``None`` here means "no episode in this cluster
+    # carried safety telemetry"; the HTML report renders ``None`` as a
+    # dash, never as ``0``. Failure clusters surface these so a human
+    # reading the report can see "this combo fails AND collides 4x per
+    # rollout" — the safety-vs-success asymmetry the B-30 spec calls
+    # out.
+    mean_collisions: float | None = None
+    mean_joint_excursions: float | None = None
+
 
 class Heatmap2D(BaseModel):
     """2D success-rate matrix for a pair of axes.
@@ -264,3 +278,14 @@ class Report(BaseModel):
     # ``suite.sampling == "sobol"`` (Sobol indices need full sample
     # structure per B-19).
     pruned_at_cell: int | None = None
+    # B-30: fraction of *successful* episodes that were also safe (zero
+    # safety violations recorded). ``None`` when no episode carried
+    # safety telemetry at all (the partial-coverage dataset case) or
+    # when there were no successes to begin with — distinct from
+    # ``0.0`` (which would mean "every success was unsafe"). The
+    # ``success_unsafe`` framing the B-30 spec calls out is the
+    # complement: ``success_unsafe_rate = success_rate - success_safe_rate``
+    # whenever both are defined. Old report.json files written before
+    # B-30 round-trip via ``Report.model_validate`` because the field
+    # defaults to ``None``.
+    success_safe_rate: float | None = None
