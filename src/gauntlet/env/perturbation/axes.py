@@ -45,6 +45,20 @@ one semantic-distractor object-swap axis:
   :class:`gauntlet.env.color_attack.ColorShiftWrapper`; backends do not
   consume this axis directly. See that module for the legal id set and
   the honest "synthetic proxy, NOT real-world illumination" framing.
+* :func:`inference_delay_jitter` — categorical, millisecond-valued
+  stale-action proxy axis (B-38). Real-Time Chunking (arXiv 2506.07339,
+  Black et al.) and "Leave No Observation Behind" (arXiv 2509.23224)
+  both show that even ~100 ms of action staleness collapses naive
+  chunked policies. The axis value is interpreted as how many env
+  steps the action is *delayed by* — at step ``k``, the env receives
+  the action that was computed at step ``k - floor(delay_ms /
+  control_dt_ms)``. Anti-feature note (mirrors the backlog wording):
+  this is a **stale-action proxy, not a wall-time delay** — a
+  literal ``time.sleep`` in the rollout would slow the test suite
+  by minutes-per-episode for sub-second latency budgets without
+  faithfully simulating the staleness pathway. Backend-agnostic; the
+  worker (not the env) owns the FIFO and filters this axis out before
+  calling :meth:`GauntletEnv.set_perturbation`.
 * :func:`camera_extrinsics` — categorical, integer-coded extrinsics
   index (B-42). Each index resolves to a structured 6-D pose delta
   ``{translation: [dx, dy, dz], rotation: [drx, dry, drz]}`` (rotation
@@ -101,6 +115,7 @@ __all__ = [
     "color_shift_synthetic",
     "distractor_count",
     "image_attack",
+    "inference_delay_jitter",
     "initial_state_ood",
     "instruction_paraphrase",
     "lighting_intensity",
@@ -175,6 +190,14 @@ DEFAULT_BOUNDS: Final[dict[str, tuple[float, float]]] = {
     # for the categorical sampler; the wrapper rounds to the nearest
     # legal id at apply time and rejects anything else.
     "color_shift_synthetic": (0.0, 5.0),
+    # B-38 — categorical stale-action delay in milliseconds. The default
+    # bounds cover the canonical (0, 50, 200, 500) ms grid from the
+    # backlog entry; the actual values come from the suite YAML's
+    # ``values:`` list and the worker rounds them through ``floor`` to
+    # an integer step count using the env's ``control_dt`` (or the
+    # 50 ms / 20 Hz fallback). A 1-second ceiling on the default
+    # sampler is generous — real suites override via the YAML.
+    "inference_delay_jitter": (0.0, 1000.0),
 }
 
 
@@ -503,6 +526,61 @@ def camera_extrinsics() -> PerturbationAxis:
     )
 
 
+def inference_delay_jitter() -> PerturbationAxis:
+    """Categorical inference-delay (stale-action proxy) axis (B-38).
+
+    Values are millisecond magnitudes. The default sampler covers the
+    canonical ``(0, 50, 200, 500)`` ms grid from the backlog entry; real
+    suites override the cardinality via the YAML ``values:`` list and
+    the worker honours that list verbatim. ``0 ms`` is the no-delay
+    baseline — choosing it is byte-identical to the no-jitter path.
+
+    **Anti-feature note (spec): stale-action proxy, not wall-time delay.**
+    A literal ``time.sleep`` in the rollout would slow the test suite by
+    ``delay_ms * n_steps_per_episode`` per rollout (minutes for a
+    sub-second budget on long episodes) without faithfully reproducing
+    the failure mode. Instead, the runner caches recent actions in a
+    FIFO and at step ``k`` delivers the action computed at step
+    ``k - floor(delay_ms / control_dt_ms)``. The first
+    ``floor(delay_ms / control_dt_ms)`` steps receive a zero action
+    (``np.zeros_like(action)``) — see
+    :func:`gauntlet.runner.worker.execute_one` for the full FIFO
+    contract.
+
+    The axis is *backend-agnostic* and applies to ALL backends (no
+    ``VISUAL_ONLY_AXES`` restriction). It is *runner-owned*: the worker
+    pops it out of the per-cell ``perturbation_values`` dict before
+    calling :meth:`GauntletEnv.set_perturbation`, so the env never sees
+    it. (Mirrors the wrapper-only pattern of B-31 ``image_attack`` and
+    B-05 ``instruction_paraphrase``, except the dispatcher is the runner
+    rather than an env wrapper because staleness is a control-loop
+    property, not an observation property.)
+
+    Pairs with B-37's inference-latency machinery: the synthetic delay
+    is **deliberately not counted** toward
+    :attr:`gauntlet.runner.Episode.inference_latency_ms_p99`. The B-37
+    measurement brackets only ``policy.act`` (not the FIFO bookkeeping),
+    so a fast policy with ``inference_delay_jitter=500`` reports the
+    policy's true compute cost while the staleness shows up as failed
+    rollouts via the success-rate downstream metric.
+
+    References: Real-Time Chunking (arXiv 2506.07339, Black et al.) —
+    even ~100 ms of action staleness collapses naive chunked policies;
+    "Leave No Observation Behind" (arXiv 2509.23224) — the dual claim
+    on the observation side.
+    """
+    lo, hi = DEFAULT_BOUNDS["inference_delay_jitter"]
+    return PerturbationAxis(
+        name="inference_delay_jitter",
+        kind=AXIS_KIND_CATEGORICAL,
+        # Default sampler: the canonical (0, 50, 200, 500) ms grid from
+        # the backlog. Real suites override via the YAML ``values:``.
+        sampler=make_categorical_sampler((0.0, 50.0, 200.0, 500.0)),
+        low=lo,
+        high=hi,
+    )
+
+
 def distractor_count(*, low: int | None = None, high: int | None = None) -> PerturbationAxis:
     """Number of visible distractor objects (integer, [0, 10])."""
     lo_f, hi_f = _resolve_bounds("distractor_count", low, high)
@@ -535,6 +613,7 @@ _DEFAULT_CONSTRUCTORS: Final[dict[str, AxisCtor]] = {
     "object_swap": object_swap,
     "camera_extrinsics": camera_extrinsics,
     "color_shift_synthetic": color_shift_synthetic,
+    "inference_delay_jitter": inference_delay_jitter,
 }
 
 

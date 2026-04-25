@@ -49,6 +49,9 @@ from gauntlet.env.perturbation.axes import (
     image_attack as image_attack,
 )
 from gauntlet.env.perturbation.axes import (
+    inference_delay_jitter as inference_delay_jitter,
+)
+from gauntlet.env.perturbation.axes import (
     initial_state_ood as initial_state_ood,
 )
 from gauntlet.env.perturbation.axes import (
@@ -113,6 +116,7 @@ AXIS_NAMES: Final[tuple[str, ...]] = (
     "object_swap",
     "camera_extrinsics",
     "color_shift_synthetic",
+    "inference_delay_jitter",
 )
 
 
@@ -133,6 +137,7 @@ __all__ = [
     "color_shift_synthetic",
     "distractor_count",
     "image_attack",
+    "inference_delay_jitter",
     "initial_state_ood",
     "instruction_paraphrase",
     "lighting_intensity",
