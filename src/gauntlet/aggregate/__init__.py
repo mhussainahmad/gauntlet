@@ -21,12 +21,20 @@ from gauntlet.aggregate.html import render_fleet_html as render_fleet_html
 from gauntlet.aggregate.html import write_fleet_html as write_fleet_html
 from gauntlet.aggregate.schema import FleetReport as FleetReport
 from gauntlet.aggregate.schema import FleetRun as FleetRun
+from gauntlet.aggregate.sim_real import AxisTransfer as AxisTransfer
+from gauntlet.aggregate.sim_real import SimRealReport as SimRealReport
+from gauntlet.aggregate.sim_real import (
+    compute_sim_real_correlation as compute_sim_real_correlation,
+)
 
 __all__ = [
+    "AxisTransfer",
     "FleetReport",
     "FleetRun",
+    "SimRealReport",
     "aggregate_directory",
     "aggregate_reports",
+    "compute_sim_real_correlation",
     "discover_run_files",
     "render_fleet_html",
     "write_fleet_html",

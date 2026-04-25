@@ -23,6 +23,7 @@ off exit status.
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
@@ -1464,6 +1465,120 @@ def aggregate(
         f"  persistent failure clusters: [{cluster_style}]{n_clusters}[/] "
         f"(threshold >={persistence_threshold:.2f})"
     )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# `aggregate-sim-real` subcommand — paired sim/real correlation (B-28).
+# ──────────────────────────────────────────────────────────────────────
+#
+# SureSim (arxiv 2510.04354, Oct 2025) and SIMPLER (arxiv 2405.05941,
+# CoRL 2024) both demonstrate that paired sim-real correlation is the
+# gold-standard sim-to-real validity signal. This subcommand ingests
+# two directories of ``episodes.json`` files (sim side, real side),
+# matches by ``(suite_hash, cell_index, episode_index)``, and writes a
+# per-axis correlation table to ``<out>/sim_real_report.json``.
+
+
+@app.command("aggregate-sim-real")
+def aggregate_sim_real(
+    sim_dir: Annotated[
+        Path,
+        typer.Argument(
+            help="Directory of sim-side episodes.json files (recursively scanned).",
+            exists=False,  # checked manually for a friendlier message
+            file_okay=False,
+            dir_okay=True,
+        ),
+    ],
+    real_dir: Annotated[
+        Path,
+        typer.Argument(
+            help="Directory of real-side episodes.json files (recursively scanned).",
+            exists=False,
+            file_okay=False,
+            dir_okay=True,
+        ),
+    ],
+    out: Annotated[
+        Path,
+        typer.Option(
+            "--out",
+            "-o",
+            help="Output directory; created if missing. Receives sim_real_report.json.",
+        ),
+    ],
+    top_n: Annotated[
+        int,
+        typer.Option(
+            "--top-n",
+            min=1,
+            help="How many axes to print on stderr, sorted by |correlation|.",
+        ),
+    ] = 10,
+) -> None:
+    """Pair sim/real episodes and emit a per-axis correlation report (B-28)."""
+    if not sim_dir.is_dir():
+        raise _fail(f"sim directory not found: {sim_dir}")
+    if not real_dir.is_dir():
+        raise _fail(f"real directory not found: {real_dir}")
+
+    # Lazy import — keeps `gauntlet --help` snappy.
+    from gauntlet.aggregate import compute_sim_real_correlation
+
+    try:
+        report = compute_sim_real_correlation(sim_dir, real_dir)
+    except FileNotFoundError as exc:
+        raise _fail(str(exc)) from exc
+    except ValueError as exc:
+        raise _fail(str(exc)) from exc
+
+    out.mkdir(parents=True, exist_ok=True)
+    report_json_path = out / "sim_real_report.json"
+    _write_json(report_json_path, report.model_dump(mode="json"))
+
+    _echo_err(f"[ok]Wrote[/] {_fmt_path(report_json_path)}")
+    _echo_err(
+        f"  paired episodes: {report.n_paired_total} "
+        f"(unmatched: sim={report.n_unmatched_sim}, real={report.n_unmatched_real})"
+    )
+    _echo_err(f"  overall correlation: {_fmt_correlation(report.overall_correlation)}")
+
+    if not report.per_axis:
+        _echo_err("  no axes with paired data")
+        return
+
+    # Sort by absolute correlation descending — anti-correlated axes
+    # (negative r) and tightly correlated axes (positive r) both rise
+    # to the top; the middle (~0) is the "matters in sim, not in real"
+    # band that SureSim flags.
+    def _abs_corr(axis: str) -> float:
+        c = report.per_axis[axis].correlation
+        return abs(c) if math.isfinite(c) else -1.0
+
+    ordered = sorted(report.per_axis.keys(), key=_abs_corr, reverse=True)
+    _echo_err(f"  top {min(top_n, len(ordered))} axes by |correlation|:")
+    for axis in ordered[:top_n]:
+        row = report.per_axis[axis]
+        _echo_err(
+            f"    [path]{axis}[/]: r={_fmt_correlation(row.correlation)} "
+            f"(sim {_fmt_success_rate(row.sim_mean)} vs "
+            f"real {_fmt_success_rate(row.real_mean)}; "
+            f"n={row.n_paired_episodes})"
+        )
+
+
+def _fmt_correlation(corr: float) -> str:
+    """Render a Pearson correlation with band colouring; NaN renders as a dash."""
+    if not math.isfinite(corr):
+        return "[delta.zero]nan[/]"
+    abs_c = abs(corr)
+    if abs_c >= 0.7:
+        style = "pct.good"
+    elif abs_c >= 0.3:
+        style = "pct.mid"
+    else:
+        style = "pct.bad"
+    return f"[{style}]{corr:+.3f}[/]"
 
 
 # ──────────────────────────────────────────────────────────────────────
