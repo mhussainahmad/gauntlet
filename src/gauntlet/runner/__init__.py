@@ -26,12 +26,14 @@ from gauntlet.runner.provenance import (
 from gauntlet.runner.provenance import capture_git_commit as capture_git_commit
 from gauntlet.runner.provenance import compute_suite_hash as compute_suite_hash
 from gauntlet.runner.runner import Runner as Runner
+from gauntlet.runner.worker import TrajectoryFormat as TrajectoryFormat
 from gauntlet.runner.worker import WorkItem as WorkItem
 from gauntlet.runner.worker import execute_one as execute_one
 
 __all__ = [
     "Episode",
     "Runner",
+    "TrajectoryFormat",
     "WorkItem",
     "capture_gauntlet_version",
     "capture_git_commit",
