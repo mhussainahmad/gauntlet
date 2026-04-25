@@ -33,6 +33,7 @@ from pydantic import ValidationError
 from rich.console import Console
 from rich.theme import Theme
 
+from gauntlet.diff import diff_reports, render_text
 from gauntlet.env.base import GauntletEnv
 from gauntlet.env.registry import get_env_factory
 from gauntlet.policy.registry import PolicySpecError, resolve_policy_factory
@@ -647,6 +648,109 @@ def compare(
     _echo_err(
         f"  regressions: [{regressions_style}]{n_regressions}[/]  "
         f"improvements: [{improvements_style}]{n_improvements}[/]"
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# `diff` subcommand — git-diff-style structured per-axis report deltas.
+# ──────────────────────────────────────────────────────────────────────
+#
+# ``compare`` answers a yes/no question (did anything regress beyond the
+# threshold?). ``diff`` answers "what moved?" — per-axis rate deltas,
+# per-cell flips, and the failure-cluster set difference. The default
+# render is human-readable text via :func:`render_text`; ``--json`` emits
+# the :class:`ReportDiff.model_dump_json(indent=2)` for machine
+# consumption.
+#
+# Both inputs accept either an ``episodes.json`` (rebuilt into a Report)
+# or a ``report.json`` — same auto-detect as ``compare`` / ``report``.
+
+
+@app.command("diff")
+def diff(
+    results_a: Annotated[
+        Path,
+        typer.Argument(help="First run: episodes.json or report.json."),
+    ],
+    results_b: Annotated[
+        Path,
+        typer.Argument(help="Second run: episodes.json or report.json."),
+    ],
+    json_output: Annotated[
+        bool,
+        typer.Option(
+            "--json",
+            help=(
+                "Emit ReportDiff.model_dump_json(indent=2) on stdout for "
+                "machine consumption instead of the human-readable text."
+            ),
+        ),
+    ] = False,
+    cell_flip_threshold: Annotated[
+        float,
+        typer.Option(
+            "--cell-flip-threshold",
+            help=(
+                "Inclusive minimum |b.success_rate - a.success_rate| to "
+                "surface a per-cell flip. Two-sided."
+            ),
+            min=0.0,
+        ),
+    ] = 0.10,
+    cluster_intensify_threshold: Annotated[
+        float,
+        typer.Option(
+            "--cluster-intensify-threshold",
+            help=(
+                "Inclusive minimum (b.lift - a.lift) for a shared failure "
+                "cluster to be reported as intensified. One-sided (lift growth)."
+            ),
+            min=0.0,
+        ),
+    ] = 0.5,
+) -> None:
+    """Emit a git-diff-style structured delta between two runs."""
+    report_a = _load_report_or_episodes(results_a)
+    report_b = _load_report_or_episodes(results_b)
+
+    if report_a.suite_name != report_b.suite_name:
+        _echo_err(
+            f"[warn]warning:[/] diffing across suites — a={report_a.suite_name!r} vs "
+            f"b={report_b.suite_name!r}"
+        )
+
+    try:
+        result = diff_reports(
+            report_a,
+            report_b,
+            a_label=str(results_a),
+            b_label=str(results_b),
+            cell_flip_threshold=cell_flip_threshold,
+            cluster_intensify_threshold=cluster_intensify_threshold,
+        )
+    except ValueError as exc:
+        raise _fail(str(exc)) from exc
+
+    if json_output:
+        # Stdout is reserved for machine-readable payloads (CLI module
+        # docstring); rich.Console default is stderr. Use typer.echo to
+        # stdout so ``gauntlet diff a b --json | jq`` works unchanged.
+        typer.echo(result.model_dump_json(indent=2))
+    else:
+        # Plain-text render goes through the rich Console so a TTY gets
+        # markup-free output (the renderer emits no ANSI itself) and the
+        # console handles soft-wrap / NO_COLOR. Print to stdout via
+        # typer.echo so users can redirect ``> diff.txt`` cleanly.
+        typer.echo(render_text(result), nl=False)
+
+    # Always emit a one-line stderr summary so the user can spot the
+    # headline even when the body is redirected to a file / pipe.
+    _echo_err(
+        f"[ok]Diffed[/] {_fmt_path(results_a)} -> {_fmt_path(results_b)}: "
+        f"overall {_fmt_signed_pct(result.overall_success_rate_delta)}, "
+        f"cell flips: {len(result.cell_flips)}, "
+        f"clusters +{len(result.cluster_added)}/-{len(result.cluster_removed)}/"
+        f"!{len(result.cluster_intensified)}"
     )
 
 
