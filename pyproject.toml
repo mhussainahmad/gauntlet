@@ -536,6 +536,10 @@ module = [
     "gauntlet.env.tabletop",
     # ``Callable[..., AxisSampler]`` factory ParamSpec (perturbation registry).
     "gauntlet.env.perturbation.base",
+    # B-31 — wraps any GauntletEnv; carries the same gymnasium
+    # ``Space[Any]`` + ``dict[str, Any]`` Protocol surface as the
+    # backend env modules above.
+    "gauntlet.env.image_attack",
     # PyBullet / Genesis / Isaac backend wrappers — backend C++ surfaces
     # carry no stubs (RFC-005 §11 / RFC-007 §4.2 / RFC-009 §4.4).
     "gauntlet.env.pybullet",

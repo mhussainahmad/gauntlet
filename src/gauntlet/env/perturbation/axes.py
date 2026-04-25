@@ -1,7 +1,8 @@
 """Concrete perturbation axes for the tabletop env.
 
 See ``GAUNTLET_SPEC.md`` §5 task 4. Five logical perturbation categories
-expand into seven base scalar axes plus one OOD-shift axis:
+expand into seven base scalar axes plus one OOD-shift axis plus one
+post-render image-attack axis:
 
 * :func:`lighting_intensity` — single scalar (one-channel grayscale level).
 * :func:`camera_offset_x` / :func:`camera_offset_y` — two scalars covering
@@ -15,6 +16,10 @@ expand into seven base scalar axes plus one OOD-shift axis:
   of ``V * prior_std * sign_per_dim`` from ``prior_mean`` (LIBERO-PRO /
   LIBERO-Plus framing — see backlog B-32). The prior is configured on the
   env via :meth:`gauntlet.env.tabletop.TabletopEnv.set_initial_state_ood_prior`.
+* :func:`image_attack` — categorical, integer-coded sensor-attack id
+  (B-31). Operates **post-render** via
+  :class:`gauntlet.env.image_attack.ImageAttackWrapper`; backends do not
+  consume this axis directly. See that module for the legal id set.
 
 Each constructor returns a :class:`PerturbationAxis` with sensible
 default bounds. Callers that load axes from YAML (Task 5) override the
@@ -46,6 +51,7 @@ __all__ = [
     "camera_offset_x",
     "camera_offset_y",
     "distractor_count",
+    "image_attack",
     "initial_state_ood",
     "lighting_intensity",
     "object_initial_pose_x",
@@ -70,6 +76,11 @@ DEFAULT_BOUNDS: Final[dict[str, tuple[float, float]]] = {
     "object_initial_pose_y": (-0.15, 0.15),
     "distractor_count": (0.0, 10.0),  # int
     "initial_state_ood": (0.0, 5.0),  # unitless sigma multiplier
+    # B-31 — categorical attack id; legal ids enumerated by
+    # ``gauntlet.env.image_attack.ATTACK_IDS``. Range is informational
+    # for the categorical sampler; the wrapper rounds to the nearest
+    # legal id at apply time and rejects anything else.
+    "image_attack": (0.0, 5.0),
 }
 
 
@@ -179,6 +190,38 @@ def initial_state_ood(*, low: float | None = None, high: float | None = None) ->
     )
 
 
+def image_attack() -> PerturbationAxis:
+    """Categorical post-render image-attack axis (B-31).
+
+    Values are integer-coded attack ids — see
+    :data:`gauntlet.env.image_attack.ATTACK_IDS` for the legal set
+    (``0`` = none / baseline, ``1`` = gaussian-low, ..., ``5`` =
+    dropout-one-camera). The float form survives the suite YAML
+    ``values:`` shape and is rounded back to int by the wrapper.
+
+    The axis is *backend-agnostic*: the inner :class:`GauntletEnv`
+    backends do not consume it. Apply only via
+    :class:`gauntlet.env.image_attack.ImageAttackWrapper` which
+    intercepts ``set_perturbation("image_attack", ...)`` and operates
+    on the rendered ``obs["image"]`` / ``obs["images"][name]`` arrays.
+    Routing into a raw backend env will raise ``ValueError`` from the
+    backend's ``set_perturbation`` since ``"image_attack"`` is not in
+    its ``AXIS_NAMES`` ClassVar.
+    """
+    # Lazy import: image_attack pulls Pillow only at JPEG-attack apply
+    # time; the registry import path stays headless and dep-free.
+    from gauntlet.env.image_attack import ATTACK_IDS
+
+    lo, hi = DEFAULT_BOUNDS["image_attack"]
+    return PerturbationAxis(
+        name="image_attack",
+        kind=AXIS_KIND_CATEGORICAL,
+        sampler=make_categorical_sampler(tuple(float(i) for i in ATTACK_IDS)),
+        low=lo,
+        high=hi,
+    )
+
+
 def distractor_count(*, low: int | None = None, high: int | None = None) -> PerturbationAxis:
     """Number of visible distractor objects (integer, [0, 10])."""
     lo_f, hi_f = _resolve_bounds("distractor_count", low, high)
@@ -206,6 +249,7 @@ _DEFAULT_CONSTRUCTORS: Final[dict[str, AxisCtor]] = {
     "object_initial_pose_y": object_initial_pose_y,
     "distractor_count": distractor_count,
     "initial_state_ood": initial_state_ood,
+    "image_attack": image_attack,
 }
 
 
