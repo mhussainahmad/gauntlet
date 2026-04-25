@@ -85,3 +85,31 @@ class Episode(BaseModel):
     # web server. Default ``None`` keeps the field semantically inert
     # for the byte-identical opt-out path.
     video_path: str | None = None
+
+    # ------------------------------------------------------------------
+    # Provenance trio (B-22) — populated by :class:`Runner` so every
+    # Episode carries enough context to be re-rolled on a fresh checkout.
+    # All three default to ``None`` for backwards compatibility with
+    # episodes.json files emitted before B-22; an old reader that lacks
+    # these fields would still reject the JSON because of
+    # ``extra="forbid"`` (see the ``video_path`` note above), but a new
+    # reader on an old file loads cleanly under the field default.
+    # ------------------------------------------------------------------
+
+    # Installed ``gauntlet`` distribution version captured at run time
+    # via :func:`importlib.metadata.version`. ``None`` when the package
+    # is not importable as an installed distribution (e.g. a checkout
+    # used without ``pip install -e .``).
+    gauntlet_version: str | None = None
+
+    # SHA-256 hex digest of the canonical Suite payload that produced
+    # this Episode (``Suite.model_dump_json(...)`` bytes; see
+    # :func:`gauntlet.runner.runner.compute_suite_hash`). Stable under
+    # YAML formatting differences because the hash is computed over the
+    # validated Pydantic model, not the raw file bytes.
+    suite_hash: str | None = None
+
+    # Output of ``git rev-parse HEAD`` captured in the working copy at
+    # run time, or ``None`` when the run happened outside a git checkout
+    # (e.g. a packaged tarball or a CI shallow without ``.git``).
+    git_commit: str | None = None

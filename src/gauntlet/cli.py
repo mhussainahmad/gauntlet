@@ -46,7 +46,9 @@ from gauntlet.replay import OverrideError, parse_override, replay_one
 from gauntlet.report import CellBreakdown, Report, build_report, write_html
 from gauntlet.report.html import _nan_to_none
 from gauntlet.runner import Episode, Runner
+from gauntlet.runner.provenance import compute_suite_hash
 from gauntlet.suite import LintFinding, lint_suite, load_suite
+from gauntlet.suite.schema import Suite
 
 __all__ = ["app"]
 
@@ -335,6 +337,104 @@ def _make_env_factory(
 
 
 # ──────────────────────────────────────────────────────────────────────
+# `repro.json` writer (B-22 — episode-level seed manifest).
+# ──────────────────────────────────────────────────────────────────────
+
+
+def _episode_repro_id(episode: Episode) -> str:
+    """Canonical human-friendly id used in ``gauntlet repro <id>``.
+
+    Mirrors the wording the spec gives ("e.g. ``cell_3_episode_7``").
+    Both halves are integers so the shape ``cell_{int}_episode_{int}``
+    is unambiguous and stable under round-trip through ``repro.json``.
+    """
+    return f"cell_{episode.cell_index}_episode_{episode.episode_index}"
+
+
+def _build_repro_payload(
+    *,
+    episodes: list[Episode],
+    suite: Suite,
+    suite_path: Path,
+    policy: str,
+    seed_override: int | None,
+    env_max_steps: int | None,
+) -> dict[str, _JsonValue]:
+    """Assemble the ``repro.json`` payload for one ``gauntlet run``.
+
+    Keys at the top level:
+
+    * ``schema_version`` — bumped on incompatible field changes.
+    * ``suite_path`` — the YAML path the user passed (anchored to the
+      cwd of the run for portability across machines is left to the
+      user; we record what was given).
+    * ``suite_name`` / ``suite_env`` — quick human cross-check.
+    * ``policy`` — the resolver string the user passed (``random``,
+      ``module.path:attr``, etc.). ``gauntlet repro`` reuses this to
+      reconstruct the policy without a separate flag.
+    * ``seed_override`` / ``env_max_steps`` — echo of the run-time CLI
+      knobs so a subsequent repro matches end-to-end.
+    * ``episodes`` — one entry per Episode keyed off
+      :func:`_episode_repro_id`.
+
+    Per-episode fields (``axis_config`` is a copy of
+    :attr:`Episode.perturbation_config` keyed by axis name):
+
+    * ``episode_id``, ``cell_index``, ``episode_index``
+    * ``env_seed`` (alias of :attr:`Episode.seed`)
+    * ``policy_seed`` (mirror of ``env_seed``: both streams derive from
+      the same SeedSequence node — see runner.runner module docstring)
+    * ``axis_config``
+    * ``gauntlet_version`` / ``suite_hash`` / ``git_commit``
+
+    The output is written with ``sort_keys=True`` so byte-comparing two
+    ``repro.json`` files is a meaningful regression signal.
+    """
+    per_episode: list[dict[str, _JsonValue]] = []
+    for ep in episodes:
+        per_episode.append(
+            {
+                "episode_id": _episode_repro_id(ep),
+                "cell_index": ep.cell_index,
+                "episode_index": ep.episode_index,
+                "env_seed": ep.seed,
+                "policy_seed": ep.seed,
+                "axis_config": cast("_JsonValue", dict(ep.perturbation_config)),
+                "gauntlet_version": ep.gauntlet_version,
+                "suite_hash": ep.suite_hash,
+                "git_commit": ep.git_commit,
+            }
+        )
+    payload: dict[str, _JsonValue] = {
+        "schema_version": 1,
+        "suite_path": str(suite_path),
+        "suite_name": suite.name,
+        "suite_env": suite.env,
+        "suite_hash": compute_suite_hash(suite),
+        "policy": policy,
+        "seed_override": seed_override,
+        "env_max_steps": env_max_steps,
+        "episodes": cast("_JsonValue", per_episode),
+    }
+    return payload
+
+
+def _write_repro_json(path: Path, payload: dict[str, _JsonValue]) -> None:
+    """Write ``repro.json`` with deterministic ordering.
+
+    Uses ``sort_keys=True`` (unlike :func:`_write_json`) so two repro
+    manifests produced from the same run on different machines hash
+    identically. NaN / inf cleansing is unnecessary here — every value
+    in the payload is an int / str / None / nested dict, never a float
+    that could be non-finite.
+    """
+    path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False, allow_nan=False, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────
 # `run` subcommand.
 # ──────────────────────────────────────────────────────────────────────
 
@@ -516,9 +616,25 @@ def run(
     episodes_path = out / "episodes.json"
     report_json_path = out / "report.json"
     report_html_path = out / "report.html"
+    repro_path = out / "repro.json"
 
     _write_json(episodes_path, cast("_JsonValue", _episodes_to_dicts(episodes)))
     _write_json(report_json_path, cast("_JsonValue", report.model_dump(mode="json")))
+
+    # B-22: episode-level seed manifest with full provenance. Always
+    # written next to ``episodes.json`` so ``gauntlet repro`` can pick
+    # it up by ``--out`` directory alone (no extra flag required).
+    _write_repro_json(
+        repro_path,
+        _build_repro_payload(
+            episodes=episodes,
+            suite=suite,
+            suite_path=suite_path,
+            policy=policy,
+            seed_override=seed_override,
+            env_max_steps=env_max_steps,
+        ),
+    )
 
     if not no_html:
         write_html(report, report_html_path)
@@ -1475,6 +1591,237 @@ def replay(
         f"steps={replayed.step_count} reward={replayed.total_reward:.4f} "
         f"(delta [{reward_delta_style}]{delta_reward:+.4f}[/])"
     )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# `repro` subcommand (B-22) — episode-level reproducibility check.
+# ──────────────────────────────────────────────────────────────────────
+
+
+# Fields compared between the original Episode and the freshly-rolled
+# repro Episode for the bit-identity assertion. We intentionally exclude
+# the provenance trio (``gauntlet_version`` / ``suite_hash`` /
+# ``git_commit``) and ``video_path`` — the whole point of ``gauntlet
+# repro`` is to detect drift between the originating run's checkout and
+# the current checkout, which would otherwise spuriously fail every
+# repro that happens to be run from a different commit. The list mirrors
+# every field that is part of the determinism contract documented in
+# ``GAUNTLET_SPEC.md`` §6 plus :class:`Episode`'s identity tuple.
+_REPRO_BITWISE_FIELDS: tuple[str, ...] = (
+    "suite_name",
+    "cell_index",
+    "episode_index",
+    "seed",
+    "perturbation_config",
+    "success",
+    "terminated",
+    "truncated",
+    "step_count",
+    "total_reward",
+)
+
+
+def _episode_diff_summary(original: Episode, replayed: Episode) -> list[str]:
+    """Return one human-readable line per mismatching field.
+
+    Empty list means bit-identical on the determinism-contract subset.
+    """
+    diffs: list[str] = []
+    for field in _REPRO_BITWISE_FIELDS:
+        a = getattr(original, field)
+        b = getattr(replayed, field)
+        if a != b:
+            diffs.append(f"  {field}: original={a!r} repro={b!r}")
+    return diffs
+
+
+@app.command("repro")
+def repro(
+    episode_id: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "Episode id from a prior run, e.g. 'cell_3_episode_7'. "
+                "Looked up in <out>/repro.json."
+            ),
+        ),
+    ],
+    out: Annotated[
+        Path,
+        typer.Option(
+            "--out",
+            "-o",
+            help=(
+                "Run output directory containing repro.json + "
+                "episodes.json (the same path the original 'gauntlet run' "
+                "wrote to)."
+            ),
+        ),
+    ] = Path("out"),
+    env_max_steps: Annotated[
+        int | None,
+        typer.Option(
+            "--env-max-steps",
+            help="(Hidden / test hook) Override the backend env's max_steps for fast tests.",
+            hidden=True,
+            min=1,
+        ),
+    ] = None,
+) -> None:
+    """Re-run one Episode in the current checkout and assert bit-identity.
+
+    Reads ``<out>/repro.json`` for the seed manifest and
+    ``<out>/episodes.json`` for the original Episode record, reconstructs
+    the env + policy with the recorded seeds and axis_config, runs ONE
+    episode, and exits 0 on bit-identical match (state-only:
+    ``seed`` / ``success`` / ``step_count`` / ``total_reward`` / etc.)
+    or 1 on mismatch with a diff summary on stderr. Provenance fields
+    (``gauntlet_version`` / ``suite_hash`` / ``git_commit``) are
+    intentionally excluded from the comparison — drift there is the
+    *signal* the user is checking against, not a determinism failure.
+    """
+    repro_path = out / "repro.json"
+    episodes_path = out / "episodes.json"
+    if not repro_path.is_file():
+        raise _fail(f"repro manifest not found: {repro_path}")
+    if not episodes_path.is_file():
+        raise _fail(f"episodes file not found: {episodes_path}")
+
+    raw_repro = _read_json(repro_path)
+    if not isinstance(raw_repro, dict):
+        raise _fail(f"{repro_path}: expected a JSON object (got {type(raw_repro).__name__})")
+
+    raw_episodes_payload = raw_repro.get("episodes")
+    if not isinstance(raw_episodes_payload, list):
+        raise _fail(
+            f"{repro_path}: 'episodes' key missing or not a list "
+            f"(got {type(raw_episodes_payload).__name__})"
+        )
+
+    entry: dict[str, _JsonValue] | None = None
+    for raw_entry in raw_episodes_payload:
+        if not isinstance(raw_entry, dict):
+            continue
+        if raw_entry.get("episode_id") == episode_id:
+            entry = raw_entry
+            break
+    if entry is None:
+        available = [
+            r.get("episode_id")
+            for r in raw_episodes_payload
+            if isinstance(r, dict) and isinstance(r.get("episode_id"), str)
+        ]
+        preview = ", ".join(cast("list[str]", available[:10]))
+        if len(available) > 10:
+            preview += f", ... ({len(available) - 10} more)"
+        raise _fail(f"episode_id {episode_id!r} not found in {repro_path}; available: {preview}")
+
+    suite_path_raw = raw_repro.get("suite_path")
+    policy_raw = raw_repro.get("policy")
+    if not isinstance(suite_path_raw, str) or not isinstance(policy_raw, str):
+        raise _fail(
+            f"{repro_path}: 'suite_path' and 'policy' must both be strings "
+            f"(got {type(suite_path_raw).__name__} / {type(policy_raw).__name__})"
+        )
+    suite_path = Path(suite_path_raw)
+    policy = policy_raw
+
+    seed_override_raw = raw_repro.get("seed_override")
+    if seed_override_raw is not None and not isinstance(seed_override_raw, int):
+        raise _fail(
+            f"{repro_path}: 'seed_override' must be int or null "
+            f"(got {type(seed_override_raw).__name__})"
+        )
+    seed_override: int | None = seed_override_raw
+
+    # ``env_max_steps`` from the manifest is the run-time value; an
+    # explicit CLI flag wins so users testing on slow hardware can
+    # bound the rollout further. None on both sides means "use the
+    # backend default" (matches Runner's contract).
+    manifest_max_steps = raw_repro.get("env_max_steps")
+    if manifest_max_steps is not None and not isinstance(manifest_max_steps, int):
+        raise _fail(
+            f"{repro_path}: 'env_max_steps' must be int or null "
+            f"(got {type(manifest_max_steps).__name__})"
+        )
+    effective_max_steps: int | None = (
+        env_max_steps if env_max_steps is not None else manifest_max_steps
+    )
+
+    if not suite_path.is_file():
+        raise _fail(
+            f"suite file referenced by repro manifest not found: {suite_path}. "
+            f"Run 'gauntlet repro' from a checkout that contains the original "
+            f"suite YAML, or move the YAML back to its original path."
+        )
+    try:
+        suite = load_suite(suite_path)
+    except (ValidationError, ValueError) as exc:
+        raise _fail(f"{suite_path}: invalid suite YAML: {exc}") from exc
+    except OSError as exc:
+        raise _fail(f"{suite_path}: could not read file: {exc}") from exc
+
+    if seed_override is not None:
+        suite = suite.model_copy(update={"seed": seed_override})
+
+    # Locate the original Episode in episodes.json so we can compare
+    # against the bit-identity contract. The cell_index / episode_index
+    # in the manifest are the lookup key.
+    cell_index_raw = entry.get("cell_index")
+    episode_index_raw = entry.get("episode_index")
+    if not isinstance(cell_index_raw, int) or not isinstance(episode_index_raw, int):
+        raise _fail(f"{repro_path}: entry {episode_id!r} missing integer cell_index/episode_index")
+    cell_index: int = cell_index_raw
+    episode_index: int = episode_index_raw
+
+    raw_episodes = _read_json(episodes_path)
+    if not isinstance(raw_episodes, list):
+        raise _fail(
+            f"{episodes_path}: expected a list of Episode objects "
+            f"(got {type(raw_episodes).__name__})"
+        )
+    episodes = _episodes_from_dicts(raw_episodes, source=episodes_path)
+    original: Episode | None = None
+    for ep in episodes:
+        if ep.cell_index == cell_index and ep.episode_index == episode_index:
+            original = ep
+            break
+    if original is None:
+        raise _fail(f"episode {cell_index}:{episode_index} not found in {episodes_path}")
+
+    try:
+        policy_factory = resolve_policy_factory(policy)
+    except PolicySpecError as exc:
+        raise _fail(str(exc)) from exc
+
+    env_factory = _make_env_factory(suite.env, effective_max_steps)
+
+    try:
+        replayed = replay_one(
+            target=original,
+            suite=suite,
+            policy_factory=policy_factory,
+            overrides=None,
+            env_factory=env_factory,
+        )
+    except OverrideError as exc:
+        raise _fail(str(exc)) from exc
+    except ValueError as exc:
+        raise _fail(f"repro failed: {exc}") from exc
+
+    diffs = _episode_diff_summary(original, replayed)
+    if not diffs:
+        _echo_err(
+            f"[ok]repro match[/] {episode_id} "
+            f"(seed={original.seed} success={original.success} "
+            f"reward={original.total_reward:.4f})"
+        )
+        return
+
+    _echo_err(f"[err]repro mismatch[/] {episode_id}: {len(diffs)} field(s) differ")
+    for line in diffs:
+        _echo_err(line)
+    raise typer.Exit(code=1)
 
 
 # ──────────────────────────────────────────────────────────────────────

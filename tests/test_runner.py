@@ -251,10 +251,17 @@ def test_master_seed_none_runs_and_records_master_seed() -> None:
     # and the resulting Episodes must match.
     suite2 = _make_suite(seed=only, episodes_per_cell=1)
     repro = runner.run(policy_factory=make_scripted_policy, suite=suite2)
+    # B-22 provenance fields (``suite_hash`` / ``gauntlet_version`` /
+    # ``git_commit``) are intentionally excluded — ``suite_hash`` honestly
+    # differs between the two runs because the second suite has
+    # ``seed=only`` while the first had ``seed=None`` (the bit the
+    # SeedSequence consumed). The determinism contract is over the
+    # outcome fields below, not the provenance trio.
+    _provenance = {"gauntlet_version", "suite_hash", "git_commit"}
     for a, b in zip(episodes, repro, strict=True):
-        # ``suite_name`` and ``master_seed`` are identical too because we
-        # rebuilt with the same name. Compare full payloads.
-        assert a.model_dump() == b.model_dump()
+        assert {k: v for k, v in a.model_dump().items() if k not in _provenance} == {
+            k: v for k, v in b.model_dump().items() if k not in _provenance
+        }
 
 
 # ----------------------------------------------------------------------------
