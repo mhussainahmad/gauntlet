@@ -604,6 +604,22 @@ def run(
             max=1.0,
         ),
     ] = None,
+    measure_action_consistency: Annotated[
+        bool,
+        typer.Option(
+            "--measure-action-consistency",
+            help=(
+                "B-18 mode-collapse metric: every Nth rollout step, sample 8 "
+                "candidate actions from the policy and report mean per-axis "
+                "variance on Episode.action_variance (aggregated as "
+                "mean_action_variance per failure cluster). Only sampleable "
+                "policies (Random, π0, SmolVLA) expose the column; greedy "
+                "policies (Scripted, OpenVLA-greedy) honestly report None. "
+                "Off by default — adds ~8x policy-inference cost on measured "
+                "steps."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Execute a suite and write episodes / report artefacts to ``--out``."""
     if not suite_path.is_file():
@@ -649,6 +665,7 @@ def run(
             cache_dir=effective_cache_dir,
             policy_id=policy if effective_cache_dir is not None else None,
             max_steps=env_max_steps if effective_cache_dir is not None else None,
+            measure_action_consistency=measure_action_consistency,
         )
     except ValueError as exc:
         raise _fail(f"runner config invalid: {exc}") from exc

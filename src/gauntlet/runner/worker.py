@@ -55,7 +55,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from gauntlet.env.base import GauntletEnv
-from gauntlet.policy.base import Policy, ResettablePolicy
+from gauntlet.policy.base import Policy, ResettablePolicy, SamplablePolicy
 from gauntlet.runner.episode import Episode
 from gauntlet.runner.parquet import TrajectoryDict, parquet_path_for, write_parquet
 from gauntlet.runner.video import VideoWriter, video_path_for
@@ -69,6 +69,7 @@ from gauntlet.runner.video import VideoWriter, video_path_for
 TrajectoryFormat = Literal["npz", "parquet", "both"]
 
 __all__ = [
+    "CONSISTENCY_STRIDE",
     "TrajectoryFormat",
     "VideoConfig",
     "WorkItem",
@@ -80,6 +81,17 @@ __all__ = [
     "trajectory_path_for",
     "write_trajectory_npz",
 ]
+
+
+# B-18 mode-collapse measurement cadence. Sampling at every step would
+# multiply policy inference cost by N; striding 5 keeps the measurement
+# bounded while still smoothing per-step jitter. Hoisted to module scope
+# so tests and callers can reference the exact constant.
+CONSISTENCY_STRIDE: int = 5
+
+# Default N (action chunks per measured step) — matches the B-18 spec's
+# "sample N action chunks per state" wording.
+_CONSISTENCY_N: int = 8
 
 
 # ----------------------------------------------------------------------------
@@ -216,6 +228,12 @@ class WorkerInitArgs:
     # ``obs["image"]`` (i.e. ``render_in_obs=True``); enforced at the
     # first reset.
     video_config: VideoConfig | None = None
+    # B-18: opt into the mode-collapse measurement (calls
+    # ``policy.act_n`` every ``CONSISTENCY_STRIDE``-th step on
+    # :class:`SamplablePolicy` instances). Default ``False`` keeps the
+    # rollout byte-identical to the pre-PR path. Greedy policies are
+    # honestly skipped (Episode.action_variance is ``None``).
+    measure_action_consistency: bool = False
 
 
 # Worker-local cache shape. ``total=False`` because pre-init reads
@@ -231,6 +249,7 @@ class _WorkerState(TypedDict, total=False):
     trajectory_dir: Path | None
     trajectory_format: TrajectoryFormat
     video_config: VideoConfig | None
+    measure_action_consistency: bool
 
 
 # Worker-local cache. Populated by ``pool_initializer``; read by
@@ -259,6 +278,7 @@ def pool_initializer(args: WorkerInitArgs) -> None:
     _WORKER_STATE["trajectory_dir"] = args.trajectory_dir
     _WORKER_STATE["trajectory_format"] = args.trajectory_format
     _WORKER_STATE["video_config"] = args.video_config
+    _WORKER_STATE["measure_action_consistency"] = args.measure_action_consistency
 
 
 # ----------------------------------------------------------------------------
@@ -349,6 +369,7 @@ def execute_one(
     trajectory_dir: Path | None = None,
     trajectory_format: TrajectoryFormat = "npz",
     video_config: VideoConfig | None = None,
+    measure_action_consistency: bool = False,
 ) -> Episode:
     """Drive one (cell, episode) rollout to completion.
 
@@ -454,7 +475,28 @@ def execute_one(
     torque_norm_sum = 0.0
     torque_norm_peak = 0.0
     torque_norm_samples = 0
+    # B-18 mode-collapse measurement. Only active when
+    # ``measure_action_consistency=True`` AND the policy implements
+    # :class:`SamplablePolicy`. Greedy / open-loop policies legitimately
+    # cannot expose this metric (no stochasticity to sample from); we
+    # leave ``Episode.action_variance=None`` for them rather than
+    # report a misleading ``0.0`` (see B-18 docstring on Episode).
+    sample_policy = (
+        policy if measure_action_consistency and isinstance(policy, SamplablePolicy) else None
+    )
+    variance_sum = 0.0
+    variance_count = 0
     while not (terminated or truncated):
+        if sample_policy is not None and step_count % CONSISTENCY_STRIDE == 0:
+            # Sample N actions for the current obs (state-preserving on
+            # the SamplablePolicy contract), reduce per-axis variance to
+            # a scalar via mean across action dims, accumulate.
+            samples = sample_policy.act_n(obs, n=_CONSISTENCY_N)
+            stacked = np.asarray(samples, dtype=np.float64)
+            if stacked.ndim == 2 and stacked.shape[0] >= 2:
+                per_axis_var = stacked.var(axis=0)
+                variance_sum += float(per_axis_var.mean())
+                variance_count += 1
         action = policy.act(obs)
         if record_trajectory:
             # Capture the obs that was fed into ``policy.act`` and the
@@ -491,6 +533,18 @@ def execute_one(
             torque_norm_samples += 1
             if t > torque_norm_peak:
                 torque_norm_peak = t
+
+    # Resolve the B-18 action-variance scalar. ``None`` covers three
+    # honest cases: (a) the user did not opt in via
+    # ``measure_action_consistency=True``, (b) the policy is greedy /
+    # open-loop and does not implement :class:`SamplablePolicy`, or
+    # (c) the rollout produced fewer than one measurable step (a T=0
+    # episode that terminated at reset). The HTML report renders this
+    # as a dash, never as ``0.0`` (which would mean "true mode
+    # collapse" — distinct from "not measured here").
+    action_variance: float | None = None
+    if sample_policy is not None and variance_count > 0:
+        action_variance = variance_sum / variance_count
 
     # Resolve the three Episode fields. ``telemetry_observed`` False
     # collapses all three to ``None`` so the report's failure-cluster
@@ -556,6 +610,7 @@ def execute_one(
         actuator_energy=actuator_energy,
         mean_torque_norm=mean_torque_norm,
         peak_torque_norm=peak_torque_norm,
+        action_variance=action_variance,
     )
 
     if record_trajectory:
@@ -650,6 +705,9 @@ def run_work_item(item: WorkItem) -> Episode:
     # safety net as ``trajectory_dir``: a worker initialised by an
     # older code path runs without video recording.
     video_config: VideoConfig | None = _WORKER_STATE.get("video_config")
+    # B-18 mode-collapse opt-in. Default ``False`` keeps the rollout
+    # byte-identical for workers initialised by pre-B-18 code paths.
+    measure = bool(_WORKER_STATE.get("measure_action_consistency", False))
     return execute_one(
         env,
         policy_factory,
@@ -657,4 +715,5 @@ def run_work_item(item: WorkItem) -> Episode:
         trajectory_dir=trajectory_dir,
         trajectory_format=trajectory_format,
         video_config=video_config,
+        measure_action_consistency=measure,
     )

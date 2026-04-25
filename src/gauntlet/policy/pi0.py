@@ -23,6 +23,8 @@ for the same caveat applied to SmolVLA.
 
 from __future__ import annotations
 
+import copy
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
@@ -163,6 +165,54 @@ class Pi0Policy:
         """
         del rng
         self._policy.reset()
+
+    def act_n(self, obs: Observation, n: int = 8) -> Sequence[Action]:
+        """Sample ``n`` independent flow-matching actions for ``obs`` (B-18).
+
+        State-preserving (B-18 :class:`gauntlet.policy.SamplablePolicy`
+        contract). Snapshots the underlying chunk queue via
+        :func:`copy.deepcopy`, calls :meth:`_policy.reset` +
+        :meth:`_policy.select_action` ``n`` times to draw N independent
+        flow-matching samples, and restores the queue afterwards so the
+        rollout's next ``act`` continues from the cached chunk
+        position. See :meth:`gauntlet.policy.lerobot.LeRobotPolicy.act_n`
+        for the matching pattern (π0 and SmolVLA share lerobot's
+        ``PreTrainedPolicy`` chunk-queue API).
+        """
+        if n < 1:
+            raise ValueError(f"n must be >= 1; got {n}")
+        frame = self._build_frame(obs)
+        batch = self._preprocess(frame)
+        snapshot: Any = None
+        queue_attr = getattr(self._policy, "_action_queue", None)
+        if queue_attr is not None:
+            try:
+                snapshot = copy.deepcopy(queue_attr)
+            except Exception:
+                snapshot = None
+        samples: list[Action] = []
+        try:
+            for _ in range(n):
+                self._policy.reset()
+                raw = self._policy.select_action(batch)
+                post = self._postprocess(raw)
+                tensor: Any = post
+                if hasattr(tensor, "detach"):
+                    tensor = tensor.detach()
+                if hasattr(tensor, "to"):
+                    tensor = tensor.to(device="cpu", dtype=self._torch.float32)
+                if hasattr(tensor, "numpy"):
+                    arr = np.asarray(tensor.numpy(), dtype=np.float64).reshape(-1)
+                else:
+                    arr = np.asarray(tensor, dtype=np.float64).reshape(-1)
+                samples.append(arr)
+        finally:
+            if snapshot is not None and queue_attr is not None:
+                try:
+                    self._policy._action_queue = snapshot
+                except Exception:
+                    self._policy.reset()
+        return samples
 
     # ---- private helpers -------------------------------------------------
 
