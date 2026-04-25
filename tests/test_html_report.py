@@ -391,3 +391,139 @@ def test_per_cell_section_is_collapsed_by_default() -> None:
     assert matches, "expected at least one <details> block (per-cell table)"
     for attrs in matches:
         assert " open" not in attrs.lower(), f"<details{attrs}> must not be open"
+
+
+# ────────────────────────────────────────────────────────────────────────
+# B-03: Wilson CI rendering
+# ────────────────────────────────────────────────────────────────────────
+
+
+def test_failure_cluster_row_renders_ci_bracket() -> None:
+    """Every cluster row must render its Wilson 95% CI as ``[lo, hi]``.
+
+    The bracket uses the ``.ci`` class so the DESIGN.md "Tabular
+    Numerals Rule" is honoured and the bracket reads as the modifier
+    it is, not as a competing point estimate.
+    """
+    report = _report_with_clusters()
+    html = render_html(report)
+    # The certain failure cluster (lighting=1.5, camera=1.0) is 3/3
+    # failures → failure_rate=1.0. Wilson CI lower bound at 95% for
+    # k=3, n=3 is ~0.4385 (computed from the closed-form formula);
+    # the upper bound clamps to 1.0. The rendered bracket uses two
+    # decimal places.
+    assert "1.00" in html  # the failure rate itself
+    # The CI span class must be present at least once on a cluster row.
+    assert 'class="ci"' in html
+    # And the bracket format ``[X.XX, Y.YY]`` must appear.
+    assert re.search(r"\[\d\.\d{2}, \d\.\d{2}\]", html) is not None
+
+
+def test_per_cell_row_renders_ci_bracket_inline() -> None:
+    """The per-cell collapsed table renders the success-rate CI inline."""
+    report = _report_with_clusters()
+    html = render_html(report)
+    # Strip the failure-cluster table out before asserting on the
+    # per-cell brackets so we know the per-cell section also carries
+    # at least one bracket. The failure-cluster section ends at the
+    # per-axis section header; the per-cell section opens via
+    # ``<details>``.
+    details_match = re.search(r"<details\b.*?</details>", html, re.DOTALL)
+    assert details_match is not None
+    details_html = details_match.group(0)
+    # At least one ``ci`` span and one bracket inside the per-cell
+    # collapsed section.
+    assert 'class="ci"' in details_html
+    assert re.search(r"\[\d\.\d{2}, \d\.\d{2}\]", details_html) is not None
+
+
+def test_embedded_json_carries_ci_fields_on_cluster_and_cell() -> None:
+    """The embedded JSON payload must carry ci_low / ci_high on per-cell
+    and failure-cluster rows so the dashboard / B-20 attribution can
+    consume them without recomputing.
+    """
+    report = _report_with_clusters()
+    html = render_html(report)
+    parsed = _extract_embedded_json(html)
+    clusters = parsed["failure_clusters"]
+    assert isinstance(clusters, list)
+    assert clusters, "expected at least one failure cluster in the fixture"
+    for cluster in clusters:
+        assert isinstance(cluster, dict)
+        assert "ci_low" in cluster
+        assert "ci_high" in cluster
+        assert cluster["ci_low"] is not None
+        assert cluster["ci_high"] is not None
+    cells = parsed["per_cell"]
+    assert isinstance(cells, list)
+    for cell in cells:
+        assert isinstance(cell, dict)
+        assert "ci_low" in cell
+        assert "ci_high" in cell
+
+
+def test_embedded_json_carries_ci_fields_on_per_axis() -> None:
+    """The per-axis JSON payload must carry per-bucket ``ci_low`` / ``ci_high``
+    keyed identically to ``rates``. The per-axis chart's tooltip
+    callback (in the embedded ``<script>``) consumes these to render
+    the bracket inline.
+    """
+    report = _report_with_clusters()
+    html = render_html(report)
+    parsed = _extract_embedded_json(html)
+    per_axis = parsed["per_axis"]
+    assert isinstance(per_axis, list)
+    assert per_axis, "expected at least one axis in the fixture"
+    for axis in per_axis:
+        assert isinstance(axis, dict)
+        assert "ci_low" in axis
+        assert "ci_high" in axis
+        rates = axis["rates"]
+        assert isinstance(rates, dict)
+        assert isinstance(axis["ci_low"], dict)
+        assert isinstance(axis["ci_high"], dict)
+        assert set(axis["ci_low"].keys()) == set(rates.keys())
+        assert set(axis["ci_high"].keys()) == set(rates.keys())
+
+
+def test_legacy_report_without_ci_fields_renders_without_brackets() -> None:
+    """A hand-built Report carrying no CI fields must render cleanly —
+    no ``KeyError``, no stray empty brackets, and no ``.ci`` span on
+    rows that lack a CI. Backwards-compat for old report.json files.
+    """
+    legacy = Report(
+        suite_name="legacy-suite",
+        suite_env=None,
+        n_episodes=2,
+        n_success=1,
+        per_axis=[],
+        per_cell=[
+            # ci_low / ci_high default to None on this row.
+            __import__("gauntlet.report", fromlist=["CellBreakdown"]).CellBreakdown(
+                cell_index=0,
+                perturbation_config={"x": 0.0},
+                n_episodes=1,
+                n_success=1,
+                success_rate=1.0,
+            ),
+        ],
+        failure_clusters=[
+            __import__("gauntlet.report", fromlist=["FailureCluster"]).FailureCluster(
+                axes={"x": 0.0, "y": 1.0},
+                n_episodes=1,
+                n_success=0,
+                failure_rate=1.0,
+                lift=2.0,
+            ),
+        ],
+        heatmap_2d={},
+        overall_success_rate=0.5,
+        overall_failure_rate=0.5,
+        cluster_multiple=2.0,
+    )
+    html = render_html(legacy)
+    # No CI brackets rendered when ci_low / ci_high are None.
+    assert 'class="ci"' not in html
+    # And no empty bracket leaks through.
+    assert "[None" not in html
+    assert "None]" not in html

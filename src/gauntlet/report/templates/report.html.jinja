@@ -97,6 +97,21 @@ Data-embed conventions:
   th { background: #f0f0f0; font-weight: 600; }
   tbody tr:hover { background: #fafafa; }
   td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  /* B-03: Wilson 95% CI bracket sits next to the rate it qualifies, in
+     low-chroma Gravel so the rate stays the loud number and the bracket
+     reads as the modifier it is. Tabular numerals so a column of
+     brackets line up vertically (DESIGN.md Tabular Numerals Rule).
+     Slightly smaller than body so the bracket never out-shouts the
+     point estimate it qualifies. ``white-space: nowrap`` keeps the
+     bracket from wrapping mid-pair on a narrow viewport, which would
+     read like two separate numbers. */
+  .ci {
+    color: var(--fg-muted);
+    font-size: 0.8rem;
+    font-variant-numeric: tabular-nums;
+    margin-left: 4px;
+    white-space: nowrap;
+  }
   code {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 0.85rem;
@@ -225,6 +240,11 @@ Data-embed conventions:
         <tr>
           <th>Axis combination</th>
           <th class="num">n</th>
+          {# B-03: header still says "Failure rate" — the cell now
+             carries the rate AND the Wilson 95% CI bracket inline, so
+             the column meaning has not actually shifted. Adding "[95%
+             CI]" to the header would be redundant for an audience the
+             PRODUCT.md "expert confidence" rule says we trust. #}
           <th class="num">Failure rate</th>
           <th class="num">Lift (×)</th>
           {% if any_cluster_video %}<th>Failed-rollout videos</th>{% endif %}
@@ -243,7 +263,12 @@ Data-embed conventions:
             </code>
           </td>
           <td class="num">{{ cluster.n_episodes }}</td>
-          <td class="num">{{ '%.1f'|format(cluster.failure_rate * 100) }}%</td>
+          <td class="num">
+            {{- '%.2f'|format(cluster.failure_rate) -}}
+            {%- if cluster.ci_low is not none and cluster.ci_high is not none %}
+            <span class="ci">[{{ '%.2f'|format(cluster.ci_low) }}, {{ '%.2f'|format(cluster.ci_high) }}]</span>
+            {%- endif %}
+          </td>
           <td class="num">{{ '%.2f'|format(cluster.lift) }}×</td>
           {% if any_cluster_video %}
           <td>
@@ -368,7 +393,12 @@ Data-embed conventions:
               </code>
             </td>
             <td class="num">{{ cell.n_episodes }}</td>
-            <td class="num">{{ '%.1f'|format(cell.success_rate * 100) }}%</td>
+            <td class="num">
+              {{- '%.2f'|format(cell.success_rate) -}}
+              {%- if cell.ci_low is not none and cell.ci_high is not none %}
+              <span class="ci">[{{ '%.2f'|format(cell.ci_low) }}, {{ '%.2f'|format(cell.ci_high) }}]</span>
+              {%- endif %}
+            </td>
             {% if any_cell_video %}
             <td>
               {% if cell.video_paths %}
@@ -427,6 +457,11 @@ Data-embed conventions:
       const labels = keys.map(function (k) { return String(k); });
       const rates = keys.map(function (k) { return axis.rates[String(k)]; });
       const counts = keys.map(function (k) { return axis.counts[String(k)]; });
+      // B-03: Wilson 95% CI per axis bucket. Optional — older
+      // report.json files written before B-03 lack these dicts; the
+      // tooltip falls back to no-CI in that case.
+      const ciLow = axis.ci_low || {};
+      const ciHigh = axis.ci_high || {};
       new Chart(canvas, {
         type: 'bar',
         data: {
@@ -448,7 +483,14 @@ Data-embed conventions:
               callbacks: {
                 label: function (ctx) {
                   const i = ctx.dataIndex;
-                  return 'rate=' + (rates[i] * 100).toFixed(1) + '%  n=' + counts[i];
+                  const k = String(keys[i]);
+                  const lo = ciLow[k];
+                  const hi = ciHigh[k];
+                  const base = 'rate=' + rates[i].toFixed(2) + '  n=' + counts[i];
+                  if (lo !== undefined && lo !== null && hi !== undefined && hi !== null) {
+                    return base + '  95% CI [' + lo.toFixed(2) + ', ' + hi.toFixed(2) + ']';
+                  }
+                  return base;
                 }
               }
             }

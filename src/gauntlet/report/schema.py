@@ -40,9 +40,18 @@ __all__ = [
 class AxisBreakdown(BaseModel):
     """Marginal success rate for one axis, broken down by axis value.
 
-    ``rates``, ``counts`` and ``successes`` share the same set of keys
-    (the unique axis values that appear in the episode list, sorted
-    ascending). Keys are float-normalized — see module docstring.
+    ``rates``, ``counts``, ``successes``, ``ci_low``, and ``ci_high``
+    share the same set of keys (the unique axis values that appear in
+    the episode list, sorted ascending). Keys are float-normalized —
+    see module docstring.
+
+    ``ci_low`` / ``ci_high`` carry the per-bucket Wilson 95%
+    confidence interval on the bucket's success rate (B-03). Each
+    value is ``None`` only if the bucket is empty (``n == 0``), which
+    the analyse layer never produces — included for schema-level
+    completeness so downstream consumers can rely on the field shape.
+    Both fields default to empty dicts so old report.json files
+    written before B-03 still validate via ``Report.model_validate``.
     """
 
     model_config = ConfigDict(extra="forbid", ser_json_inf_nan="strings")
@@ -51,6 +60,8 @@ class AxisBreakdown(BaseModel):
     rates: dict[float, float]
     counts: dict[float, int]
     successes: dict[float, int]
+    ci_low: dict[float, float | None] = Field(default_factory=dict)
+    ci_high: dict[float, float | None] = Field(default_factory=dict)
 
 
 class CellBreakdown(BaseModel):
@@ -65,6 +76,12 @@ class CellBreakdown(BaseModel):
     ``Runner(record_video=True)`` is used. Default is an empty list so
     pre-PR Episode dicts (which have no ``video_path`` field) round-
     trip through ``build_report`` unchanged.
+
+    ``ci_low`` / ``ci_high`` carry the Wilson 95% confidence interval
+    on ``success_rate`` (B-03). ``None`` only when ``n_episodes == 0``
+    (which :func:`gauntlet.report.analyze.build_report` never produces);
+    both default to ``None`` so old report.json files written before
+    B-03 still validate.
     """
 
     model_config = ConfigDict(extra="forbid", ser_json_inf_nan="strings")
@@ -74,6 +91,8 @@ class CellBreakdown(BaseModel):
     n_episodes: int
     n_success: int
     success_rate: float
+    ci_low: float | None = None
+    ci_high: float | None = None
     video_paths: list[str] = Field(default_factory=list)
 
 
@@ -96,6 +115,15 @@ class FailureCluster(BaseModel):
     ``video_paths`` is the list of MP4 paths for the failed episodes
     inside this cluster, populated when ``Runner(record_video=True)``.
     Default empty list — pre-PR reports round-trip unchanged.
+
+    ``ci_low`` / ``ci_high`` carry the Wilson 95% confidence interval
+    on ``failure_rate`` (B-03). The CI is computed on failures (not
+    successes), so a (5/5) all-failed cluster reports a high
+    ``ci_low`` — the right framing for "we are confident this combo
+    breaks the policy". ``None`` only when ``n_episodes == 0`` (which
+    the analyse layer never produces). Both default to ``None`` so old
+    report.json files written before B-03 still validate. Consumed by
+    B-20 (regression-vs-noise attribution in ``gauntlet diff``).
     """
 
     model_config = ConfigDict(extra="forbid", ser_json_inf_nan="strings")
@@ -105,6 +133,8 @@ class FailureCluster(BaseModel):
     n_success: int
     failure_rate: float
     lift: float
+    ci_low: float | None = None
+    ci_high: float | None = None
     video_paths: list[str] = Field(default_factory=list)
 
 
