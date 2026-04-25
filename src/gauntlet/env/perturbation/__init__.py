@@ -37,6 +37,9 @@ from gauntlet.env.perturbation.axes import (
     distractor_count as distractor_count,
 )
 from gauntlet.env.perturbation.axes import (
+    image_attack as image_attack,
+)
+from gauntlet.env.perturbation.axes import (
     initial_state_ood as initial_state_ood,
 )
 from gauntlet.env.perturbation.axes import (
@@ -90,6 +93,7 @@ AXIS_NAMES: Final[tuple[str, ...]] = (
     "object_initial_pose_y",
     "distractor_count",
     "initial_state_ood",
+    "image_attack",
 )
 
 
@@ -106,6 +110,7 @@ __all__ = [
     "camera_offset_x",
     "camera_offset_y",
     "distractor_count",
+    "image_attack",
     "initial_state_ood",
     "lighting_intensity",
     "make_categorical_sampler",

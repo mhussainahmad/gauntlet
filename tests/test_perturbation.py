@@ -50,7 +50,18 @@ _APPLY_VALUE: dict[str, float] = {
     "object_initial_pose_y": -0.087,
     "distractor_count": 3.0,
     "initial_state_ood": 1.0,  # 1-sigma OOD displacement (B-32)
+    # B-31 — image_attack is a *post-render* axis; it is in the
+    # canonical AXIS_NAMES registry (so the suite YAML accepts it) but
+    # the inner backend env does NOT implement it. The
+    # ImageAttackWrapper handles dispatch instead. Tests that exercise
+    # backend-direct ``set_perturbation`` filter this name out.
+    "image_attack": 0.0,
 }
+
+# B-31 — axes whose dispatch lives outside the inner backend env.
+# Filtered out of any test that drives ``TabletopEnv.set_perturbation``
+# directly (the env legitimately rejects them).
+_BACKEND_DIRECT_AXES: tuple[str, ...] = tuple(name for name in AXIS_NAMES if name != "image_attack")
 
 
 def _zero_action() -> np.ndarray:
@@ -71,7 +82,9 @@ def env() -> Iterator[TabletopEnv]:
 
 
 class TestAxisNamesRegistry:
-    def test_axis_names_are_canonical_eight(self) -> None:
+    def test_axis_names_are_canonical(self) -> None:
+        # Order is the stable downstream contract — see AXIS_NAMES
+        # docstring in env/perturbation/__init__.py.
         assert AXIS_NAMES == (
             "lighting_intensity",
             "camera_offset_x",
@@ -81,6 +94,7 @@ class TestAxisNamesRegistry:
             "object_initial_pose_y",
             "distractor_count",
             "initial_state_ood",
+            "image_attack",
         )
 
     def test_axis_names_is_tuple(self) -> None:
@@ -107,6 +121,8 @@ class TestAxisFactories:
 
     def test_individual_constructors_match_axis_for(self) -> None:
         # axis_for is a registry over the public constructors.
+        from gauntlet.env.perturbation import image_attack
+
         ctors = {
             "lighting_intensity": lighting_intensity,
             "camera_offset_x": camera_offset_x,
@@ -116,12 +132,15 @@ class TestAxisFactories:
             "object_initial_pose_y": object_initial_pose_y,
             "distractor_count": distractor_count,
             "initial_state_ood": initial_state_ood,
+            "image_attack": image_attack,
         }
         for name, ctor in ctors.items():
             assert ctor().name == name
             assert axis_for(name).name == name
 
     def test_axis_kinds(self) -> None:
+        from gauntlet.env.perturbation import image_attack
+
         assert lighting_intensity().kind == AXIS_KIND_CONTINUOUS
         assert camera_offset_x().kind == AXIS_KIND_CONTINUOUS
         assert camera_offset_y().kind == AXIS_KIND_CONTINUOUS
@@ -130,6 +149,7 @@ class TestAxisFactories:
         assert object_texture().kind == AXIS_KIND_CATEGORICAL
         assert distractor_count().kind == AXIS_KIND_INT
         assert initial_state_ood().kind == AXIS_KIND_CONTINUOUS
+        assert image_attack().kind == AXIS_KIND_CATEGORICAL
 
     def test_continuous_factory_rejects_inverted_bounds(self) -> None:
         with pytest.raises(ValueError, match="low must be <= high"):
@@ -146,9 +166,16 @@ class TestAxisFactories:
 
 
 class TestSetPerturbationDispatch:
-    """The env-side hook every axis ultimately calls into."""
+    """The env-side hook every axis ultimately calls into.
 
-    @pytest.mark.parametrize("name", AXIS_NAMES)
+    ``image_attack`` is excluded from the parametrize set: its dispatch
+    lives in :class:`gauntlet.env.image_attack.ImageAttackWrapper`, not
+    on the inner backend env, so the inner env legitimately rejects it.
+    See ``tests/test_perturbation_image_attack.py`` for the wrapper
+    coverage.
+    """
+
+    @pytest.mark.parametrize("name", _BACKEND_DIRECT_AXES)
     def test_known_axis_accepted_and_queued(self, env: TabletopEnv, name: str) -> None:
         env.set_perturbation(name, _APPLY_VALUE[name])
         # Queued, not yet applied; reset() consumes the queue.
@@ -159,6 +186,13 @@ class TestSetPerturbationDispatch:
     def test_unknown_axis_name_raises_clear_error(self, env: TabletopEnv) -> None:
         with pytest.raises(ValueError, match="unknown perturbation axis"):
             env.set_perturbation("not_a_real_axis", 1.0)
+
+    def test_image_attack_rejected_by_backend_directly(self, env: TabletopEnv) -> None:
+        # image_attack is in the canonical AXIS_NAMES registry but the
+        # inner backend env does not implement it (the wrapper does).
+        # Routing it directly to the backend must fail loudly.
+        with pytest.raises(ValueError, match="unknown perturbation axis"):
+            env.set_perturbation("image_attack", 0.0)
 
 
 # -------------------------------------------------- observable state changes
