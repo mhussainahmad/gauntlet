@@ -97,8 +97,8 @@ def render_text(diff: ReportDiff) -> str:
         --- a: <a_label> (<a_suite_name>)
         +++ b: <b_label> (<b_suite_name>)
         @@ overall @@
-          <sign> overall_success_rate: <pct_a> -> <pct_b> (<signed_pct>)
-          <sign> n_episodes: <n_a> -> <n_b> (<signed_int>)
+          <sign> overall_success_rate: <signed_pct>
+          <sign> n_episodes: <signed_int>
         @@ axes @@
           axis: <name>
             <sign> <name>=<value>: <signed_pct>
