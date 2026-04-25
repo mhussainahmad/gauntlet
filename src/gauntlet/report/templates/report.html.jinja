@@ -391,6 +391,57 @@ Data-embed conventions:
   {% endif %}
 </section>
 
+{# ─── 2a. Calibration-aware abstention scoring (B-04) ───
+   "Did the policy know it was failing?" — selective-prediction
+   numbers over the B-01 conformal failure detector. Rendered only
+   when at least one episode in the dataset carried a populated
+   ``failure_score`` (i.e. the conformal detector ran upstream); a
+   greedy-policy report stays visually identical to pre-B-04. Sits
+   right under the failure-clusters table because the two sections
+   answer the same question from opposite sides — clusters say
+   *where* the policy fails, abstention says *whether the policy
+   knew it was about to*. #}
+{% if report.abstention_metrics is not none %}
+{%- set _ab = report.abstention_metrics -%}
+<section>
+  <h2>Abstention scoring</h2>
+  <p class="subtle">
+    Selective-prediction metrics over the B-01 conformal failure
+    detector ({{ _ab.n_with_score }} of {{ report.n_episodes }} episodes scored).
+    AURC is the area under the coverage-accuracy curve — higher is better;
+    perfect detector ≈ 1.0, useless detector ≈ overall success rate.
+  </p>
+  <div class="card">
+    <div class="summary-metrics">
+      <div>
+        <div class="metric-label">AURC</div>
+        <div class="metric-value">{{ '%.3f'|format(_ab.aurc) }}</div>
+      </div>
+      <div>
+        <div class="metric-label">Corrected success rate</div>
+        <div class="metric-value">
+          {%- if _ab.abstention_corrected_success_rate is not none -%}
+            {{ '%.1f'|format(_ab.abstention_corrected_success_rate * 100) }}%
+          {%- else -%}
+            <span class="ci">-</span>
+          {%- endif -%}
+        </div>
+      </div>
+      <div>
+        <div class="metric-label">Correctly abstained</div>
+        <div class="metric-value">{{ _ab.n_correctly_abstained }}</div>
+      </div>
+      <div>
+        <div class="metric-label">Falsely abstained</div>
+        <div class="metric-value{% if _ab.n_falsely_abstained > 0 %} fail{% endif %}">
+          {{ _ab.n_falsely_abstained }}
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+{% endif %}
+
 {# ─── 2b. Per-axis Sobol sensitivity bar (B-19) ───
    "Which axis matters most" — single horizontal bar of total-order
    indices, sorted descending. Sits above the per-axis success-rate
