@@ -204,7 +204,12 @@ def test_make_key_includes_schema_version() -> None:
     # look for the schema_version field in the canonical payload.
     import hashlib
 
-    suite_hash = hashlib.sha256(suite.model_dump_json(round_trip=True).encode("utf-8")).hexdigest()
+    from gauntlet.runner.provenance import compute_suite_provenance_hash
+
+    # B-40: ``suite_hash`` is now the 16-char blake2b suite-provenance
+    # hash (not the legacy full-sha256). The canonical JSON below
+    # mirrors ``EpisodeCache._compose_key`` byte-for-byte.
+    suite_hash = compute_suite_provenance_hash(suite)
     canonical = {
         "suite_name": suite.name,
         "suite_hash": suite_hash,
