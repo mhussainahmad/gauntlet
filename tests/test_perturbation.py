@@ -60,6 +60,11 @@ _APPLY_VALUE: dict[str, float] = {
     # gauntlet.env.instruction.InstructionWrapper). Apply value is the
     # paraphrase index (0 = baseline phrasing).
     "instruction_paraphrase": 0.0,
+    # B-06 — object_swap is a backend-direct categorical axis on
+    # MuJoCo. Apply value 1.0 selects the second registry entry
+    # (``mug``) so the apply branch exercises the geom-toggle path
+    # rather than collapsing to the cube baseline.
+    "object_swap": 1.0,
 }
 
 # B-31 / B-05 — axes whose dispatch lives outside the inner backend env.
@@ -102,6 +107,7 @@ class TestAxisNamesRegistry:
             "initial_state_ood",
             "image_attack",
             "instruction_paraphrase",
+            "object_swap",
         )
 
     def test_axis_names_is_tuple(self) -> None:
@@ -128,7 +134,11 @@ class TestAxisFactories:
 
     def test_individual_constructors_match_axis_for(self) -> None:
         # axis_for is a registry over the public constructors.
-        from gauntlet.env.perturbation import image_attack, instruction_paraphrase
+        from gauntlet.env.perturbation import (
+            image_attack,
+            instruction_paraphrase,
+            object_swap,
+        )
 
         ctors = {
             "lighting_intensity": lighting_intensity,
@@ -141,13 +151,18 @@ class TestAxisFactories:
             "initial_state_ood": initial_state_ood,
             "image_attack": image_attack,
             "instruction_paraphrase": instruction_paraphrase,
+            "object_swap": object_swap,
         }
         for name, ctor in ctors.items():
             assert ctor().name == name
             assert axis_for(name).name == name
 
     def test_axis_kinds(self) -> None:
-        from gauntlet.env.perturbation import image_attack, instruction_paraphrase
+        from gauntlet.env.perturbation import (
+            image_attack,
+            instruction_paraphrase,
+            object_swap,
+        )
 
         assert lighting_intensity().kind == AXIS_KIND_CONTINUOUS
         assert camera_offset_x().kind == AXIS_KIND_CONTINUOUS
@@ -159,6 +174,7 @@ class TestAxisFactories:
         assert initial_state_ood().kind == AXIS_KIND_CONTINUOUS
         assert image_attack().kind == AXIS_KIND_CATEGORICAL
         assert instruction_paraphrase().kind == AXIS_KIND_CATEGORICAL
+        assert object_swap().kind == AXIS_KIND_CATEGORICAL
 
     def test_continuous_factory_rejects_inverted_bounds(self) -> None:
         with pytest.raises(ValueError, match="low must be <= high"):

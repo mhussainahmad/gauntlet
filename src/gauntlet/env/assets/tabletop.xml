@@ -32,6 +32,28 @@
       <freejoint/>
       <geom name="cube_geom" type="box" size="0.025 0.025 0.025"
             material="cube_mat" mass="0.1"/>
+      <!-- B-06 object-swap alternates. Co-resident inside the cube body
+           so the freejoint, the cached body id, and the grasp / success
+           geometry all stay valid across class swaps. Each is hidden
+           (alpha=0, contype=0, conaffinity=0) at scene-load time;
+           ``set_perturbation('object_swap', i)`` reveals the matching
+           geom and hides the cube. Footprints match the cube's grasp
+           radius (0.025 m) so swap classes are interchangeable from the
+           scripted policy's perspective. Geoms mirror the per-class
+           MJCF snippets shipped under ``assets/objects/`` for
+           single-source-of-truth documentation. -->
+      <geom name="swap_mug_geom" type="cylinder" size="0.025 0.025"
+            rgba="0.95 0.92 0.85 0" mass="0.1"
+            contype="0" conaffinity="0"/>
+      <geom name="swap_banana_geom" type="capsule" size="0.018 0.04"
+            rgba="0.95 0.85 0.15 0" mass="0.1"
+            contype="0" conaffinity="0"/>
+      <geom name="swap_screwdriver_geom" type="cylinder" size="0.012 0.05"
+            rgba="0.55 0.55 0.6 0" mass="0.1"
+            contype="0" conaffinity="0"/>
+      <geom name="swap_bottle_geom" type="ellipsoid" size="0.022 0.022 0.045"
+            rgba="0.15 0.25 0.65 0" mass="0.1"
+            contype="0" conaffinity="0"/>
     </body>
 
     <body name="ee" mocap="true" pos="0 0 0.7">
