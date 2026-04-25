@@ -235,6 +235,28 @@ class FailureCluster(BaseModel):
     mean_near_collision_count: float | None = None
     mean_peak_force: float | None = None
 
+    # B-37: per-cluster aggregates of the inference-latency telemetry
+    # (:attr:`gauntlet.runner.Episode.inference_latency_ms_p50` /
+    # ``..._p99`` / ``..._max``). Latency is always measured for live
+    # runs (always-on contract in :func:`gauntlet.runner.worker.execute_one`),
+    # but legacy episodes.json files saved before B-37 leave the field
+    # ``None``; same partial-coverage handling as the actuator / safety
+    # / behavioural trios above. ``None`` here means "no episode in
+    # this cluster carried latency telemetry"; the HTML report renders
+    # ``None`` as a dash, never as ``0``.
+    #
+    # ``inference_budget_violation_rate`` is the fraction of the
+    # cluster's episodes whose ``metadata['inference_budget_violated']``
+    # was True — only meaningful when ``--max-inference-ms`` was set
+    # at run time. ``None`` when no episode in the cluster reported
+    # the flag (either no budget configured, or every episode came in
+    # under p99). Distinct from ``0.0`` which would mean "budget was
+    # configured AND every episode came in under it".
+    mean_inference_latency_ms_p50: float | None = None
+    mean_inference_latency_ms_p99: float | None = None
+    mean_inference_latency_ms_max: float | None = None
+    inference_budget_violation_rate: float | None = None
+
 
 class Heatmap2D(BaseModel):
     """2D success-rate matrix for a pair of axes.

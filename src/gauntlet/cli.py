@@ -688,6 +688,25 @@ def run(
             ),
         ),
     ] = False,
+    max_inference_ms: Annotated[
+        float | None,
+        typer.Option(
+            "--max-inference-ms",
+            help=(
+                "B-37 inference-latency budget in milliseconds. Per-step "
+                "policy.act() latency is ALWAYS measured (zero-config) and "
+                "surfaced on Episode.inference_latency_ms_{p50,p99,max} "
+                "regardless of this flag. When set, episodes whose p99 "
+                "exceeds the budget get metadata['inference_budget_violated']"
+                " = True so the failure-cluster table can sort by it. "
+                "DELIBERATELY a soft flag: violations never abort the run, "
+                "never flip success — the user wants to see every offender, "
+                "not have the run die halfway. VLA-Perf (arxiv 2602.18397) "
+                "recommends 10-100 ms as the operating envelope."
+            ),
+            min=0.0,
+        ),
+    ] = None,
     wandb: Annotated[
         bool,
         typer.Option(
@@ -763,6 +782,7 @@ def run(
             policy_id=policy if effective_cache_dir is not None else None,
             max_steps=env_max_steps if effective_cache_dir is not None else None,
             measure_action_consistency=measure_action_consistency,
+            max_inference_ms=max_inference_ms,
         )
     except ValueError as exc:
         raise _fail(f"runner config invalid: {exc}") from exc
