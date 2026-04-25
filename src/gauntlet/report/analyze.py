@@ -34,9 +34,10 @@ from gauntlet.report.schema import (
     Heatmap2D,
     Report,
 )
+from gauntlet.report.wilson import DEFAULT_CONFIDENCE, wilson_interval
 from gauntlet.runner.episode import Episode
 
-__all__ = ["build_report"]
+__all__ = ["DEFAULT_CONFIDENCE", "build_report"]
 
 
 # Number of decimal places used to normalize float axis values before
@@ -75,6 +76,8 @@ def _ordered_axis_names(episodes: Iterable[Episode]) -> tuple[str, ...]:
 def _per_axis_breakdowns(
     episodes: list[Episode],
     axis_names: tuple[str, ...],
+    *,
+    confidence: float,
 ) -> list[AxisBreakdown]:
     """Compute one :class:`AxisBreakdown` per axis name.
 
@@ -82,6 +85,9 @@ def _per_axis_breakdowns(
     to the marginal; missing keys are skipped (they should not occur in
     Runner-produced episodes, but tolerating them keeps the function
     safe under hand-constructed inputs).
+
+    ``ci_low`` / ``ci_high`` carry the per-bucket Wilson interval at
+    the requested ``confidence`` level (B-03).
     """
     breakdowns: list[AxisBreakdown] = []
     for axis in axis_names:
@@ -97,18 +103,30 @@ def _per_axis_breakdowns(
         # Sort keys ascending so JSON / HTML rendering is stable.
         sorted_keys = sorted(counts.keys())
         rates = {k: successes[k] / counts[k] for k in sorted_keys}
+        ci_low: dict[float, float | None] = {}
+        ci_high: dict[float, float | None] = {}
+        for k in sorted_keys:
+            lo, hi = wilson_interval(successes[k], counts[k], confidence=confidence)
+            ci_low[k] = lo
+            ci_high[k] = hi
         breakdowns.append(
             AxisBreakdown(
                 name=axis,
                 rates=rates,
                 counts={k: counts[k] for k in sorted_keys},
                 successes={k: successes[k] for k in sorted_keys},
+                ci_low=ci_low,
+                ci_high=ci_high,
             )
         )
     return breakdowns
 
 
-def _per_cell_breakdowns(episodes: list[Episode]) -> list[CellBreakdown]:
+def _per_cell_breakdowns(
+    episodes: list[Episode],
+    *,
+    confidence: float,
+) -> list[CellBreakdown]:
     """Group episodes by ``(cell_index, frozenset(normalized_config))``.
 
     Returns one :class:`CellBreakdown` per group, sorted by
@@ -121,6 +139,9 @@ def _per_cell_breakdowns(episodes: list[Episode]) -> list[CellBreakdown]:
     feature). Order matches the input ``episodes`` enumeration order
     so re-running the analysis on the same Episode list is byte-
     identical.
+
+    ``ci_low`` / ``ci_high`` carry the Wilson interval on
+    ``success_rate`` at the requested ``confidence`` level (B-03).
     """
     groups: dict[tuple[int, frozenset[tuple[str, float]]], list[Episode]] = defaultdict(list)
     configs: dict[tuple[int, frozenset[tuple[str, float]]], dict[str, float]] = {}
@@ -137,6 +158,7 @@ def _per_cell_breakdowns(episodes: list[Episode]) -> list[CellBreakdown]:
         n = len(eps)
         n_success = sum(1 for e in eps if e.success)
         videos = [e.video_path for e in eps if e.video_path is not None]
+        ci_low, ci_high = wilson_interval(n_success, n, confidence=confidence)
         rows.append(
             CellBreakdown(
                 cell_index=key[0],
@@ -144,6 +166,8 @@ def _per_cell_breakdowns(episodes: list[Episode]) -> list[CellBreakdown]:
                 n_episodes=n,
                 n_success=n_success,
                 success_rate=n_success / n,
+                ci_low=ci_low,
+                ci_high=ci_high,
                 video_paths=videos,
             )
         )
@@ -157,6 +181,7 @@ def _failure_clusters(
     baseline_failure_rate: float,
     cluster_multiple: float,
     min_cluster_size: int,
+    confidence: float,
 ) -> list[FailureCluster]:
     """Find axis-PAIR value combinations with elevated failure rates.
 
@@ -202,6 +227,16 @@ def _failure_clusters(
             failure_rate = (n_total - n_success) / n_total
             if failure_rate < cluster_multiple * baseline_failure_rate:
                 continue
+            # CI is on the failure rate (not the success rate) — the
+            # "we are confident this combo breaks the policy" framing
+            # the report leads with. Wilson is symmetric on the
+            # binomial, so this is just ``wilson_interval(n_total -
+            # n_success, n_total)``.
+            ci_low, ci_high = wilson_interval(
+                n_total - n_success,
+                n_total,
+                confidence=confidence,
+            )
             clusters.append(
                 FailureCluster(
                     axes={axis_a: va, axis_b: vb},
@@ -209,6 +244,8 @@ def _failure_clusters(
                     n_success=n_success,
                     failure_rate=failure_rate,
                     lift=failure_rate / baseline_failure_rate,
+                    ci_low=ci_low,
+                    ci_high=ci_high,
                     video_paths=list(pair_videos.get((va, vb), [])),
                 )
             )
@@ -283,6 +320,7 @@ def build_report(
     cluster_multiple: float = 2.0,
     min_cluster_size: int = 3,
     suite_env: str | None = None,
+    confidence: float = DEFAULT_CONFIDENCE,
 ) -> Report:
     """Aggregate a list of :class:`Episode` into a :class:`Report`.
 
@@ -298,17 +336,30 @@ def build_report(
         min_cluster_size: Minimum number of episodes required at an
             axis-pair value combination before it can be reported as a
             cluster. Defaults to 3.
+        suite_env: Optional env slug carried through onto the report
+            (RFC-005 §12 Q2). Old report.json files written before
+            RFC-005 are accepted unchanged when ``suite_env`` is
+            ``None``.
+        confidence: Two-sided coverage level for the Wilson score
+            interval attached to every per-cell, per-axis-value, and
+            failure-cluster rate (B-03). Defaults to
+            :data:`DEFAULT_CONFIDENCE` (0.95). Must be in ``(0, 1)``.
 
     Returns:
         A fully populated :class:`Report`.
 
     Raises:
         ValueError: if ``episodes`` is empty, contains rows from more
-            than one suite, or ``cluster_multiple <= 0``.
+            than one suite, or ``cluster_multiple <= 0``, or
+            ``confidence`` is not in ``(0, 1)``.
     """
     if cluster_multiple <= 0:
         raise ValueError(
             f"cluster_multiple must be > 0; got {cluster_multiple}",
+        )
+    if not (0.0 < confidence < 1.0):
+        raise ValueError(
+            f"confidence must be in (0, 1); got {confidence}",
         )
     if len(episodes) == 0:
         raise ValueError("cannot build report from zero episodes")
@@ -328,14 +379,15 @@ def build_report(
 
     axis_names = _ordered_axis_names(episodes)
 
-    per_axis = _per_axis_breakdowns(episodes, axis_names)
-    per_cell = _per_cell_breakdowns(episodes)
+    per_axis = _per_axis_breakdowns(episodes, axis_names, confidence=confidence)
+    per_cell = _per_cell_breakdowns(episodes, confidence=confidence)
     failure_clusters = _failure_clusters(
         episodes,
         axis_names,
         baseline_failure_rate=overall_failure_rate,
         cluster_multiple=cluster_multiple,
         min_cluster_size=min_cluster_size,
+        confidence=confidence,
     )
     heatmap_2d = _heatmaps_2d(episodes, axis_names)
 
