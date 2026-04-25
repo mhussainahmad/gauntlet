@@ -10,6 +10,10 @@ This module is the dispatch layer behind :attr:`Suite.sampling`:
   follow-up step in this same task series).
 * ``"sobol"`` — :class:`SobolSampler` (Joe-Kuo 6.21201
   low-discrepancy sequence; see ``docs/polish-exploration-sobol-sampler.md``).
+* ``"adversarial"`` — :class:`AdversarialSampler` (B-07) — Thompson-
+  sampling bandit over the perturbation hypercube, conditioned on a
+  pilot run's :class:`gauntlet.report.schema.Report`. Biases coverage
+  toward high-failure bins; do not use for benchmark reporting.
 
 The :class:`Sampler` protocol is intentionally minimal: ``sample(suite,
 rng)`` returns a list of :class:`SuiteCell` records. The Runner is
@@ -91,14 +95,24 @@ class CartesianSampler:
         return out
 
 
-def build_sampler(mode: str) -> Sampler:
+def build_sampler(mode: str, *, suite: Suite | None = None) -> Sampler:
     """Return the :class:`Sampler` for a given :attr:`Suite.sampling` value.
 
+    The optional ``suite`` argument is only consulted by the
+    ``"adversarial"`` branch — it needs the suite's
+    :attr:`Suite.pilot_report` path to load the pilot
+    :class:`gauntlet.report.schema.Report`. Every other branch ignores
+    it and the kwarg defaults to ``None`` so existing callers (CLI,
+    tests, downstream wrappers) keep their two-line signature.
+
     Raises:
-        ValueError: if ``mode`` is not one of the recognised strategies.
-            The :class:`Suite` schema already restricts ``sampling`` to
-            the literal set, so this branch is defence-in-depth for
-            direct callers that bypass schema validation.
+        ValueError: if ``mode`` is not one of the recognised
+            strategies, or if ``mode == "adversarial"`` and ``suite``
+            is None / missing :attr:`Suite.pilot_report`. The
+            :class:`Suite` schema already restricts ``sampling`` to
+            the literal set, so the unknown-mode branch is
+            defence-in-depth for direct callers that bypass schema
+            validation.
     """
     if mode == "cartesian":
         return CartesianSampler()
@@ -115,7 +129,19 @@ def build_sampler(mode: str) -> Sampler:
         from gauntlet.suite.sobol import SobolSampler
 
         return SobolSampler()
+    if mode == "adversarial":
+        # Same lazy-import rationale.
+        from gauntlet.suite.adversarial import AdversarialSampler, load_pilot_report
+
+        if suite is None or suite.pilot_report is None:
+            raise ValueError(
+                "build_sampler(mode='adversarial') requires a Suite "
+                "with pilot_report set; the schema validator should "
+                "have caught this. Was the Suite constructed bypassing "
+                "model_validate?",
+            )
+        return AdversarialSampler(load_pilot_report(suite.pilot_report))
     raise ValueError(
         f"unknown sampling mode {mode!r}; expected one of "
-        "{'cartesian', 'latin_hypercube', 'sobol'}",
+        "{'cartesian', 'latin_hypercube', 'sobol', 'adversarial'}",
     )

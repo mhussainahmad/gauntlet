@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import functools
 import importlib
+import warnings
 from pathlib import Path
 from typing import Any, cast
 
@@ -114,7 +115,55 @@ def _validate(raw: Any, *, source: str) -> Suite:
     suite = Suite.model_validate(data)
     _ensure_backend_registered(suite.env)
     _reject_purely_visual_suites(suite)
+    suite = _resolve_and_check_pilot_report(suite, source=source)
     return suite
+
+
+def _resolve_and_check_pilot_report(suite: Suite, *, source: str) -> Suite:
+    """B-07 — resolve a relative ``pilot_report`` and emit the loud warning.
+
+    When ``sampling == "adversarial"``:
+
+    * If ``pilot_report`` is a relative path and ``source`` points at
+      a real file, resolve it against the YAML's parent directory.
+      String-loaded suites (``source == "<string>"``) treat the path
+      as cwd-relative — documented behaviour, not a bug.
+    * Verify the file exists and parses as a
+      :class:`gauntlet.report.schema.Report`. Loading at suite-load
+      time (rather than first ``cells()`` call) makes
+      ``gauntlet suite check`` catch broken pilots without running
+      the harness.
+    * Emit :class:`UserWarning` with :data:`ADVERSARIAL_WARNING` so
+      every consumer (CLI, scripts, tests) sees the same anti-feature
+      caveat once per load.
+
+    Returns a Suite with ``pilot_report`` rewritten to the resolved
+    absolute path so downstream callers (the sampler) do not have to
+    repeat the resolution.
+    """
+    if suite.sampling != "adversarial":
+        return suite
+
+    # Local import keeps the loader's startup cost flat for the
+    # cartesian/LHS/Sobol common case.
+    from gauntlet.suite.adversarial import ADVERSARIAL_WARNING, load_pilot_report
+
+    assert suite.pilot_report is not None  # validator enforces this.
+    pilot_path = Path(suite.pilot_report)
+    if not pilot_path.is_absolute() and source != "<string>":
+        pilot_path = (Path(source).parent / pilot_path).resolve()
+
+    # Loud anti-feature warning — emitted at load time so every entry
+    # path (CLI, suite check, direct scripts) carries the caveat.
+    warnings.warn(ADVERSARIAL_WARNING, UserWarning, stacklevel=2)
+
+    # Load-time parse: surfaces a malformed / missing pilot at
+    # ``gauntlet suite check`` time, not three cells into a 200-cell
+    # run. The Report itself is discarded; the sampler re-loads it on
+    # ``Suite.cells()`` so the load result is not pinned to memory.
+    load_pilot_report(pilot_path)
+
+    return suite.model_copy(update={"pilot_report": str(pilot_path)})
 
 
 def _reject_purely_visual_suites(suite: Suite) -> None:
