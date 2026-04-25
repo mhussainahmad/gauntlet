@@ -237,3 +237,20 @@ class Report(BaseModel):
     # B-19 do not carry the field; ``Report.model_validate`` accepts
     # them unchanged.
     sensitivity_indices: dict[str, SensitivityIndex] | None = None
+    # B-26: cell index at which Optuna-style early-stop pruning kicked
+    # in, or ``None`` when the run completed every cell. Populated by
+    # the CLI from :attr:`gauntlet.runner.Runner.last_pruned_at_cell`
+    # after the run finishes; ``build_report`` itself never sets it.
+    # ``None`` is the byte-identical default for runs that did not opt
+    # into pruning (the common case) — old report.json files written
+    # before B-26 still validate via ``Report.model_validate``.
+    #
+    # Note: pruning destroys the "fair sample of the perturbation
+    # space" reading by definition (we stop sampling early). When this
+    # field is non-None the report's ``per_cell`` list has fewer than
+    # the suite's nominal cell count and any axis-marginal or
+    # heatmap-derived statistic is biased toward whichever cells the
+    # Runner happened to schedule first. Force-disabled when
+    # ``suite.sampling == "sobol"`` (Sobol indices need full sample
+    # structure per B-19).
+    pruned_at_cell: int | None = None
