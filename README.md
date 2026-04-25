@@ -267,6 +267,69 @@ ffmpeg binary — no system ffmpeg install required. Pass
 constructed with `render_in_obs=True` when `record_video=True`; the
 example wires that automatically.
 
+### Fleet dashboard
+
+Once you've accumulated more than a few `report.json` files
+(different policies, different seeds, nightly runs), eyeballing each
+HTML report individually stops scaling. `gauntlet.dashboard` builds a
+self-contained static SPA that indexes every `report.json` under a
+directory:
+
+```python
+from pathlib import Path
+from gauntlet.dashboard import build_dashboard
+
+build_dashboard(Path("runs/"), Path("dashboard-out/"))
+# Open dashboard-out/index.html via file:// — no web server needed.
+```
+
+The output directory contains exactly three files (`index.html`,
+`dashboard.js`, `dashboard.css`); all run data is embedded as an
+inline JSON literal so the SPA opens straight off the filesystem
+without tripping CORS. The dashboard surfaces an index card
+(n_runs / n_episodes / mean ± std success rate), a per-run table
+filterable by env / suite / policy, a time-series chart of success
+rate keyed off `report.json` mtime, and per-axis aggregate bars
+pooled across the matching runs. Sibling `report.html` files (from
+the originating `gauntlet run`) are auto-linked from each row.
+
+The CLI surface (`gauntlet dashboard build <runs-dir> --out <out>`)
+is RFC-shaped but the shipped path is the Python API above; see
+[`docs/phase3-rfc-020-web-dashboard.md`](./docs/phase3-rfc-020-web-dashboard.md)
+for the full design.
+
+### Real-to-sim scene ingestion
+
+The endgame for `GAUNTLET_SPEC.md` §7 is gaussian-splatting
+reconstruction of customer scenes from real-robot camera dumps
+straight into a renderable eval backend. Shipping the renderer
+itself needs `torch` + CUDA + a multi-gigabyte training pipeline,
+which violates spec §6 — so this release lands the *input pipeline*
+and the *renderer extension point* only. A plugin (or a future
+in-tree RFC) implements an actual renderer against the
+`RealSimRenderer` Protocol without touching the schema or the CLI:
+
+```bash
+uv run gauntlet realsim ingest <frames-dir> \
+  --calib <calib.json> \
+  --out <scene-dir>
+
+uv run gauntlet realsim info <scene-dir>
+```
+
+`ingest` validates the frames + calibration JSON and writes a
+self-contained scene directory (`manifest.json` + frame copies, or
+symlinks via `--symlink`). The manifest carries `Pose` (4x4
+row-major rigid transforms, NeRFStudio / COLMAP `transforms.json`
+convention), `CameraIntrinsics` (pinhole + optional distortion,
+shared by id), and `CameraFrame` rows. `info` prints a one-screen
+manifest summary. The renderer itself is **deferred** — `RealSimRenderer`
+is a `typing.Protocol`, and `register_renderer` / `get_renderer` are a
+module-local registry for plugin renderers. See
+[`docs/phase3-rfc-021-real-to-sim-stub.md`](./docs/phase3-rfc-021-real-to-sim-stub.md)
+for the full design (pose representation, validation rules, plugin
+seam).
+
 ### Multi-camera observations
 
 Multi-view policies (SmolVLA, ACT, Diffusion Policy — anything that
