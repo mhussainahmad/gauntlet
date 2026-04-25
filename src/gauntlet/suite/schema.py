@@ -18,7 +18,14 @@ Two axis spec shapes are accepted (one or the other, never both):
 
 * **Continuous / int**: ``{low, high, steps}`` — ``steps`` evenly spaced
   inclusive points (midpoint when ``steps == 1``).
-* **Categorical**: ``{values: [...]}`` — explicit enumeration.
+* **Categorical**: ``{values: [...]}`` — explicit enumeration. ``values``
+  may be a list of floats (the default) or a list of strings; the
+  string shape is accepted only on the ``instruction_paraphrase`` axis
+  (B-05) where each entry is a natural-language paraphrasing of the
+  task. The cell channel stays float-valued — string lists enumerate
+  to ``(0.0, 1.0, ..., len-1)`` indices and the
+  :class:`gauntlet.env.instruction.InstructionWrapper` performs the
+  index → string lookup at apply time.
 
 Validation is firm — extras are forbidden, axis names must be canonical,
 ``low <= high``, ``steps >= 1``, ``episodes_per_cell >= 1``, ``env`` must
@@ -122,7 +129,15 @@ class AxisSpec(BaseModel):
     low: float | None = Field(default=None)
     high: float | None = Field(default=None)
     steps: int | None = Field(default=None)
-    values: list[float] | None = Field(default=None)
+    # B-05 — accept either a float list (the historical categorical
+    # shape) or a string list (the instruction_paraphrase shape; the
+    # parent ``Suite`` validator restricts string lists to the
+    # ``instruction_paraphrase`` axis name). The discriminated union is
+    # safe under Pydantic v2: float list candidates win on numeric input,
+    # string list candidates win on string input, mixed inputs are
+    # rejected by the per-arm coercion and surface a clear validation
+    # error.
+    values: list[float] | list[str] | None = Field(default=None)
     # B-32 — OOD prior for the ``initial_state_ood`` axis. Both fields
     # are length-3 ``(x, y, z)`` lists. They are forbidden on every
     # other axis (cross-axis check lives on the parent ``Suite``).
@@ -144,7 +159,7 @@ class AxisSpec(BaseModel):
 
     @field_validator("values")
     @classmethod
-    def _values_nonempty(cls, v: list[float] | None) -> list[float] | None:
+    def _values_nonempty(cls, v: list[float] | list[str] | None) -> list[float] | list[str] | None:
         if v is not None and len(v) == 0:
             raise ValueError("values must be a non-empty list when provided")
         return v
@@ -223,7 +238,13 @@ class AxisSpec(BaseModel):
         """Return the ordered grid values for this axis.
 
         For the categorical shape, this is the ``values`` list (cast to
-        float) in declared order.
+        float) in declared order. For the
+        :class:`instruction_paraphrase`-style string shape (B-05) where
+        ``values`` is a list of natural-language paraphrases, the
+        enumeration emits the *indices* ``(0.0, 1.0, ..., len-1)`` —
+        :class:`gauntlet.env.instruction.InstructionWrapper` performs
+        the index → string lookup at apply time so the
+        :class:`SuiteCell.values` mapping stays uniformly float-valued.
 
         For the continuous shape:
 
@@ -233,6 +254,10 @@ class AxisSpec(BaseModel):
           ``range(steps)``.
         """
         if self.values is not None:
+            # B-05 — string-valued ``values`` enumerates as indices; the
+            # wrapper resolves each index back to its paraphrase string.
+            if len(self.values) > 0 and isinstance(self.values[0], str):
+                return tuple(float(i) for i in range(len(self.values)))
             return tuple(float(v) for v in self.values)
         # Continuous: validated above to have all three set.
         assert self.low is not None
@@ -245,6 +270,21 @@ class AxisSpec(BaseModel):
             return (0.5 * (lo + hi),)
         denom = float(steps - 1)
         return tuple(lo + i * (hi - lo) / denom for i in range(steps))
+
+    def paraphrases(self) -> tuple[str, ...] | None:
+        """Return the natural-language strings on a string-valued axis.
+
+        B-05 helper: returns ``None`` if ``values`` is not a string list
+        (i.e. every other axis shape). Otherwise returns the strings in
+        declared order so
+        :class:`gauntlet.env.instruction.InstructionWrapper` can map
+        each :meth:`enumerate` index back to its paraphrase.
+        """
+        if self.values is None or len(self.values) == 0:
+            return None
+        if not isinstance(self.values[0], str):
+            return None
+        return tuple(str(s) for s in self.values)
 
 
 class Suite(BaseModel):
@@ -345,6 +385,19 @@ class Suite(BaseModel):
                 raise ValueError(
                     f"axes[{axis_name!r}]: prior_mean / prior_std are only "
                     "valid on the 'initial_state_ood' axis",
+                )
+        # B-05 — string-valued ``values`` (paraphrase strings) are only
+        # legal on the ``instruction_paraphrase`` axis. Every other axis
+        # uses the float-coded value channel; a string list there would
+        # silently misroute through the runner since the cell value is
+        # consumed as a float.
+        for axis_name, spec in v.items():
+            if axis_name == "instruction_paraphrase":
+                continue
+            if spec.values is not None and len(spec.values) > 0 and isinstance(spec.values[0], str):
+                raise ValueError(
+                    f"axes[{axis_name!r}]: string-valued 'values' lists are "
+                    "only valid on the 'instruction_paraphrase' axis (B-05)",
                 )
         return v
 

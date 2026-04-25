@@ -56,12 +56,18 @@ _APPLY_VALUE: dict[str, float] = {
     # ImageAttackWrapper handles dispatch instead. Tests that exercise
     # backend-direct ``set_perturbation`` filter this name out.
     "image_attack": 0.0,
+    # B-05 — instruction_paraphrase is also a wrapper-only axis (see
+    # gauntlet.env.instruction.InstructionWrapper). Apply value is the
+    # paraphrase index (0 = baseline phrasing).
+    "instruction_paraphrase": 0.0,
 }
 
-# B-31 — axes whose dispatch lives outside the inner backend env.
+# B-31 / B-05 — axes whose dispatch lives outside the inner backend env.
 # Filtered out of any test that drives ``TabletopEnv.set_perturbation``
 # directly (the env legitimately rejects them).
-_BACKEND_DIRECT_AXES: tuple[str, ...] = tuple(name for name in AXIS_NAMES if name != "image_attack")
+_BACKEND_DIRECT_AXES: tuple[str, ...] = tuple(
+    name for name in AXIS_NAMES if name not in {"image_attack", "instruction_paraphrase"}
+)
 
 
 def _zero_action() -> np.ndarray:
@@ -95,6 +101,7 @@ class TestAxisNamesRegistry:
             "distractor_count",
             "initial_state_ood",
             "image_attack",
+            "instruction_paraphrase",
         )
 
     def test_axis_names_is_tuple(self) -> None:
@@ -121,7 +128,7 @@ class TestAxisFactories:
 
     def test_individual_constructors_match_axis_for(self) -> None:
         # axis_for is a registry over the public constructors.
-        from gauntlet.env.perturbation import image_attack
+        from gauntlet.env.perturbation import image_attack, instruction_paraphrase
 
         ctors = {
             "lighting_intensity": lighting_intensity,
@@ -133,13 +140,14 @@ class TestAxisFactories:
             "distractor_count": distractor_count,
             "initial_state_ood": initial_state_ood,
             "image_attack": image_attack,
+            "instruction_paraphrase": instruction_paraphrase,
         }
         for name, ctor in ctors.items():
             assert ctor().name == name
             assert axis_for(name).name == name
 
     def test_axis_kinds(self) -> None:
-        from gauntlet.env.perturbation import image_attack
+        from gauntlet.env.perturbation import image_attack, instruction_paraphrase
 
         assert lighting_intensity().kind == AXIS_KIND_CONTINUOUS
         assert camera_offset_x().kind == AXIS_KIND_CONTINUOUS
@@ -150,6 +158,7 @@ class TestAxisFactories:
         assert distractor_count().kind == AXIS_KIND_INT
         assert initial_state_ood().kind == AXIS_KIND_CONTINUOUS
         assert image_attack().kind == AXIS_KIND_CATEGORICAL
+        assert instruction_paraphrase().kind == AXIS_KIND_CATEGORICAL
 
     def test_continuous_factory_rejects_inverted_bounds(self) -> None:
         with pytest.raises(ValueError, match="low must be <= high"):

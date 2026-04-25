@@ -2,7 +2,7 @@
 
 See ``GAUNTLET_SPEC.md`` §5 task 4. Five logical perturbation categories
 expand into seven base scalar axes plus one OOD-shift axis plus one
-post-render image-attack axis:
+post-render image-attack axis plus one instruction-paraphrase axis:
 
 * :func:`lighting_intensity` — single scalar (one-channel grayscale level).
 * :func:`camera_offset_x` / :func:`camera_offset_y` — two scalars covering
@@ -20,6 +20,13 @@ post-render image-attack axis:
   (B-31). Operates **post-render** via
   :class:`gauntlet.env.image_attack.ImageAttackWrapper`; backends do not
   consume this axis directly. See that module for the legal id set.
+* :func:`instruction_paraphrase` — categorical, integer-coded paraphrase
+  index (B-05). The actual natural-language strings live on the suite
+  YAML's ``values:`` list and are dispatched by
+  :class:`gauntlet.env.instruction.InstructionWrapper`; backends do not
+  consume this axis directly. The paper references are LIBERO-PRO
+  (arXiv 2510.03827) and LIBERO-Plus (arXiv 2510.13626) — both show VLAs
+  collapse from ~90% canonical accuracy to ~0% on simple paraphrases.
 
 Each constructor returns a :class:`PerturbationAxis` with sensible
 default bounds. Callers that load axes from YAML (Task 5) override the
@@ -53,6 +60,7 @@ __all__ = [
     "distractor_count",
     "image_attack",
     "initial_state_ood",
+    "instruction_paraphrase",
     "lighting_intensity",
     "object_initial_pose_x",
     "object_initial_pose_y",
@@ -81,6 +89,14 @@ DEFAULT_BOUNDS: Final[dict[str, tuple[float, float]]] = {
     # for the categorical sampler; the wrapper rounds to the nearest
     # legal id at apply time and rejects anything else.
     "image_attack": (0.0, 5.0),
+    # B-05 — categorical paraphrase index. The high bound is a soft
+    # informational ceiling; the actual cardinality is set by the suite
+    # YAML's ``values:`` list and resolved by
+    # :class:`gauntlet.env.instruction.InstructionWrapper`. The default
+    # constructor builds a 1-element placeholder sampler (index 0); real
+    # suites override via ``axis_for("instruction_paraphrase")`` plus a
+    # YAML-supplied paraphrase list.
+    "instruction_paraphrase": (0.0, 32.0),
 }
 
 
@@ -222,6 +238,47 @@ def image_attack() -> PerturbationAxis:
     )
 
 
+def instruction_paraphrase() -> PerturbationAxis:
+    """Categorical instruction-paraphrase axis (B-05).
+
+    Values are integer-coded **indices** into a paraphrase list supplied
+    by the suite YAML (``values: ["pick up the red cube", "grab the
+    crimson block", ...]``). The axis itself does NOT carry the strings
+    — the schema layer extracts them and the
+    :class:`gauntlet.env.instruction.InstructionWrapper` performs the
+    index → string lookup at apply time. This keeps the
+    :class:`PerturbationAxis` value channel uniformly float-valued
+    (matching :data:`gauntlet.suite.schema.SuiteCell.values`).
+
+    The default constructor returns a 1-element placeholder sampler
+    (index 0) because the *real* paraphrase count comes from the YAML at
+    load time. Tests / direct callers that need richer sampling override
+    by handing the wrapper their own list.
+
+    The axis is *backend-agnostic*: inner :class:`GauntletEnv` backends
+    do not consume it. Apply only via
+    :class:`gauntlet.env.instruction.InstructionWrapper`. Routing into a
+    raw backend env will raise ``ValueError`` from the backend's
+    ``set_perturbation`` since ``"instruction_paraphrase"`` is not in
+    its ``AXIS_NAMES`` ClassVar.
+
+    References: LIBERO-PRO (arXiv 2510.03827), LIBERO-Plus
+    (arXiv 2510.13626) — VLAs scoring 90%+ on canonical instructions
+    collapse to ~0% on simple paraphrases.
+    """
+    lo, hi = DEFAULT_BOUNDS["instruction_paraphrase"]
+    return PerturbationAxis(
+        name="instruction_paraphrase",
+        kind=AXIS_KIND_CATEGORICAL,
+        # Placeholder: real cardinality is set by the suite YAML. The
+        # categorical sampler needs at least one value, so we pin index 0
+        # — the common "no paraphrase override" fall-through.
+        sampler=make_categorical_sampler((0.0,)),
+        low=lo,
+        high=hi,
+    )
+
+
 def distractor_count(*, low: int | None = None, high: int | None = None) -> PerturbationAxis:
     """Number of visible distractor objects (integer, [0, 10])."""
     lo_f, hi_f = _resolve_bounds("distractor_count", low, high)
@@ -250,6 +307,7 @@ _DEFAULT_CONSTRUCTORS: Final[dict[str, AxisCtor]] = {
     "distractor_count": distractor_count,
     "initial_state_ood": initial_state_ood,
     "image_attack": image_attack,
+    "instruction_paraphrase": instruction_paraphrase,
 }
 
 

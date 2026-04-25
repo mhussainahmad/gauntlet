@@ -43,6 +43,9 @@ from gauntlet.env.perturbation.axes import (
     initial_state_ood as initial_state_ood,
 )
 from gauntlet.env.perturbation.axes import (
+    instruction_paraphrase as instruction_paraphrase,
+)
+from gauntlet.env.perturbation.axes import (
     lighting_intensity as lighting_intensity,
 )
 from gauntlet.env.perturbation.axes import (
@@ -94,6 +97,7 @@ AXIS_NAMES: Final[tuple[str, ...]] = (
     "distractor_count",
     "initial_state_ood",
     "image_attack",
+    "instruction_paraphrase",
 )
 
 
@@ -112,6 +116,7 @@ __all__ = [
     "distractor_count",
     "image_attack",
     "initial_state_ood",
+    "instruction_paraphrase",
     "lighting_intensity",
     "make_categorical_sampler",
     "make_continuous_sampler",

@@ -540,6 +540,12 @@ module = [
     # ``Space[Any]`` + ``dict[str, Any]`` Protocol surface as the
     # backend env modules above.
     "gauntlet.env.image_attack",
+    # B-05 — same wrapper pattern as image_attack: wraps any
+    # GauntletEnv and carries the gymnasium ``Space[Any]`` +
+    # ``dict[str, Any]`` Protocol surface, plus an ``__getattr__``
+    # proxy whose return is genuinely ``Any`` (the inner backend's
+    # extras are heterogeneous).
+    "gauntlet.env.instruction",
     # PyBullet / Genesis / Isaac backend wrappers — backend C++ surfaces
     # carry no stubs (RFC-005 §11 / RFC-007 §4.2 / RFC-009 §4.4).
     "gauntlet.env.pybullet",
