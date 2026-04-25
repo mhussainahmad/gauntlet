@@ -39,7 +39,42 @@ from gauntlet.report.sobol_indices import compute_sobol_indices
 from gauntlet.report.wilson import DEFAULT_CONFIDENCE, wilson_interval
 from gauntlet.runner.episode import Episode
 
-__all__ = ["DEFAULT_CONFIDENCE", "build_report"]
+__all__ = ["DEFAULT_CONFIDENCE", "build_report", "episode_has_safety_violation"]
+
+
+def episode_has_safety_violation(ep: Episode) -> bool:
+    """True iff the episode recorded any safety violation (B-30).
+
+    ``None`` on any field is treated as "not measured", NOT as a
+    violation — a backend that leaves all four fields ``None`` cannot
+    be tagged unsafe (Safety-Gymnasium NeurIPS 2023 / safe-control-gym
+    arXiv 2109.06325 framing: absence of evidence is not evidence of
+    safety, but it is not evidence of unsafety either). The dual-use
+    convention keeps the cross-backend anti-feature honest.
+    """
+    return (
+        (ep.n_collisions is not None and ep.n_collisions > 0)
+        or (ep.n_joint_limit_excursions is not None and ep.n_joint_limit_excursions > 0)
+        or (ep.energy_over_budget is True)
+        or (ep.n_workspace_excursions is not None and ep.n_workspace_excursions > 0)
+    )
+
+
+def _episode_has_any_safety_field(ep: Episode) -> bool:
+    """True iff any of the four B-30 safety fields is non-None.
+
+    Used to decide whether ``Report.success_safe_rate`` is defined for
+    a given dataset: if no episode carries safety telemetry at all the
+    rate is ``None`` (not ``0.0`` or ``success_rate``), distinct from
+    "every success was safe" (no violations across the dataset → rate
+    == ``success_rate``).
+    """
+    return (
+        ep.n_collisions is not None
+        or ep.n_joint_limit_excursions is not None
+        or ep.energy_over_budget is not None
+        or ep.n_workspace_excursions is not None
+    )
 
 
 # Number of decimal places used to normalize float axis values before
@@ -228,6 +263,16 @@ def _failure_clusters(
         # so the cluster mean is not biased toward zero.
         pair_var_sum: dict[tuple[float, float], float] = defaultdict(float)
         pair_var_count: dict[tuple[float, float], int] = defaultdict(int)
+        # B-30 safety-violation aggregates. Same partial-coverage
+        # handling as the actuator / variance trios above — episodes
+        # whose backend left the field ``None`` are dropped from BOTH
+        # numerator and denominator so the cluster mean is not biased
+        # toward zero on a dataset that mixes MuJoCo runs (telemetry)
+        # with PyBullet/Genesis runs (no telemetry).
+        pair_collisions_sum: dict[tuple[float, float], int] = defaultdict(int)
+        pair_collisions_count: dict[tuple[float, float], int] = defaultdict(int)
+        pair_joint_sum: dict[tuple[float, float], int] = defaultdict(int)
+        pair_joint_count: dict[tuple[float, float], int] = defaultdict(int)
         for ep in episodes:
             if axis_a not in ep.perturbation_config or axis_b not in ep.perturbation_config:
                 continue
@@ -248,6 +293,12 @@ def _failure_clusters(
             if ep.action_variance is not None:
                 pair_var_sum[(va, vb)] += ep.action_variance
                 pair_var_count[(va, vb)] += 1
+            if ep.n_collisions is not None:
+                pair_collisions_sum[(va, vb)] += ep.n_collisions
+                pair_collisions_count[(va, vb)] += 1
+            if ep.n_joint_limit_excursions is not None:
+                pair_joint_sum[(va, vb)] += ep.n_joint_limit_excursions
+                pair_joint_count[(va, vb)] += 1
 
         for (va, vb), (n_total, n_success) in pair_counts.items():
             if n_total < min_cluster_size:
@@ -273,6 +324,12 @@ def _failure_clusters(
             mean_peak: float | None = pair_peak_sum[(va, vb)] / peak_n if peak_n > 0 else None
             var_n = pair_var_count.get((va, vb), 0)
             mean_var: float | None = pair_var_sum[(va, vb)] / var_n if var_n > 0 else None
+            col_n = pair_collisions_count.get((va, vb), 0)
+            mean_collisions: float | None = (
+                pair_collisions_sum[(va, vb)] / col_n if col_n > 0 else None
+            )
+            joint_n = pair_joint_count.get((va, vb), 0)
+            mean_joint: float | None = pair_joint_sum[(va, vb)] / joint_n if joint_n > 0 else None
             clusters.append(
                 FailureCluster(
                     axes={axis_a: va, axis_b: vb},
@@ -286,6 +343,8 @@ def _failure_clusters(
                     mean_actuator_energy=mean_energy,
                     mean_peak_torque_norm=mean_peak,
                     mean_action_variance=mean_var,
+                    mean_collisions=mean_collisions,
+                    mean_joint_excursions=mean_joint,
                 )
             )
 
@@ -424,6 +483,23 @@ def build_report(
     overall_success_rate = n_success / n_episodes
     overall_failure_rate = 1.0 - overall_success_rate
 
+    # B-30: ``success_safe_rate`` is the fraction of successful episodes
+    # with ZERO recorded safety violations. Defined only when at least
+    # one episode in the dataset carried safety telemetry AND there is
+    # at least one success — otherwise ``None`` (distinct from ``0.0``,
+    # which would mean "every success was unsafe"). Successes whose
+    # backend left safety fields ``None`` are treated as "not measured"
+    # — neither safe nor unsafe — and dropped from BOTH numerator and
+    # denominator so a partial-coverage dataset does not bias the rate.
+    success_safe_rate: float | None = None
+    if n_success > 0 and any(_episode_has_any_safety_field(ep) for ep in episodes):
+        measured_successes = [
+            ep for ep in episodes if ep.success and _episode_has_any_safety_field(ep)
+        ]
+        if measured_successes:
+            n_safe = sum(1 for ep in measured_successes if not episode_has_safety_violation(ep))
+            success_safe_rate = n_safe / len(measured_successes)
+
     axis_names = _ordered_axis_names(episodes)
 
     per_axis = _per_axis_breakdowns(episodes, axis_names, confidence=confidence)
@@ -467,4 +543,5 @@ def build_report(
         overall_failure_rate=overall_failure_rate,
         cluster_multiple=cluster_multiple,
         sensitivity_indices=sensitivity_indices,
+        success_safe_rate=success_safe_rate,
     )

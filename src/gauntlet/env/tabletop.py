@@ -312,6 +312,25 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         self._last_step_actuator_energy: float | None = None
         self._last_step_torque_norm: float | None = None
 
+        # B-30 safety telemetry: per-control-step scratch slots
+        # populated inside :meth:`step` and surfaced via
+        # :meth:`_build_info` as ``safety_n_collisions_delta`` /
+        # ``safety_joint_limit_violation`` /
+        # ``safety_workspace_excursion``. The MuJoCo definition is the
+        # portable one (``mj_data.ncon`` delta + ``model.jnt_range``
+        # check + EE-vs-table-half-extents check); other backends
+        # publish nothing and the worker carries ``None`` to the
+        # Episode. ``None`` after reset (= "not a control step") so
+        # the worker's accumulator does not double-count the reset
+        # observation.
+        self._last_step_n_collisions_delta: int | None = None
+        self._last_step_joint_limit_violation: bool | None = None
+        self._last_step_workspace_excursion: bool | None = None
+        # Previous-step contact count for the ``ncon``-delta definition.
+        # Reset to 0 in :meth:`reset` so the first step's delta is the
+        # full count of new contacts since the bare scene.
+        self._prev_ncon: int = 0
+
         self.action_space: spaces.Box = spaces.Box(low=-1.0, high=1.0, shape=(7,), dtype=np.float64)
         obs_spaces: dict[str, spaces.Space[Any]] = {
             "cube_pos": spaces.Box(low=-np.inf, high=np.inf, shape=(3,), dtype=np.float64),
@@ -684,6 +703,16 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         self._last_step_actuator_energy = None
         self._last_step_torque_norm = None
 
+        # B-30: same treatment for the safety telemetry. ``_prev_ncon``
+        # resets to 0 so the first step's contact-count delta is the
+        # full count of new contacts since the bare scene; per-step
+        # scratch slots stay ``None`` until the first :meth:`step`
+        # populates them.
+        self._last_step_n_collisions_delta = None
+        self._last_step_joint_limit_violation = None
+        self._last_step_workspace_excursion = None
+        self._prev_ncon = 0
+
         # Populate body_xpos / site_xpos before we read them for the obs.
         mujoco.mj_forward(self._model, self._data)
 
@@ -769,6 +798,52 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         cube_pos = np.array(self._data.xpos[self._cube_body_id], dtype=np.float64)
         if self._xy_distance(cube_pos, self._target_pos) <= self.TARGET_RADIUS:
             self._success = True
+
+        # B-30 safety telemetry. The MuJoCo definition is the portable
+        # one (anti-feature note: PyBullet/Genesis/Isaac approximate
+        # this differently or not at all):
+        #
+        # * ``ncon`` delta — count of *new* contacts since the previous
+        #   step. Steady-state contacts (cube on table) do not tick the
+        #   counter; gripper poking a distractor or cube falling off
+        #   does. Clamped at 0 — a contact that resolved (object lifted
+        #   off) is not a "negative collision".
+        # * Joint-limit excursion — any joint with ``jnt_range``
+        #   bounded that has its qpos outside the bounds. The
+        #   tabletop's mocap-driven scene currently has no bounded
+        #   joints, so this is structurally False here; the wiring
+        #   stays so a future joint-actuator MJCF asset surfaces real
+        #   values.
+        # * Workspace excursion — end-effector mocap pos outside the
+        #   table half-extents (``±_TABLE_HALF_X / Y``). Z is not
+        #   checked (the EE legitimately hovers above the table).
+        ncon_now = int(self._data.ncon)
+        self._last_step_n_collisions_delta = max(ncon_now - self._prev_ncon, 0)
+        self._prev_ncon = ncon_now
+        # Joint-limit check. ``jnt_range`` is shape (njnt, 2). A joint
+        # is bounded iff ``jnt_limited[i]`` is truthy. We honour the
+        # MuJoCo flag rather than the range (a (0,0) range with
+        # ``jnt_limited=False`` means "unlimited", not "pinned at 0").
+        joint_violation = False
+        m = self._model
+        for jid in range(int(m.njnt)):
+            if not bool(m.jnt_limited[jid]):
+                continue
+            qpos_adr = int(m.jnt_qposadr[jid])
+            q = float(self._data.qpos[qpos_adr])
+            lo = float(m.jnt_range[jid, 0])
+            hi = float(m.jnt_range[jid, 1])
+            if q < lo or q > hi:
+                joint_violation = True
+                break
+        self._last_step_joint_limit_violation = joint_violation
+        # Workspace check on the EE mocap pos.
+        ee_pos = self._data.mocap_pos[self._ee_mocap_id]
+        ee_x = float(ee_pos[0])
+        ee_y = float(ee_pos[1])
+        self._last_step_workspace_excursion = (
+            abs(ee_x) > self._TABLE_HALF_X or abs(ee_y) > self._TABLE_HALF_Y
+        )
 
         terminated = self._success
         truncated = (not terminated) and self._step_count >= self._max_steps
@@ -954,6 +1029,16 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
             info["actuator_energy_delta"] = self._last_step_actuator_energy
         if self._last_step_torque_norm is not None:
             info["actuator_torque_norm"] = self._last_step_torque_norm
+        # B-30: same key-absence convention as the actuator block — the
+        # worker reads with ``info.get(...)`` and only ticks its
+        # accumulator when the key is present, so absence == "this is a
+        # reset, not a control step".
+        if self._last_step_n_collisions_delta is not None:
+            info["safety_n_collisions_delta"] = self._last_step_n_collisions_delta
+        if self._last_step_joint_limit_violation is not None:
+            info["safety_joint_limit_violation"] = self._last_step_joint_limit_violation
+        if self._last_step_workspace_excursion is not None:
+            info["safety_workspace_excursion"] = self._last_step_workspace_excursion
         return info
 
     @staticmethod
