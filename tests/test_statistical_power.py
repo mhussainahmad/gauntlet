@@ -33,7 +33,7 @@ from gauntlet.report.wilson import (
     required_episodes,
     required_episodes_paired,
 )
-from gauntlet.suite import lint_suite, load_suite_from_string
+from gauntlet.suite import LintFinding, lint_suite, load_suite_from_string
 from gauntlet.suite.linter import (
     LOW_POWER_DEFAULT_DELTA,
     LOW_POWER_DEFAULT_RHO,
@@ -179,7 +179,10 @@ def test_floor_at_one_for_extreme_separation() -> None:
 # ────────────────────────────────────────────────────────────────────────
 
 
-def _by_rule(findings: list, rule: str) -> list:
+def _by_rule(
+    findings: list[LintFinding],
+    rule: str,
+) -> list[LintFinding]:
     return [f for f in findings if f.rule == rule]
 
 
@@ -281,7 +284,12 @@ def test_linter_low_power_message_carries_anti_feature_warning() -> None:
 
 @pytest.fixture
 def runner() -> CliRunner:
-    return CliRunner(mix_stderr=False)
+    # Click 8.3 separates stdout / stderr by default — the legacy
+    # ``mix_stderr=False`` constructor keyword was removed. ``result.stdout``
+    # still carries the machine-readable table; ``result.stderr`` carries
+    # the rich ``_echo_err`` envelope (anti-feature footer, fallback
+    # notes).
+    return CliRunner()
 
 
 def _write_yaml(tmp_path: Path, body: str, *, name: str = "suite.yaml") -> Path:
