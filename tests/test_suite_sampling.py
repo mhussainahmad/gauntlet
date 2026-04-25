@@ -5,13 +5,13 @@ Two responsibilities:
 * Pin :class:`CartesianSampler` to a byte-identical reproduction of
   the historical :meth:`Suite.cells` enumeration, so the sampler
   refactor is invisible to existing callers.
-* Cover the :func:`build_sampler` dispatch table — including the
-  :class:`SobolSampler` placeholder that raises a clear
-  :class:`NotImplementedError` until the follow-up PR lands.
+* Cover the :func:`build_sampler` dispatch table — cartesian, LHS,
+  and Sobol all wired through the same protocol.
 
-The LHS sampler has its own dedicated suite in ``test_lhs_sampler.py``;
-this file only covers the protocol layer + the cartesian regression
-pin + the Sobol placeholder.
+The LHS and Sobol samplers have their own dedicated suites in
+``test_lhs_sampler.py`` / ``test_sobol_sampler.py``; this file only
+covers the protocol layer + the cartesian regression pin + the
+end-to-end ``Suite.cells`` dispatch.
 """
 
 from __future__ import annotations
@@ -27,9 +27,9 @@ from gauntlet.suite import Suite, load_suite, load_suite_from_string
 from gauntlet.suite.sampling import (
     CartesianSampler,
     Sampler,
-    SobolSampler,
     build_sampler,
 )
+from gauntlet.suite.sobol import SobolSampler
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EXAMPLE_SMOKE = REPO_ROOT / "examples" / "suites" / "tabletop-smoke.yaml"
@@ -131,11 +131,6 @@ class TestSobolSampler:
     def test_satisfies_sampler_protocol(self) -> None:
         assert isinstance(SobolSampler(), Sampler)
 
-    def test_raises_clear_not_implemented_with_followup_hint(self) -> None:
-        suite = load_suite_from_string(_REGRESSION_YAML)
-        with pytest.raises(NotImplementedError, match="follow-up"):
-            SobolSampler().sample(suite, np.random.default_rng(0))
-
 
 class TestBuildSampler:
     def test_cartesian_dispatch(self) -> None:
@@ -223,10 +218,38 @@ axes:
         rows_b = [dict(c.values) for c in suite_b.cells()]
         assert rows_a != rows_b
 
-    def test_sobol_cells_propagates_not_implemented(self) -> None:
+    def test_sobol_cells_emits_n_samples_rows(self) -> None:
+        # ``Suite.cells`` for a Sobol suite must produce exactly
+        # ``n_samples`` SuiteCell rows, with values inside each
+        # axis's declared range.
         suite = load_suite_from_string(self._SOBOL_YAML)
-        with pytest.raises(NotImplementedError, match="follow-up"):
-            list(suite.cells())
+        cells = list(suite.cells())
+        assert len(cells) == 8
+        assert suite.num_cells() == 8
+        for cell in cells:
+            for axis_name, value in cell.values.items():
+                spec = suite.axes[axis_name]
+                assert spec.low is not None
+                assert spec.high is not None
+                assert spec.low <= value < spec.high or value == pytest.approx(spec.high)
+
+    def test_sobol_cells_deterministic_across_calls(self) -> None:
+        # Sobol is fully deterministic: two ``Suite.cells()`` calls
+        # produce the same cells.
+        suite = load_suite_from_string(self._SOBOL_YAML)
+        a = [(c.index, dict(c.values)) for c in suite.cells()]
+        b = [(c.index, dict(c.values)) for c in suite.cells()]
+        assert a == b
+
+    def test_sobol_cells_seed_independent(self) -> None:
+        # Sobol ignores ``Suite.seed`` — the sequence is fixed by the
+        # direction-number table alone. Two suites differing only in
+        # ``seed`` produce identical Sobol cells.
+        suite_a = load_suite_from_string(self._SOBOL_YAML.replace("seed: 42", "seed: 1"))
+        suite_b = load_suite_from_string(self._SOBOL_YAML.replace("seed: 42", "seed: 2"))
+        rows_a = [dict(c.values) for c in suite_a.cells()]
+        rows_b = [dict(c.values) for c in suite_b.cells()]
+        assert rows_a == rows_b
 
     def test_lhs_num_cells_matches_n_samples_without_iterating(self) -> None:
         # ``num_cells`` for non-cartesian must read off ``n_samples``

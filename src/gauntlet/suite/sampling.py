@@ -8,9 +8,8 @@ This module is the dispatch layer behind :attr:`Suite.sampling`:
   pre-LHS behaviour.
 * ``"latin_hypercube"`` — :class:`LatinHypercubeSampler` (added in a
   follow-up step in this same task series).
-* ``"sobol"`` — :class:`SobolSampler` (placeholder; raises
-  :class:`NotImplementedError` with a clear "planned for follow-up
-  PR; LHS is supported" message).
+* ``"sobol"`` — :class:`SobolSampler` (Joe-Kuo 6.21201
+  low-discrepancy sequence; see ``docs/polish-exploration-sobol-sampler.md``).
 
 The :class:`Sampler` protocol is intentionally minimal: ``sample(suite,
 rng)`` returns a list of :class:`SuiteCell` records. The Runner is
@@ -36,7 +35,6 @@ if TYPE_CHECKING:
 __all__ = [
     "CartesianSampler",
     "Sampler",
-    "SobolSampler",
     "build_sampler",
 ]
 
@@ -89,28 +87,6 @@ class CartesianSampler:
         return out
 
 
-class SobolSampler:
-    """Placeholder for the Sobol low-discrepancy sequence sampler.
-
-    Sobol-on-numpy is a few hundred lines (Joe-Kuo direction-number
-    table + Gray-code generator + scrambler) and has subtle correctness
-    failure modes that are hard to test exhaustively. This polish PR
-    ships the LHS half of the schema upgrade and defers Sobol so the
-    follow-up can land it without touching the schema again.
-
-    The schema accepts ``sampling: sobol`` to keep the YAML grammar
-    forward-compatible — every YAML written today against this schema
-    will continue to load when the real Sobol sampler arrives.
-    """
-
-    def sample(self, suite: Suite, rng: np.random.Generator) -> list[SuiteCell]:
-        del suite, rng
-        raise NotImplementedError(
-            "Sobol sampler is planned for a follow-up PR; "
-            "LHS (sampling: latin_hypercube) is supported today."
-        )
-
-
 def build_sampler(mode: str) -> Sampler:
     """Return the :class:`Sampler` for a given :attr:`Suite.sampling` value.
 
@@ -123,16 +99,17 @@ def build_sampler(mode: str) -> Sampler:
     if mode == "cartesian":
         return CartesianSampler()
     if mode == "latin_hypercube":
-        # LatinHypercubeSampler is added in a later commit in this
-        # same task; the import is local so this module stays
-        # self-contained even before the LHS file lands. Once it
-        # exists, ``build_sampler('latin_hypercube')`` returns an
-        # instance directly; until then, the caller sees a clear
-        # ImportError pointing at the missing module.
+        # Local import dodges the schema <-> sampling cycle: schema
+        # imports this module to dispatch ``Suite.cells``, and the
+        # sampler subclasses each defer their ``SuiteCell`` import to
+        # call time for the same reason.
         from gauntlet.suite.lhs import LatinHypercubeSampler
 
         return LatinHypercubeSampler()
     if mode == "sobol":
+        # Same lazy-import rationale as LHS above.
+        from gauntlet.suite.sobol import SobolSampler
+
         return SobolSampler()
     raise ValueError(
         f"unknown sampling mode {mode!r}; expected one of "
