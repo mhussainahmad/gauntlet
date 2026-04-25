@@ -183,6 +183,17 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
     _TABLE_HALF_X: float = 0.5
     _TABLE_HALF_Y: float = 0.5
 
+    # B-02 near-collision threshold. Any active MuJoCo contact whose
+    # ``data.contact[i].dist`` is below this distance counts toward the
+    # per-step ``info["behavior_near_collision_delta"]``. 1cm is the
+    # RoboEval-style "the policy was close to a contact" bar; the unit
+    # is metres (MuJoCo's native unit). Steady-state contacts (the
+    # cube resting on the table) sit at ``dist = 0`` and DO tick the
+    # counter — that is acceptable because the failure-cluster table
+    # cares about the *delta* across configurations, not the absolute
+    # value, and the baseline is the same across the dataset.
+    _NEAR_COLLISION_DIST: float = 0.01
+
     # Randomisation ranges (conservative — keep cube & target on the table).
     _CUBE_INIT_HALFRANGE: float = 0.15
     _TARGET_HALFRANGE: float = 0.2
@@ -364,6 +375,21 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         # Reset to 0 in :meth:`reset` so the first step's delta is the
         # full count of new contacts since the bare scene.
         self._prev_ncon: int = 0
+
+        # B-02 behavioural-metrics telemetry: per-control-step scratch
+        # slots populated inside :meth:`step` and surfaced via
+        # :meth:`_build_info` as ``behavior_ee_pos`` (3,) ndarray /
+        # ``behavior_control_dt`` float / ``behavior_near_collision_delta``
+        # int / ``behavior_peak_contact_force`` float. The worker buffers
+        # the EE position per step and derives ``time_to_success`` /
+        # ``path_length_ratio`` / ``jerk_rms`` at episode boundary, while
+        # accumulating ``near_collision_count`` (sum) and ``peak_force``
+        # (max) inline. ``None`` after :meth:`reset` so the worker's
+        # accumulator only ticks on real control steps; absence of a key
+        # in the post-reset info dict signals the same. See B-02 docstring
+        # on :class:`gauntlet.runner.episode.Episode` for the full contract.
+        self._last_step_near_collision_delta: int | None = None
+        self._last_step_peak_contact_force: float | None = None
 
         self.action_space: spaces.Box = spaces.Box(low=-1.0, high=1.0, shape=(7,), dtype=np.float64)
         obs_spaces: dict[str, spaces.Space[Any]] = {
@@ -871,6 +897,13 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         self._last_step_workspace_excursion = None
         self._prev_ncon = 0
 
+        # B-02: same per-step scratch-reset treatment as the actuator /
+        # safety blocks above. The worker's accumulator only ticks when
+        # the keys are present in the post-step info, so absence after
+        # reset == "no control step yet".
+        self._last_step_near_collision_delta = None
+        self._last_step_peak_contact_force = None
+
         # Populate body_xpos / site_xpos before we read them for the obs.
         mujoco.mj_forward(self._model, self._data)
 
@@ -1002,6 +1035,49 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         self._last_step_workspace_excursion = (
             abs(ee_x) > self._TABLE_HALF_X or abs(ee_y) > self._TABLE_HALF_Y
         )
+
+        # B-02 behavioural telemetry. The MuJoCo definition is the
+        # portable one (anti-feature note: PyBullet/Genesis/Isaac
+        # approximate this differently or not at all):
+        #
+        # * ``near_collision_delta`` — integer number of *active* contacts
+        #   whose penetration distance ``data.contact[i].dist`` is below
+        #   the 1cm near-collision threshold this step. ``mj_data.contact``
+        #   is the live array of currently-active contacts; we count each
+        #   step independently so a brief brush-by ticks the counter once
+        #   per step it lasts. The worker sums across the rollout to land
+        #   :attr:`Episode.near_collision_count`.
+        # * ``peak_contact_force`` — max L2 norm of the *force* component
+        #   (first 3 entries) of :func:`mujoco.mj_contactForce` across
+        #   every active contact this step. The torque component (last 3)
+        #   is excluded so the units stay newtons, not a mixed N+Nm
+        #   magnitude. The worker takes the running max across steps to
+        #   land :attr:`Episode.peak_force`.
+        # * ``ee_pos`` — current end-effector mocap position (the same
+        #   array surfaced in ``obs["ee_pos"]``). The worker buffers these
+        #   per step and derives ``path_length_ratio`` / ``jerk_rms`` at
+        #   episode boundary so the env-side cost stays a constant
+        #   per-step append.
+        # * ``control_dt`` — wall-clock seconds per control step
+        #   (``model.opt.timestep * n_substeps``). Constant for the env
+        #   lifetime, but emitted per step so the worker does not have to
+        #   special-case the post-reset info gap. The worker keys
+        #   :attr:`Episode.time_to_success` off this.
+        ncon_active = int(self._data.ncon)
+        near_thresh = self._NEAR_COLLISION_DIST
+        near_count = 0
+        peak_force = 0.0
+        force_buf = np.zeros(6, dtype=np.float64)
+        for cid in range(ncon_active):
+            contact = self._data.contact[cid]
+            if float(contact.dist) < near_thresh:
+                near_count += 1
+            mujoco.mj_contactForce(self._model, self._data, cid, force_buf)
+            mag = float(np.linalg.norm(force_buf[:3]))
+            if mag > peak_force:
+                peak_force = mag
+        self._last_step_near_collision_delta = near_count
+        self._last_step_peak_contact_force = peak_force
 
         terminated = self._success
         truncated = (not terminated) and self._step_count >= self._max_steps
@@ -1197,6 +1273,21 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
             info["safety_joint_limit_violation"] = self._last_step_joint_limit_violation
         if self._last_step_workspace_excursion is not None:
             info["safety_workspace_excursion"] = self._last_step_workspace_excursion
+        # B-02: same key-absence convention as the actuator / safety
+        # blocks above. The worker reads with ``info.get(...)`` and only
+        # ticks its accumulator when the key is present, so absence ==
+        # "this is a reset, not a control step". ``ee_pos`` and
+        # ``control_dt`` are gated together on ``near_collision_delta``
+        # being populated so the four keys move as a unit (a backend
+        # that cannot publish *any* of these stays out of the worker's
+        # behavioural buffer entirely).
+        if self._last_step_near_collision_delta is not None:
+            info["behavior_near_collision_delta"] = self._last_step_near_collision_delta
+            info["behavior_peak_contact_force"] = self._last_step_peak_contact_force
+            info["behavior_ee_pos"] = np.array(
+                self._data.mocap_pos[self._ee_mocap_id], dtype=np.float64
+            )
+            info["behavior_control_dt"] = float(self._model.opt.timestep) * float(self._n_substeps)
         return info
 
     @staticmethod

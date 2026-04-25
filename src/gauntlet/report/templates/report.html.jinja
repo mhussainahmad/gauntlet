@@ -271,6 +271,24 @@ Data-embed conventions:
      (report.failure_clusters | rejectattr('mean_collisions', 'none') | list | length > 0)
      or (report.failure_clusters | rejectattr('mean_joint_excursions', 'none') | list | length > 0)
    ) %}
+{# B-02: render the behavioural-metrics columns only when at least one
+   cluster carries any of the five RoboEval-style trajectory / contact
+   metrics (i.e. a MuJoCo run). Two grouped columns keep the table at
+   a manageable visual width: time/path/jerk first (trajectory shape),
+   then near-collision/peak-force (contact intensity). Mirrors the
+   actuator-energy / safety conditional-column pattern so non-MuJoCo
+   reports stay visually identical. #}
+{% set any_cluster_behavior_traj = report.failure_clusters
+   and (
+     (report.failure_clusters | rejectattr('mean_time_to_success', 'none') | list | length > 0)
+     or (report.failure_clusters | rejectattr('mean_path_length_ratio', 'none') | list | length > 0)
+     or (report.failure_clusters | rejectattr('mean_jerk_rms', 'none') | list | length > 0)
+   ) %}
+{% set any_cluster_behavior_contact = report.failure_clusters
+   and (
+     (report.failure_clusters | rejectattr('mean_near_collision_count', 'none') | list | length > 0)
+     or (report.failure_clusters | rejectattr('mean_peak_force', 'none') | list | length > 0)
+   ) %}
 <section>
   <h2>Where it failed</h2>
   {% if report.failure_clusters %}
@@ -290,6 +308,8 @@ Data-embed conventions:
           {% if any_cluster_energy %}<th class="num">Energy / peak τ</th>{% endif %}
           {% if any_cluster_action_var %}<th class="num">Action var (B-18)</th>{% endif %}
           {% if any_cluster_safety %}<th class="num">Collisions / jnt excursions</th>{% endif %}
+          {% if any_cluster_behavior_traj %}<th class="num">Time / path / jerk (B-02)</th>{% endif %}
+          {% if any_cluster_behavior_contact %}<th class="num">Near coll. / peak force (B-02)</th>{% endif %}
           {% if any_cluster_video %}<th>Failed-rollout videos</th>{% endif %}
         </tr>
       </thead>
@@ -359,6 +379,53 @@ Data-embed conventions:
             {%- endif -%}
             {% if cluster.mean_joint_excursions is not none %}
             <span class="ci">/ {{ '%.2f'|format(cluster.mean_joint_excursions) }}</span>
+            {% else %}
+            <span class="ci">/ -</span>
+            {% endif %}
+          </td>
+          {% endif %}
+          {% if any_cluster_behavior_traj %}
+          {# B-02: trajectory-shape behavioural metrics. ``-`` for
+             non-MuJoCo backends (cross-backend anti-feature) and for
+             cluster-empty values (e.g. all-failure clusters report
+             ``-`` on time_to_success because failed rollouts have
+             nothing to time to). ``data-sort-value`` carries the raw
+             value for a future client-side sort pass; ``-1`` is the
+             "missing" sentinel because every metric is non-negative.
+             Render order — time / path / jerk — matches the table
+             header. #}
+          <td class="num" data-sort-value="{{ cluster.mean_time_to_success if cluster.mean_time_to_success is not none else -1 }}">
+            {%- if cluster.mean_time_to_success is not none -%}
+              {{ '%.2f'|format(cluster.mean_time_to_success) }}s
+            {%- else -%}
+              <span class="ci">-</span>
+            {%- endif -%}
+            {% if cluster.mean_path_length_ratio is not none %}
+            <span class="ci">/ {{ '%.2f'|format(cluster.mean_path_length_ratio) }}×</span>
+            {% else %}
+            <span class="ci">/ -</span>
+            {% endif %}
+            {% if cluster.mean_jerk_rms is not none %}
+            <span class="ci">/ {{ '%.1f'|format(cluster.mean_jerk_rms) }}</span>
+            {% else %}
+            <span class="ci">/ -</span>
+            {% endif %}
+          </td>
+          {% endif %}
+          {% if any_cluster_behavior_contact %}
+          {# B-02: contact-intensity behavioural metrics. Same ``-``
+             convention as the trajectory column above; the
+             ``data-sort-value`` carries near_collision_count (the
+             count is the dominant signal — peak_force often co-
+             varies but is more sensitive to a single contact event). #}
+          <td class="num" data-sort-value="{{ cluster.mean_near_collision_count if cluster.mean_near_collision_count is not none else -1 }}">
+            {%- if cluster.mean_near_collision_count is not none -%}
+              {{ '%.1f'|format(cluster.mean_near_collision_count) }}
+            {%- else -%}
+              <span class="ci">-</span>
+            {%- endif -%}
+            {% if cluster.mean_peak_force is not none %}
+            <span class="ci">/ {{ '%.2f'|format(cluster.mean_peak_force) }}N</span>
             {% else %}
             <span class="ci">/ -</span>
             {% endif %}

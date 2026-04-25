@@ -505,6 +505,20 @@ def execute_one(
     n_collisions_acc = 0
     n_joint_excursions_acc = 0
     n_workspace_excursions_acc = 0
+    # B-02 behavioural-metrics accumulators. ``behavior_observed`` flips
+    # True the first time the env publishes any of the four per-step
+    # ``behavior_*`` keys; backends that publish nothing leave it False
+    # and the Episode carries ``None`` for all five derived fields.
+    # Mirrors the actuator-telemetry / safety-violation contract. The
+    # ``ee_pos_buffer`` is the single place we incur per-step memory
+    # growth — at 24 bytes per sample it is negligible next to the
+    # trajectory NPZ buffer (which is gated behind a separate opt-in).
+    behavior_observed = False
+    ee_pos_buffer: list[NDArray[np.float64]] = []
+    near_collision_acc = 0
+    peak_force_acc = 0.0
+    last_control_dt: float | None = None
+    success_step_count: int | None = None
     while not (terminated or truncated):
         if sample_policy is not None and step_count % CONSISTENCY_STRIDE == 0:
             # Sample N actions for the current obs (state-preserving on
@@ -571,6 +585,34 @@ def execute_one(
             safety_observed = True
             if bool(workspace_violation):
                 n_workspace_excursions_acc += 1
+        # B-02 behavioural telemetry. The four ``behavior_*`` keys move
+        # as a unit — backends that publish any of them must publish
+        # all four, by the env-side contract. We still defensively gate
+        # on the leading near-collision key so a partial-coverage env
+        # surfaces honestly as "not measured" rather than silently
+        # mis-aggregating.
+        near_delta = info.get("behavior_near_collision_delta")
+        if near_delta is not None:
+            behavior_observed = True
+            near_collision_acc += int(near_delta)
+            peak_step = info.get("behavior_peak_contact_force")
+            if peak_step is not None:
+                peak_step_f = float(peak_step)
+                if peak_step_f > peak_force_acc:
+                    peak_force_acc = peak_step_f
+            ee_step = info.get("behavior_ee_pos")
+            if ee_step is not None:
+                ee_pos_buffer.append(np.asarray(ee_step, dtype=np.float64).copy())
+            dt_step = info.get("behavior_control_dt")
+            if dt_step is not None:
+                last_control_dt = float(dt_step)
+        # Snapshot the step count at which ``info["success"]`` first
+        # flipped True so ``time_to_success`` reflects the time-to-done
+        # even when the env keeps running for a tail of post-success
+        # steps (it does not in TabletopEnv, but the contract is
+        # backend-agnostic).
+        if success_step_count is None and bool(info.get("success", False)):
+            success_step_count = step_count
 
     # Resolve the B-18 action-variance scalar. ``None`` covers three
     # honest cases: (a) the user did not opt in via
@@ -614,6 +656,55 @@ def execute_one(
         energy_over_budget = bool(actuator_energy > energy_budget)
 
     success = bool(info.get("success", False))
+
+    # B-02 behavioural-metrics resolution. ``behavior_observed`` False
+    # collapses every derived field to ``None`` — distinct from any
+    # observed-but-zero value (e.g. a stationary policy that never
+    # moved still reports ``near_collision_count=0``, not ``None``).
+    # The five fields divide along their data dependencies:
+    #
+    # * ``time_to_success`` needs ``control_dt`` AND ``success``. A
+    #   failed rollout has nothing to time to (``None``).
+    # * ``path_length_ratio`` needs >= 2 EE samples. Stationary policies
+    #   (initial == final, distance < 1e-6 m) report ``None`` rather
+    #   than ``inf`` — distance/0 is undefined, not "infinite detour".
+    # * ``jerk_rms`` needs >= 4 EE samples (third finite difference)
+    #   AND ``control_dt`` for the dt^3 denominator.
+    # * ``near_collision_count`` and ``peak_force`` are direct
+    #   accumulator reads; ``int`` and ``float`` respectively.
+    time_to_success: float | None = None
+    path_length_ratio: float | None = None
+    jerk_rms: float | None = None
+    near_collision_count: int | None = None
+    peak_force: float | None = None
+    if behavior_observed:
+        near_collision_count = int(near_collision_acc)
+        peak_force = float(peak_force_acc)
+        if success and success_step_count is not None and last_control_dt is not None:
+            time_to_success = float(success_step_count) * float(last_control_dt)
+        if len(ee_pos_buffer) >= 2:
+            ee_arr = np.stack(ee_pos_buffer, axis=0)
+            # Path length — sum of consecutive-sample L2 distances.
+            seg = np.linalg.norm(np.diff(ee_arr, axis=0), axis=1)
+            path_length = float(seg.sum())
+            straight = float(np.linalg.norm(ee_arr[-1] - ee_arr[0]))
+            # 1e-6 m guard: any tighter and IEEE-754 round-off in the
+            # MuJoCo integrator (typical 1e-9 noise on a "stationary"
+            # mocap pose) would split a stationary policy into an
+            # ``inf``-ratio outlier. Wider would falsely declare a
+            # 1mm legitimate motion as "stationary".
+            if straight > 1e-6:
+                path_length_ratio = path_length / straight
+            if len(ee_pos_buffer) >= 4 and last_control_dt is not None:
+                # Third finite difference (forward, length T-3) — the
+                # canonical numerical-jerk estimator. Higher-order
+                # schemes would require T >= 5+; we keep the bar at
+                # T >= 4 so even short rollouts are measurable.
+                dt3 = float(last_control_dt) ** 3
+                third = ee_arr[3:] - 3.0 * ee_arr[2:-1] + 3.0 * ee_arr[1:-2] - ee_arr[:-3]
+                jerk = third / dt3
+                jerk_mag_sq = np.sum(jerk * jerk, axis=1)
+                jerk_rms = float(np.sqrt(jerk_mag_sq.mean()))
 
     # Compute the video path BEFORE Episode construction so the field
     # can be set in the same constructor call (keeping the schema
@@ -671,6 +762,11 @@ def execute_one(
         n_joint_limit_excursions=n_joint_limit_excursions,
         energy_over_budget=energy_over_budget,
         n_workspace_excursions=n_workspace_excursions,
+        time_to_success=time_to_success,
+        path_length_ratio=path_length_ratio,
+        jerk_rms=jerk_rms,
+        near_collision_count=near_collision_count,
+        peak_force=peak_force,
     )
 
     if record_trajectory:

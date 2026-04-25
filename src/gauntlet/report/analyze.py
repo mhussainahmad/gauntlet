@@ -274,6 +274,24 @@ def _failure_clusters(
         pair_collisions_count: dict[tuple[float, float], int] = defaultdict(int)
         pair_joint_sum: dict[tuple[float, float], int] = defaultdict(int)
         pair_joint_count: dict[tuple[float, float], int] = defaultdict(int)
+        # B-02 behavioural-metric aggregates. Same partial-coverage
+        # handling as the actuator / safety trios above — episodes
+        # whose backend left the field ``None`` are dropped from BOTH
+        # numerator and denominator so a partial-coverage cluster mean
+        # is not biased toward zero. The five fields are independent
+        # (a successful episode has ``time_to_success`` populated but
+        # ``jerk_rms`` may be ``None`` if the rollout was T < 4
+        # samples), so each carries its own pair of dicts.
+        pair_tts_sum: dict[tuple[float, float], float] = defaultdict(float)
+        pair_tts_count: dict[tuple[float, float], int] = defaultdict(int)
+        pair_plr_sum: dict[tuple[float, float], float] = defaultdict(float)
+        pair_plr_count: dict[tuple[float, float], int] = defaultdict(int)
+        pair_jerk_sum: dict[tuple[float, float], float] = defaultdict(float)
+        pair_jerk_count: dict[tuple[float, float], int] = defaultdict(int)
+        pair_nearcol_sum: dict[tuple[float, float], int] = defaultdict(int)
+        pair_nearcol_count: dict[tuple[float, float], int] = defaultdict(int)
+        pair_peakforce_sum: dict[tuple[float, float], float] = defaultdict(float)
+        pair_peakforce_count: dict[tuple[float, float], int] = defaultdict(int)
         for ep in episodes:
             if axis_a not in ep.perturbation_config or axis_b not in ep.perturbation_config:
                 continue
@@ -300,6 +318,21 @@ def _failure_clusters(
             if ep.n_joint_limit_excursions is not None:
                 pair_joint_sum[(va, vb)] += ep.n_joint_limit_excursions
                 pair_joint_count[(va, vb)] += 1
+            if ep.time_to_success is not None:
+                pair_tts_sum[(va, vb)] += ep.time_to_success
+                pair_tts_count[(va, vb)] += 1
+            if ep.path_length_ratio is not None:
+                pair_plr_sum[(va, vb)] += ep.path_length_ratio
+                pair_plr_count[(va, vb)] += 1
+            if ep.jerk_rms is not None:
+                pair_jerk_sum[(va, vb)] += ep.jerk_rms
+                pair_jerk_count[(va, vb)] += 1
+            if ep.near_collision_count is not None:
+                pair_nearcol_sum[(va, vb)] += ep.near_collision_count
+                pair_nearcol_count[(va, vb)] += 1
+            if ep.peak_force is not None:
+                pair_peakforce_sum[(va, vb)] += ep.peak_force
+                pair_peakforce_count[(va, vb)] += 1
 
         for (va, vb), (n_total, n_success) in pair_counts.items():
             if n_total < min_cluster_size:
@@ -331,6 +364,20 @@ def _failure_clusters(
             )
             joint_n = pair_joint_count.get((va, vb), 0)
             mean_joint: float | None = pair_joint_sum[(va, vb)] / joint_n if joint_n > 0 else None
+            tts_n = pair_tts_count.get((va, vb), 0)
+            mean_tts: float | None = pair_tts_sum[(va, vb)] / tts_n if tts_n > 0 else None
+            plr_n = pair_plr_count.get((va, vb), 0)
+            mean_plr: float | None = pair_plr_sum[(va, vb)] / plr_n if plr_n > 0 else None
+            jerk_n = pair_jerk_count.get((va, vb), 0)
+            mean_jerk: float | None = pair_jerk_sum[(va, vb)] / jerk_n if jerk_n > 0 else None
+            nearcol_n = pair_nearcol_count.get((va, vb), 0)
+            mean_nearcol: float | None = (
+                pair_nearcol_sum[(va, vb)] / nearcol_n if nearcol_n > 0 else None
+            )
+            peakforce_n = pair_peakforce_count.get((va, vb), 0)
+            mean_peakforce: float | None = (
+                pair_peakforce_sum[(va, vb)] / peakforce_n if peakforce_n > 0 else None
+            )
             clusters.append(
                 FailureCluster(
                     axes={axis_a: va, axis_b: vb},
@@ -346,6 +393,11 @@ def _failure_clusters(
                     mean_action_variance=mean_var,
                     mean_collisions=mean_collisions,
                     mean_joint_excursions=mean_joint,
+                    mean_time_to_success=mean_tts,
+                    mean_path_length_ratio=mean_plr,
+                    mean_jerk_rms=mean_jerk,
+                    mean_near_collision_count=mean_nearcol,
+                    mean_peak_force=mean_peakforce,
                 )
             )
 
