@@ -30,6 +30,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import numpy as np
+from numpy.typing import NDArray
 
 if TYPE_CHECKING:
     from gauntlet.suite.schema import AxisSpec, Suite, SuiteCell
@@ -41,7 +42,7 @@ def lhs_unit_cube(
     n_samples: int,
     n_axes: int,
     rng: np.random.Generator,
-) -> np.ndarray:
+) -> NDArray[np.float64]:
     """Draw an LHS matrix in ``[0, 1)^n_axes`` with ``n_samples`` rows.
 
     The McKay 1979 stratification: each axis has every one of
