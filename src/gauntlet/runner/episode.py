@@ -189,6 +189,32 @@ class Episode(BaseModel):
     action_variance: float | None = None
 
     # ------------------------------------------------------------------
+    # Conformal failure-prediction telemetry (B-01) — split-conformal
+    # detector calibrated on a held-out successful-rollout set; see
+    # :mod:`gauntlet.monitor.conformal`. Both fields default ``None``
+    # for backwards compatibility (Episodes from before the detector
+    # ran, OR from a greedy policy whose ``action_variance`` itself is
+    # ``None``).
+    #
+    # Schema:
+    # * ``failure_score`` — the candidate's ``action_variance`` divided
+    #   by the calibration threshold. Greater than 1.0 means "more
+    #   uncertain than the calibration set at this confidence level";
+    #   less than 1.0 means "in distribution". ``None`` matches the
+    #   B-18 asymmetry — greedy policies cannot expose a score.
+    # * ``failure_alarm`` — convenience boolean, ``True`` iff
+    #   ``failure_score > 1.0``. Pre-populated by ``gauntlet monitor
+    #   conformal score`` so the report renderer does not need to
+    #   re-thread the threshold to colour the row.
+    #
+    # Refs: FIPER (arxiv 2510.09459, NeurIPS 2025), FAIL-Detect (arxiv
+    # 2503.08558).
+    # ------------------------------------------------------------------
+
+    failure_score: float | None = None
+    failure_alarm: bool | None = None
+
+    # ------------------------------------------------------------------
     # Safety-violation telemetry (B-30) — first-class per-rollout
     # accounting of how badly the policy abused the world to score its
     # success. The "failures over averages" rule (PRODUCT.md, GAUNTLET
