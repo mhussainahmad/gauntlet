@@ -219,6 +219,20 @@ Data-embed conventions:
         <div class="metric-label">Suite</div>
         <div class="metric-value" style="font-size:1.05rem">{{ report.suite_name }}</div>
       </div>
+      {# B-30: success-but-unsafe complement. Surfaces the Safety-
+         Gymnasium / safe-control-gym framing — a "successful" pick
+         that dings the table on every rollout is not actually a
+         successful policy. Rendered only when at least one episode
+         in the dataset carried safety telemetry (i.e. a MuJoCo run);
+         non-MuJoCo reports stay visually identical. #}
+      {% if report.success_safe_rate is not none %}
+      <div>
+        <div class="metric-label">Success unsafe</div>
+        <div class="metric-value{% if report.success_safe_rate < 1.0 %} fail{% endif %}">
+          {{ '%.1f'|format((1.0 - report.success_safe_rate) * 100) }}%
+        </div>
+      </div>
+      {% endif %}
     </div>
   </div>
 </section>
@@ -247,6 +261,16 @@ Data-embed conventions:
    and report.failure_clusters
    | rejectattr('mean_action_variance', 'none')
    | list | length > 0 %}
+{# B-30: render the safety-violations column only when at least one
+   cluster carries collision OR joint-excursion telemetry (i.e. a
+   MuJoCo run). Mirrors the actuator-energy / action-variance
+   conditional-column pattern so non-MuJoCo reports stay visually
+   identical. #}
+{% set any_cluster_safety = report.failure_clusters
+   and (
+     (report.failure_clusters | rejectattr('mean_collisions', 'none') | list | length > 0)
+     or (report.failure_clusters | rejectattr('mean_joint_excursions', 'none') | list | length > 0)
+   ) %}
 <section>
   <h2>Where it failed</h2>
   {% if report.failure_clusters %}
@@ -265,6 +289,7 @@ Data-embed conventions:
           <th class="num">Lift (×)</th>
           {% if any_cluster_energy %}<th class="num">Energy / peak τ</th>{% endif %}
           {% if any_cluster_action_var %}<th class="num">Action var (B-18)</th>{% endif %}
+          {% if any_cluster_safety %}<th class="num">Collisions / jnt excursions</th>{% endif %}
           {% if any_cluster_video %}<th>Failed-rollout videos</th>{% endif %}
         </tr>
       </thead>
@@ -318,6 +343,25 @@ Data-embed conventions:
             {%- else -%}
               <span class="ci">-</span>
             {%- endif -%}
+          </td>
+          {% endif %}
+          {% if any_cluster_safety %}
+          {# B-30: per-cluster safety violations. Non-MuJoCo backends
+             leave the fields ``None`` and we render ``-``; never
+             ``0.00`` (which would mean "every episode in this cluster
+             measured zero violations"). Cross-backend semantics
+             differ — anti-feature documented on the Episode field. #}
+          <td class="num">
+            {%- if cluster.mean_collisions is not none -%}
+              {{ '%.2f'|format(cluster.mean_collisions) }}
+            {%- else -%}
+              <span class="ci">-</span>
+            {%- endif -%}
+            {% if cluster.mean_joint_excursions is not none %}
+            <span class="ci">/ {{ '%.2f'|format(cluster.mean_joint_excursions) }}</span>
+            {% else %}
+            <span class="ci">/ -</span>
+            {% endif %}
           </td>
           {% endif %}
           {% if any_cluster_video %}

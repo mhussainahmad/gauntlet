@@ -189,6 +189,66 @@ class Episode(BaseModel):
     action_variance: float | None = None
 
     # ------------------------------------------------------------------
+    # Safety-violation telemetry (B-30) — first-class per-rollout
+    # accounting of how badly the policy abused the world to score its
+    # success. The "failures over averages" rule (PRODUCT.md, GAUNTLET
+    # spec §6) extends to *unsafe* successes: a policy that dings the
+    # table on every successful pick is not actually a successful
+    # policy. Refs: Safety-Gymnasium NeurIPS 2023, safe-control-gym
+    # arXiv 2109.06325.
+    #
+    # Schema is four FLAT fields rather than a nested
+    # ``safety_violations`` dict so JSON / Parquet stays tractable and
+    # the HTML report can render directly without un-nesting.
+    #
+    # Cross-backend caveat (anti-feature, deliberately documented):
+    # collision-detection semantics differ wildly between simulators.
+    # MuJoCo's ``mj_data.ncon`` delta is the portable definition we
+    # adopt; PyBullet, Genesis, and Isaac approximate it differently
+    # (or not at all). The shipped MuJoCo :class:`TabletopEnv`
+    # populates ``info["safety_n_collisions_delta"]`` /
+    # ``info["safety_joint_limit_violation"]`` /
+    # ``info["safety_workspace_excursion"]`` per step; other backends
+    # emit nothing and the worker leaves all four fields ``None``.
+    # ``None`` is distinct from ``0`` — ``0`` means "backend captured,
+    # zero violations observed", ``None`` means "this backend doesn't
+    # capture safety telemetry". The HTML report renders ``None`` as
+    # a dash, never as zero.
+    #
+    # ``energy_over_budget`` is derived in the worker (not the env) by
+    # comparing the accumulated ``actuator_energy`` to an optional
+    # per-run ``energy_budget`` threshold (see
+    # :class:`gauntlet.runner.worker.WorkerInitArgs.energy_budget` /
+    # :func:`gauntlet.runner.worker.execute_one`'s
+    # ``energy_budget`` kwarg). Stays ``None`` whenever
+    # ``actuator_energy is None`` (no torque telemetry to compare
+    # against) or no budget was configured.
+    # ------------------------------------------------------------------
+
+    # Total contact count delta (sum of per-step ``max(ncon - ncon_prev,
+    # 0)``) over the rollout. New contacts only — steady-state contacts
+    # (e.g. cube resting on the table) are not counted.
+    n_collisions: int | None = None
+
+    # Number of control steps where any joint exceeded its
+    # ``model.jnt_range`` bound. Cumulative count, not a per-step flag;
+    # a single excursion that lasted three steps counts as 3.
+    n_joint_limit_excursions: int | None = None
+
+    # True when the rollout's accumulated ``actuator_energy`` exceeded
+    # the per-run ``energy_budget`` threshold; False when measured and
+    # within budget; ``None`` when no budget was configured OR the
+    # backend did not surface ``actuator_energy`` (cannot evaluate the
+    # threshold). Distinct from ``False`` (which means "we checked,
+    # the policy stayed within budget").
+    energy_over_budget: bool | None = None
+
+    # Number of control steps where the end-effector left the env's
+    # advertised workspace bounds. Same cumulative count semantics as
+    # ``n_joint_limit_excursions``.
+    n_workspace_excursions: int | None = None
+
+    # ------------------------------------------------------------------
     # Sim-vs-real provenance tag (B-28) — explicit "this episode came
     # from a sim rollout" / "real-robot rollout" marker. Default
     # ``None`` keeps the field semantically inert for the legacy
