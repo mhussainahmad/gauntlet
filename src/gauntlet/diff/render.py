@@ -18,11 +18,24 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from gauntlet.diff.diff import VERDICT_IMPROVED, VERDICT_REGRESSED, VERDICT_WITHIN_NOISE
+
 if TYPE_CHECKING:
     from gauntlet.diff.diff import AxisDelta, CellFlip, ClusterDelta, ReportDiff
     from gauntlet.report import FailureCluster
 
 __all__ = ["render_text"]
+
+
+# B-20 verdict-prefix tokens — plain ASCII so the renderer stays
+# ANSI-free (the CLI passes the result through ``typer.echo``, not
+# ``Console.print``). A piped consumer can grep ``[REGRESSED]`` /
+# ``[IMPROVED]`` / ``[NOISE]`` to triage flips.
+_VERDICT_PREFIX: dict[str, str] = {
+    VERDICT_REGRESSED: "[REGRESSED]",
+    VERDICT_IMPROVED: "[IMPROVED] ",
+    VERDICT_WITHIN_NOISE: "[NOISE]    ",
+}
 
 
 def _sign(delta: float) -> str:
@@ -62,8 +75,14 @@ def _render_axis(axis_delta: AxisDelta) -> list[str]:
 def _render_flip(flip: CellFlip) -> str:
     sign = "-" if flip.direction == "regressed" else "+"
     delta = flip.b_success_rate - flip.a_success_rate
+    # B-20 verdict prefix: tags the row with whether the flip is a real
+    # regression / improvement or sample noise (CI brackets zero, or
+    # paired McNemar p > 0.05). Legacy diffs without ``verdict`` get a
+    # blank pad so column alignment survives mixed-source rendering.
+    verdict_prefix = _VERDICT_PREFIX.get(flip.verdict or "", "           ")
     head = (
-        f"  {sign} cell {flip.cell_index} {_fmt_config(flip.perturbation_config)}: "
+        f"  {verdict_prefix} {sign} cell {flip.cell_index} "
+        f"{_fmt_config(flip.perturbation_config)}: "
         f"{_fmt_pct(flip.a_success_rate)} -> {_fmt_pct(flip.b_success_rate)} "
         f"({_fmt_signed_pct(delta)}, {flip.direction})"
     )
@@ -99,12 +118,21 @@ def _render_intensified(delta: ClusterDelta) -> str:
     )
 
 
-def render_text(diff: ReportDiff) -> str:
+def render_text(diff: ReportDiff, *, show_noise: bool = False) -> str:
     """Render a :class:`ReportDiff` as a plain-text ``git diff``-style block.
 
     Returned string ends with a newline and contains no ANSI escape
-    sequences. The shape is stable (and substring-tested in
-    ``tests/test_diff.py``):
+    sequences. Each cell-flip line is prefixed with the B-20 verdict
+    bracket (``[REGRESSED]`` / ``[IMPROVED]`` / ``[NOISE]``) so a piped
+    consumer can grep verdicts without parsing the whole row.
+
+    Within-noise flips (verdict == ``within_noise``) are filtered out by
+    default — they're still in the JSON output (``--json``), but the
+    rendered diff is the trustworthy signal. Set ``show_noise=True`` to
+    surface them too (``gauntlet diff --show-noise``).
+
+    The shape is stable (and substring-tested in
+    ``tests/test_diff.py`` and ``tests/test_diff_verdict.py``):
 
     .. code-block:: text
 
@@ -118,7 +146,7 @@ def render_text(diff: ReportDiff) -> str:
             <sign> <name>=<value>: <signed_pct>
             ...
         @@ cell flips @@
-          <sign> cell <i> {axis=value, ...}: <pct_a> -> <pct_b> (<signed_pct>, <direction>)
+          [REGRESSED] - cell <i> {axis=value, ...}: <pct_a> -> <pct_b> ...
         @@ failure clusters @@
           - cluster {...}: failure_rate=<pct> lift=<x>x (n=<n>)
           + cluster {...}: failure_rate=<pct> lift=<x>x (n=<n>)
@@ -156,11 +184,23 @@ def render_text(diff: ReportDiff) -> str:
         lines.append("@@ axes @@")
         lines.extend(axis_lines)
 
-    # Cell-flip hunk.
-    if diff.cell_flips:
+    # Cell-flip hunk. B-20: within-noise flips are filtered unless the
+    # caller opts in — the user-facing "stop crying wolf" win.
+    visible_flips = [f for f in diff.cell_flips if show_noise or f.verdict != VERDICT_WITHIN_NOISE]
+    if visible_flips:
         lines.append("@@ cell flips @@")
-        for flip in diff.cell_flips:
+        for flip in visible_flips:
             lines.append(_render_flip(flip))
+    elif diff.cell_flips and not show_noise:
+        # Every flip was tagged within-noise — surface a single explanatory
+        # line so the user knows there *were* threshold-crossings, just
+        # nothing the CIs trust. Re-run with ``--show-noise`` to see them.
+        n_filtered = sum(1 for f in diff.cell_flips if f.verdict == VERDICT_WITHIN_NOISE)
+        lines.append("@@ cell flips @@")
+        lines.append(
+            f"  ({n_filtered} flip{'s' if n_filtered != 1 else ''} suppressed as "
+            f"within-noise; pass --show-noise to surface)"
+        )
 
     # Failure-cluster hunk.
     if diff.cluster_added or diff.cluster_removed or diff.cluster_intensified:

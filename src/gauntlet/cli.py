@@ -936,6 +936,18 @@ def diff(
             ),
         ),
     ] = None,
+    show_noise: Annotated[
+        bool,
+        typer.Option(
+            "--show-noise/--no-show-noise",
+            help=(
+                "B-20: surface cell-flips tagged ``within_noise`` in the "
+                "rendered diff. Off by default — noise flips clutter the "
+                "output without representing a real regression. The "
+                "``--json`` output always includes them regardless."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Emit a git-diff-style structured delta between two runs."""
     report_a, episodes_a = _load_report_with_episodes(results_a)
@@ -980,7 +992,9 @@ def diff(
         # markup-free output (the renderer emits no ANSI itself) and the
         # console handles soft-wrap / NO_COLOR. Print to stdout via
         # typer.echo so users can redirect ``> diff.txt`` cleanly.
-        typer.echo(render_text(result), nl=False)
+        # ``--show-noise`` (B-20) toggles whether within-noise flips are
+        # surfaced in the rendered output (JSON always carries them).
+        typer.echo(render_text(result, show_noise=show_noise), nl=False)
 
     # Always emit a one-line stderr summary so the user can spot the
     # headline even when the body is redirected to a file / pipe.
