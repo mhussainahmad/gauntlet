@@ -19,8 +19,21 @@ jobs:
     # silently recreate ``.venv`` from scratch (wiping the synced
     # packages). See PR #37 for the prior CI hotfix; this is the next
     # orthogonal failure mode that surfaced on py3.12 jobs.
+    #
+    # Thread caps (OMP/MKL/OPENBLAS=1) prevent BLAS / OpenMP from
+    # spinning up nproc=4 worker threads inside each test process.
+    # On the ubuntu-latest runner (4 logical CPUs, ~2 usable under
+    # cgroup limits) the implicit thread pools collide with the
+    # Runner's spawn-method multiprocessing pool — see PR
+    # hotfix/ci-pytest-hang for the diagnosis (workers wedged on
+    # MJCF compile during pool startup, 6h cancel). The cap also
+    # makes deterministic-numerics tests cheaper without changing
+    # any results.
     env:
       UV_PYTHON: ${{ matrix.python-version }}
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
     strategy:
       fail-fast: false
       matrix:
