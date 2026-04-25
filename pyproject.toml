@@ -59,6 +59,17 @@ lerobot = [
     "transformers>=4.40,<5",
     "pillow>=10.0,<12",
 ]
+# Independent extra for the π0 (Physical Intelligence) adapter — backlog
+# B-14. Mirrors the [lerobot] extra exactly: π0 is distributed through
+# the same ``lerobot.policies.factory`` surface as SmolVLA. Note the
+# upstream lerobot extra is ``lerobot[pi]`` (not ``[pi0]``); the
+# user-facing gauntlet extra is ``[pi0]`` to match the model name end
+# users actually search for.
+pi0 = [
+    "lerobot[pi]>=0.4,<1",
+    "transformers>=4.40,<5",
+    "pillow>=10.0,<12",
+]
 # Drift detector (Phase 2 Task 3).
 # Torch is the only heavy dep; pillow is carried along so the optional
 # image-AE path (deferred follow-up) does not silently ImportError on a
@@ -270,6 +281,10 @@ conflicts = [
     [
         { extra = "isaac" },
         { extra = "lerobot" },
+    ],
+    [
+        { extra = "isaac" },
+        { extra = "pi0" },
     ],
     [
         { extra = "isaac" },
@@ -559,6 +574,7 @@ module = [
     "gauntlet.policy.base",
     "gauntlet.policy.huggingface",
     "gauntlet.policy.lerobot",
+    "gauntlet.policy.pi0",
     # Lazy-import ``__getattr__`` (PEP 562) — narrowing defeats lazy load.
     "gauntlet.monitor",
     # rclpy ``Node`` typed as ``Any`` in upstream stubs (RFC-010 §3).
@@ -604,6 +620,7 @@ testpaths = ["tests"]
 markers = [
     "hf: tests that require the [hf] extra (torch, transformers, PIL)",
     "lerobot: tests that require the [lerobot] extra (lerobot, torch, PIL)",
+    "pi0: tests that require the [pi0] extra (lerobot[pi], torch, PIL) — backlog B-14",
     "monitor: tests that require the [monitor] extra (torch, PIL)",
     "pybullet: tests that require the [pybullet] extra (pybullet>=3.2)",
     "genesis: tests that require the [genesis] extra (genesis-world>=0.4, torch)",
