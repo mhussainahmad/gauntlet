@@ -703,7 +703,13 @@ def test_cli_diff_paired_text_render_includes_paired_header(
     b_path = tmp_path / "b_episodes.json"
     _write_episodes_json(a_path, cell_count=2, eps_per_cell=10, a_or_b="a")
     _write_episodes_json(b_path, cell_count=2, eps_per_cell=10, a_or_b="b", flip_cell_zero=True)
-    result = runner.invoke(app, ["diff", str(a_path), str(b_path)])
+    # B-20: ``flip_cell_zero=True`` flips half the cell-0 episodes
+    # (b=5, c=0 over n_paired=10) — McNemar p ≈ 0.0625 > 0.05 → the
+    # verdict is ``within_noise`` and the rendered row is suppressed by
+    # default. Pass ``--show-noise`` to keep this test asserting on the
+    # paired header / suffix surface area without depending on the
+    # default-cry-wolf-suppression policy.
+    result = runner.invoke(app, ["diff", str(a_path), str(b_path), "--show-noise"])
     assert result.exit_code == 0, result.output
     assert "paired: true" in result.stdout
     assert "paired CI" in result.stdout
