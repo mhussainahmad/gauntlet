@@ -14,6 +14,13 @@ jobs:
   lint-typecheck-test:
     name: lint + mypy + pytest (torch-free, py${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    # Pin every ``uv`` invocation in this job to the matrix python so
+    # ``uv run`` does not fall back to the runner's system python and
+    # silently recreate ``.venv`` from scratch (wiping the synced
+    # packages). See PR #37 for the prior CI hotfix; this is the next
+    # orthogonal failure mode that surfaced on py3.12 jobs.
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
     strategy:
       fail-fast: false
       matrix:
@@ -66,6 +73,8 @@ jobs:
   hf-tests:
     name: hf tests (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
     strategy:
       fail-fast: false
       matrix:
@@ -94,6 +103,8 @@ jobs:
   lerobot-tests:
     name: lerobot tests (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
     strategy:
       fail-fast: false
       matrix:
@@ -120,6 +131,8 @@ jobs:
   monitor-tests:
     name: monitor-tests (torch, py${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
     strategy:
       fail-fast: false
       matrix:
@@ -152,6 +165,8 @@ jobs:
     # marker so this is the sole runner for those tests.
     name: video-tests (imageio[ffmpeg], py${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
     strategy:
       fail-fast: false
       matrix:
@@ -178,6 +193,8 @@ jobs:
   pybullet-tests:
     name: pybullet backend tests (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
     strategy:
       fail-fast: false
       matrix:
@@ -209,6 +226,8 @@ jobs:
   genesis-tests:
     name: genesis backend tests (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
     strategy:
       fail-fast: false
       matrix:
@@ -240,6 +259,8 @@ jobs:
   ros2-tests:
     name: ros2-tests (rclpy mocked, py${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
     strategy:
       fail-fast: false
       matrix:
@@ -288,6 +309,8 @@ jobs:
     name: isaac backend tests (placeholder, py${{ matrix.python-version }})
     runs-on: ubuntu-latest
     continue-on-error: true
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
     strategy:
       fail-fast: false
       matrix:
@@ -341,6 +364,8 @@ jobs:
     # scan.
     name: security-audit (pip-audit, OSV)
     runs-on: ubuntu-latest
+    env:
+      UV_PYTHON: "3.11"
     steps:
       - uses: actions/checkout@v4
 
@@ -384,6 +409,8 @@ jobs:
     # credential (the audit step exists for this reason).
     name: secret-scan (detect-secrets)
     runs-on: ubuntu-latest
+    env:
+      UV_PYTHON: "3.11"
     steps:
       - uses: actions/checkout@v4
         with:
