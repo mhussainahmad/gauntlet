@@ -124,6 +124,11 @@ already known:
   per-worker cache with exactly four documented keys (`env`,
   `policy_factory`, `trajectory_dir`, `video_config`). A `TypedDict`
   with `total=False` matches the runtime-known shape exactly.
+- `suite/lhs.py:lhs_unit_cube` — returns bare `np.ndarray` (which
+  mypy widens to `ndarray[Any, Any]`). The function builds the result
+  from `np.arange + rng.uniform / int`, which numpy promotes to
+  float64; the docstring already promises a float matrix in
+  ``[0, 1)``. Narrow to `NDArray[np.float64]`.
 
 **Verdict: purge in this PR.**
 
@@ -134,9 +139,10 @@ already known:
 | `aggregate/` | `html.py` | Introduce module-level `_JsonValue` recursive type alias; retype `_nan_to_none`. |
 | `report/` | `html.py` | Same as above (deliberately duplicated, not imported). |
 | `runner/` | `worker.py` | Replace `_WORKER_STATE: dict[str, Any]` with a `TypedDict`. The `info: dict[str, Any]` from `env.step` stays — that is the gymnasium FFI boundary surfaced literally. |
+| `suite/` | `lhs.py` | Tighten `lhs_unit_cube` return type from bare `np.ndarray` to `NDArray[np.float64]` (matches the runtime dtype the function actually returns and the contract the docstring already promises). |
 
-Total purgeable lines: ~5 explicit `Any` annotations. The rest of the
-145-leak baseline stays as documented above.
+Total purgeable lines: 4 explicit / implicit `Any` annotations. The
+rest of the 145-leak baseline stays as documented above.
 
 ## 5. mypy flag changes
 
@@ -183,9 +189,11 @@ Every change is annotation-only at runtime. `_WORKER_STATE` keeps the
 same key set (`env`, `policy_factory`, `trajectory_dir`,
 `video_config`) and the same `dict.get(...)`-with-`None`-fallback read
 pattern. The `_nan_to_none` helpers keep the same recursion and the
-same identity behaviour for non-float, non-container leaves. mypy
-`--strict`, ruff, and the in-scope pytest subset all pass on every
-commit.
+same identity behaviour for non-float, non-container leaves.
+`lhs_unit_cube` returns the same matrix it always did (numpy promotes
+the arithmetic to float64 at runtime regardless of the annotation).
+mypy `--strict`, ruff, and the in-scope pytest subset all pass on
+every commit.
 
 ## 8. Post-purge audit result
 
@@ -195,19 +203,20 @@ which now includes the sibling's `polish/gauntlet-diff` PR #29):
 ```
 $ uv run mypy --warn-return-any --disallow-any-explicit src/gauntlet
 ...
-Found 146 errors in 32 files (checked 61 source files)
+Found 145 errors in 31 files (checked 61 source files)
 ```
 
-The pre-PR baseline was 145 across 33 files (58 checked). The sibling
-PR #29 added 5 new leaks in 2 new sites (`src/gauntlet/diff/diff.py` —
-4 leaks — and one extra `Any` in `cli.py`). This PR purged 3 leaks
-in pure-Python helpers, so:
+The pre-PR baseline (against `aa56142`, the commit before sibling
+PR #29 merged) was 145 across 33 files (58 checked). Sibling PR #29
+added 4 new leaks (all in `src/gauntlet/diff/diff.py`) and shifted
+`cli.py` line numbers by +1 without changing its leak count. This PR
+purged 4 leaks in pure-Python helpers, so:
 
 ```
-146 (post-rebase) = 145 (baseline) + 5 (sibling) − 3 (this PR) − 1 (off-by-one drift in cli.py line counts)
+145 (post-rebase) = 145 (baseline) + 4 (sibling diff/) − 4 (this PR)
 ```
 
-The remaining 146 are all documented as either §3a (pydantic
+The remaining 145 are all documented as either §3a (pydantic
 synthetic) or §3b (FFI seam):
 
 | File | Leaks | Bucket |
@@ -231,7 +240,7 @@ synthetic) or §3b (FFI seam):
 | `plugins.py` | 2 | §3b — entry-point FFI |
 | `monitor/schema.py` | 2 | §3a — pydantic synthetic |
 | `aggregate/schema.py` | 2 | §3a — pydantic synthetic |
-| 13 single-leak files | 13 | mix of §3a / §3b |
+| 12 single-leak files | 12 | mix of §3a / §3b |
 
 Zero `Any` leaks remain in the pure-Python core helper code that this
 task targets. Excluding the sibling-owned `cli.py` and `diff/`
