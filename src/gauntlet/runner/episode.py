@@ -275,6 +275,76 @@ class Episode(BaseModel):
     n_workspace_excursions: int | None = None
 
     # ------------------------------------------------------------------
+    # Behavioural metrics beyond binary success (B-02) — per-rollout
+    # numbers that distinguish policies tied on success rate. Refs:
+    # RoboEval (RSS 2025, robo-eval.github.io) — "policies with identical
+    # success rates have meaningfully different behavioural profiles, and
+    # binary success becomes uninformative at the easy/hard tails". The
+    # report surfaces these in the failure-clusters table so a "succeeds
+    # but jerks the gripper around" policy is visible before it ships.
+    #
+    # Cross-backend caveat (anti-feature, deliberately documented):
+    # collision and contact-force semantics differ across simulators.
+    # MuJoCo's ``mj_data.contact[i].dist`` and :func:`mujoco.mj_contactForce`
+    # are the portable definitions we adopt; PyBullet, Genesis, and Isaac
+    # approximate them differently (or not at all). The shipped MuJoCo
+    # :class:`TabletopEnv` populates ``info["behavior_*"]`` per step;
+    # other backends emit nothing and the worker leaves all five fields
+    # ``None``. ``None`` is distinct from ``0`` / ``0.0`` — those mean
+    # "backend captured, the policy moved nothing / never came close to
+    # contact"; ``None`` means "this backend doesn't capture behaviour
+    # telemetry at all". The HTML report renders ``None`` as a dash,
+    # never as zero.
+    # ------------------------------------------------------------------
+
+    # Wall-clock seconds from the start of the rollout to the step at
+    # which ``info["success"]`` first flipped True, computed from the
+    # env's per-step ``info["behavior_control_dt"]`` (typically
+    # ``model.opt.timestep * n_substeps``). ``None`` for unsuccessful
+    # rollouts (no ``done`` step to time to) AND for backends that do
+    # not publish ``control_dt``. Distinct from ``0.0`` (which would
+    # mean "succeeded at reset" — impossible in the current envs).
+    time_to_success: float | None = None
+
+    # End-effector path length divided by the straight-line distance
+    # from the initial to the final EE position. ``1.0`` means the
+    # policy moved in a perfectly straight line; ``> 1.0`` quantifies
+    # detour. ``None`` when (a) the backend does not publish
+    # ``info["behavior_ee_pos"]``, OR (b) the rollout produced fewer
+    # than 2 EE samples, OR (c) the straight-line distance is below
+    # 1e-6 m (a stationary policy — the ratio is undefined, distinct
+    # from ``inf``). The HTML report renders these as dashes.
+    path_length_ratio: float | None = None
+
+    # RMS of the third-time-derivative of EE position over the rollout
+    # (``sqrt(mean(||jerk_t||^2))``), in m / s^3. Computed via finite
+    # differences on the buffered ``info["behavior_ee_pos"]`` samples;
+    # ``jerk_t = (ee[t+3] - 3*ee[t+2] + 3*ee[t+1] - ee[t]) / dt^3`` with
+    # ``dt`` from ``info["behavior_control_dt"]``. ``None`` when (a) the
+    # backend does not publish EE position / control_dt, OR (b) the
+    # rollout produced fewer than 4 EE samples (third differences are
+    # undefined). Lower is smoother — high jerk often correlates with
+    # near-collisions in real hardware.
+    jerk_rms: float | None = None
+
+    # Cumulative count of control steps where the closest pairwise
+    # object distance fell below the env's near-collision threshold
+    # (1cm in :class:`TabletopEnv`). Sum over the rollout, NOT a
+    # per-step flag. Steady-state contacts (cube on table) are excluded
+    # by the env-side filter so a trivial pickup does not run up the
+    # counter. ``None`` for backends that do not publish
+    # ``info["behavior_near_collision_delta"]``.
+    near_collision_count: int | None = None
+
+    # Maximum L2 norm of any contact force (3-component force vector,
+    # torques excluded) observed in any single step, in newtons.
+    # MuJoCo derivation: :func:`mujoco.mj_contactForce` per active
+    # contact, take L2 norm of the first 3 components, max across
+    # contacts and across steps. ``None`` for backends that do not
+    # publish ``info["behavior_peak_contact_force"]``.
+    peak_force: float | None = None
+
+    # ------------------------------------------------------------------
     # Sim-vs-real provenance tag (B-28) — explicit "this episode came
     # from a sim rollout" / "real-robot rollout" marker. Default
     # ``None`` keeps the field semantically inert for the legacy
