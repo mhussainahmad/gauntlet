@@ -62,11 +62,25 @@ def _render_axis(axis_delta: AxisDelta) -> list[str]:
 def _render_flip(flip: CellFlip) -> str:
     sign = "-" if flip.direction == "regressed" else "+"
     delta = flip.b_success_rate - flip.a_success_rate
-    return (
+    head = (
         f"  {sign} cell {flip.cell_index} {_fmt_config(flip.perturbation_config)}: "
         f"{_fmt_pct(flip.a_success_rate)} -> {_fmt_pct(flip.b_success_rate)} "
         f"({_fmt_signed_pct(delta)}, {flip.direction})"
     )
+    # Paired CRN attribution (B-08): when ``--paired`` ran, the delta
+    # carries a much tighter Wald CI plus a McNemar p-value. Surface
+    # both inline so the user sees "regressed by 8% with paired CI
+    # [-12%, -4%], p=0.01" instead of just the point estimate. The
+    # unpaired path keeps the legacy single-line render.
+    if flip.paired and flip.delta_ci_low is not None and flip.delta_ci_high is not None:
+        suffix_parts = [
+            f"paired CI [{_fmt_signed_pct(flip.delta_ci_low)}, "
+            f"{_fmt_signed_pct(flip.delta_ci_high)}]"
+        ]
+        if flip.mcnemar_p_value is not None:
+            suffix_parts.append(f"McNemar p={flip.mcnemar_p_value:.3f}")
+        return head + " [" + "; ".join(suffix_parts) + "]"
+    return head
 
 
 def _render_cluster(cluster: FailureCluster, *, sign: str) -> str:
@@ -113,6 +127,17 @@ def render_text(diff: ReportDiff) -> str:
     lines: list[str] = []
     lines.append(f"--- a: {diff.a_label} ({diff.a_suite_name})")
     lines.append(f"+++ b: {diff.b_label} ({diff.b_suite_name})")
+
+    # Paired CRN tag — single line so a piped consumer can grep "paired:"
+    # to know whether deltas carry the variance-reduced CI bracket
+    # (B-08). Rendered above the @@ overall @@ hunk so it's the first
+    # thing the human sees, mirroring how ``--no-color`` git diff puts
+    # mode-change lines above the header.
+    if diff.paired and diff.paired_comparison is not None:
+        lines.append(
+            f"paired: true (master_seed={diff.paired_comparison.master_seed}, "
+            f"n_paired_episodes={diff.paired_comparison.n_paired_episodes})"
+        )
 
     # Overall hunk.
     lines.append("@@ overall @@")

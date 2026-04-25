@@ -33,12 +33,17 @@ from pydantic import ValidationError
 from rich.console import Console
 from rich.theme import Theme
 
-from gauntlet.diff import diff_reports, render_text
+from gauntlet.diff import (
+    PairingError,
+    compute_paired_cells,
+    diff_reports,
+    render_text,
+)
 from gauntlet.env.base import GauntletEnv
 from gauntlet.env.registry import get_env_factory
 from gauntlet.policy.registry import PolicySpecError, resolve_policy_factory
 from gauntlet.replay import OverrideError, parse_override, replay_one
-from gauntlet.report import Report, build_report, write_html
+from gauntlet.report import CellBreakdown, Report, build_report, write_html
 from gauntlet.report.html import _nan_to_none
 from gauntlet.runner import Episode, Runner
 from gauntlet.suite import LintFinding, lint_suite, load_suite
@@ -171,22 +176,101 @@ def _load_report_or_episodes(path: Path) -> Report:
     top-level ``dict`` → assume it is a serialized :class:`Report`.
     Anything else is an error.
     """
+    report, _ = _load_report_with_episodes(path)
+    return report
+
+
+def _load_report_with_episodes(path: Path) -> tuple[Report, list[Episode] | None]:
+    """Load a report + (optionally) the original episode list.
+
+    The B-08 paired-comparison path needs the *per-episode* pass/fail
+    triples (``cell_index``, ``episode_index``, ``success``) plus the
+    ``master_seed`` echoed onto each Episode's metadata; the per-cell
+    aggregates carried by :class:`Report` are not enough on their own.
+    This helper exposes both: the rebuilt :class:`Report` (for the
+    legacy unpaired path that already drives compare/diff) AND the
+    original :class:`Episode` list (returned only when the input file
+    was an ``episodes.json``; ``report.json`` carries no per-episode
+    detail and the second tuple element is ``None``).
+    """
     raw = _read_json(path)
     if isinstance(raw, list):
         episodes = _episodes_from_dicts(raw, source=path)
         try:
-            return build_report(episodes)
+            return (build_report(episodes), episodes)
         except ValueError as exc:
             raise _fail(f"{path}: cannot build report: {exc}") from exc
     if isinstance(raw, dict):
         try:
-            return Report.model_validate(raw)
+            return (Report.model_validate(raw), None)
         except ValidationError as exc:
             raise _fail(f"{path}: not a valid report.json: {exc}") from exc
     raise _fail(
         f"{path}: top-level JSON must be a list (episodes) or dict (report); "
         f"got {type(raw).__name__}"
     )
+
+
+def _episodes_have_master_seed(episodes: list[Episode]) -> bool:
+    """Return True iff every episode carries an int ``master_seed``.
+
+    The auto-paired path requires the runner-stamped
+    ``metadata["master_seed"]`` echo. Older / hand-built episode lists
+    may omit it; in that case the auto path silently falls back to the
+    legacy unpaired comparison (the explicit ``--paired`` flag still
+    surfaces a clear PairingError so the user knows why).
+    """
+    for ep in episodes:
+        seed = ep.metadata.get("master_seed")
+        if not isinstance(seed, int):
+            return False
+    return True
+
+
+def _resolve_pairing_mode(
+    requested: bool | None,
+    episodes_a: list[Episode] | None,
+    episodes_b: list[Episode] | None,
+    path_a: Path,
+    path_b: Path,
+) -> bool:
+    """Map ``--paired/--no-paired`` tri-state into a concrete on/off decision.
+
+    Rules (B-08):
+
+    * ``--no-paired`` (``requested=False``) → never pair, even if both
+      sides have episodes. Matches the explicit user opt-out.
+    * ``--paired`` (``requested=True``) → require episodes on both
+      sides; if either side is a ``report.json`` (no per-episode
+      detail), raise a clean :class:`typer.Exit` so the user knows
+      exactly which file lacks the per-episode pass/fail triples that
+      drive the McNemar / paired-CI computation. (``master_seed``
+      mismatches surface later, inside :func:`compute_paired_cells`.)
+    * ``requested is None`` (the default) → auto: pair iff both sides
+      loaded as episode lists AND every episode carries the runner-
+      stamped ``master_seed`` (older / hand-built fixtures omit it).
+      Avoids surprising the legacy ``compare report-a.json report-b.json``
+      invocation while making the CRN reduction free for the common
+      ``compare episodes-a.json episodes-b.json`` flow.
+    """
+    if requested is False:
+        return False
+    if requested is True:
+        if episodes_a is None or episodes_b is None:
+            missing = []
+            if episodes_a is None:
+                missing.append(str(path_a))
+            if episodes_b is None:
+                missing.append(str(path_b))
+            raise _fail(
+                f"--paired requires per-episode data (episodes.json) on both sides; "
+                f"got report.json for: {', '.join(missing)}. Re-run with the "
+                f"episodes.json output, or drop --paired for the independent path."
+            )
+        return True
+    if episodes_a is None or episodes_b is None:
+        return False
+    return _episodes_have_master_seed(episodes_a) and _episodes_have_master_seed(episodes_b)
 
 
 def _episodes_from_dicts(raw: list[_JsonValue], *, source: Path) -> list[Episode]:
@@ -495,6 +579,8 @@ def _build_compare(
     *,
     threshold: float,
     min_cell_size: int,
+    episodes_a: list[Episode] | None = None,
+    episodes_b: list[Episode] | None = None,
 ) -> dict[str, _JsonValue]:
     """Build the ``compare.json`` payload for two reports.
 
@@ -502,10 +588,52 @@ def _build_compare(
     appears in *both* reports with at least ``min_cell_size`` episodes
     on both sides AND a success-rate delta exceeding ``threshold`` in
     the negative (positive) direction.
+
+    When ``episodes_a`` / ``episodes_b`` are provided AND both runs
+    share the same ``master_seed`` (via the deterministic seed-derivation
+    in :func:`gauntlet.runner.runner.Runner._build_work_items`), the
+    payload is enriched with the B-08 paired CRN bracket per cell and
+    a top-level ``paired: true`` flag. ``master_seed`` mismatches are a
+    hard :class:`PairingError` raised by
+    :func:`gauntlet.diff.compute_paired_cells` and surfaced verbatim
+    by the caller.
     """
     cells_a = {_cell_key(c.perturbation_config): c for c in report_a.per_cell}
     cells_b = {_cell_key(c.perturbation_config): c for c in report_b.per_cell}
     shared_keys = cells_a.keys() & cells_b.keys()
+
+    paired_payload: dict[str, _JsonValue] | None = None
+    paired_by_config: dict[frozenset[tuple[str, float]], dict[str, _JsonValue]] = {}
+    if episodes_a is not None and episodes_b is not None:
+        paired = compute_paired_cells(episodes_a, episodes_b, suite_name=report_a.suite_name)
+        paired_payload = cast("dict[str, _JsonValue]", json.loads(paired.model_dump_json()))
+        for paired_cell in paired.cells:
+            paired_by_config[_cell_key(paired_cell.perturbation_config)] = {
+                "delta_ci_low": paired_cell.delta_ci_low,
+                "delta_ci_high": paired_cell.delta_ci_high,
+                "mcnemar_p_value": paired_cell.mcnemar.p_value,
+                "n_paired": paired_cell.n_paired,
+            }
+
+    def _row(
+        ca: CellBreakdown,
+        cb: CellBreakdown,
+        delta: float,
+        key: frozenset[tuple[str, float]],
+    ) -> dict[str, _JsonValue]:
+        row: dict[str, _JsonValue] = {
+            "axis_combination": dict(ca.perturbation_config),
+            "rate_a": ca.success_rate,
+            "rate_b": cb.success_rate,
+            "delta": delta,
+            "n_episodes_a": ca.n_episodes,
+            "n_episodes_b": cb.n_episodes,
+        }
+        paired_row = paired_by_config.get(key)
+        if paired_row is not None:
+            row["paired"] = True
+            row.update(paired_row)
+        return row
 
     regressions: list[dict[str, _JsonValue]] = []
     improvements: list[dict[str, _JsonValue]] = []
@@ -516,27 +644,9 @@ def _build_compare(
             continue
         delta = cb.success_rate - ca.success_rate
         if delta < -threshold:
-            regressions.append(
-                {
-                    "axis_combination": dict(ca.perturbation_config),
-                    "rate_a": ca.success_rate,
-                    "rate_b": cb.success_rate,
-                    "delta": delta,
-                    "n_episodes_a": ca.n_episodes,
-                    "n_episodes_b": cb.n_episodes,
-                }
-            )
+            regressions.append(_row(ca, cb, delta, key))
         elif delta > threshold:
-            improvements.append(
-                {
-                    "axis_combination": dict(ca.perturbation_config),
-                    "rate_a": ca.success_rate,
-                    "rate_b": cb.success_rate,
-                    "delta": delta,
-                    "n_episodes_a": ca.n_episodes,
-                    "n_episodes_b": cb.n_episodes,
-                }
-            )
+            improvements.append(_row(ca, cb, delta, key))
 
     # Stable order: worst regression / best improvement first, then by
     # axis_combination repr for tie-breaking. ``r["delta"]`` is built as
@@ -546,7 +656,7 @@ def _build_compare(
     regressions.sort(key=lambda r: (cast("float", r["delta"]), repr(r["axis_combination"])))
     improvements.sort(key=lambda r: (-cast("float", r["delta"]), repr(r["axis_combination"])))
 
-    return {
+    payload: dict[str, _JsonValue] = {
         "a": {
             "name": report_a.suite_name,
             "overall_success_rate": report_a.overall_success_rate,
@@ -560,6 +670,7 @@ def _build_compare(
         "delta_success_rate": report_b.overall_success_rate - report_a.overall_success_rate,
         "threshold": threshold,
         "min_cell_size": min_cell_size,
+        "paired": paired_payload is not None,
         # ``regressions`` / ``improvements`` are constructed locally as
         # ``list[dict[str, _JsonValue]]``; ``list`` is invariant in its
         # parameter so the cast bridges to ``_JsonValue`` (which the
@@ -567,6 +678,9 @@ def _build_compare(
         "regressions": cast("_JsonValue", regressions),
         "improvements": cast("_JsonValue", improvements),
     }
+    if paired_payload is not None:
+        payload["paired_comparison"] = paired_payload
+    return payload
 
 
 @app.command("compare")
@@ -615,10 +729,23 @@ def compare(
             ),
         ),
     ] = False,
+    paired: Annotated[
+        bool | None,
+        typer.Option(
+            "--paired/--no-paired",
+            help=(
+                "Common-random-numbers (CRN) paired comparison (B-08). "
+                "Default: auto-on when both inputs are episodes.json files "
+                "sharing the same master_seed. --paired forces it (errors "
+                "out if seeds mismatch or input is report.json); --no-paired "
+                "forces the legacy independent-Wilson path."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Diff two runs and emit compare.json (HTML companion deferred to Phase 2)."""
-    report_a = _load_report_or_episodes(results_a)
-    report_b = _load_report_or_episodes(results_b)
+    report_a, episodes_a = _load_report_with_episodes(results_a)
+    report_b, episodes_b = _load_report_with_episodes(results_b)
 
     # Cross-backend guard — RFC-005 §11.3 / §12 Q2. Only fires when
     # both reports carry a suite_env (Phase-2-written reports) and the
@@ -650,12 +777,18 @@ def compare(
             f"b={report_b.suite_name!r}"
         )
 
-    payload = _build_compare(
-        report_a,
-        report_b,
-        threshold=threshold,
-        min_cell_size=min_cell_size,
-    )
+    use_paired = _resolve_pairing_mode(paired, episodes_a, episodes_b, results_a, results_b)
+    try:
+        payload = _build_compare(
+            report_a,
+            report_b,
+            threshold=threshold,
+            min_cell_size=min_cell_size,
+            episodes_a=episodes_a if use_paired else None,
+            episodes_b=episodes_b if use_paired else None,
+        )
+    except PairingError as exc:
+        raise _fail(str(exc)) from exc
 
     out_path = out if out is not None else results_b.parent / "compare.json"
     if out_path.parent and not out_path.parent.exists():
@@ -679,6 +812,14 @@ def compare(
         f"  regressions: [{regressions_style}]{n_regressions}[/]  "
         f"improvements: [{improvements_style}]{n_improvements}[/]"
     )
+    # B-08 paired-mode echo. When the CRN bracket is attached the
+    # report.json carries `paired: true` plus a per-cell `delta_ci_low/
+    # high` and `mcnemar_p_value` — surface a one-line status so the
+    # user knows the variance-reduced statistics fired.
+    if cast("bool", payload["paired"]):
+        _echo_err("  paired: [ok]on[/] (CRN bracket + McNemar attached)")
+    else:
+        _echo_err("  paired: [warn]off[/] (independent-Wilson bracket)")
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -738,16 +879,39 @@ def diff(
             min=0.0,
         ),
     ] = 0.5,
+    paired: Annotated[
+        bool | None,
+        typer.Option(
+            "--paired/--no-paired",
+            help=(
+                "Common-random-numbers (CRN) paired diff (B-08). Default: "
+                "auto-on when both inputs are episodes.json files sharing "
+                "the same master_seed. --paired forces it (errors out if "
+                "seeds mismatch or input is report.json); --no-paired "
+                "forces the legacy unpaired path."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Emit a git-diff-style structured delta between two runs."""
-    report_a = _load_report_or_episodes(results_a)
-    report_b = _load_report_or_episodes(results_b)
+    report_a, episodes_a = _load_report_with_episodes(results_a)
+    report_b, episodes_b = _load_report_with_episodes(results_b)
 
     if report_a.suite_name != report_b.suite_name:
         _echo_err(
             f"[warn]warning:[/] diffing across suites — a={report_a.suite_name!r} vs "
             f"b={report_b.suite_name!r}"
         )
+
+    use_paired = _resolve_pairing_mode(paired, episodes_a, episodes_b, results_a, results_b)
+    paired_comparison = None
+    if use_paired and episodes_a is not None and episodes_b is not None:
+        try:
+            paired_comparison = compute_paired_cells(
+                episodes_a, episodes_b, suite_name=report_a.suite_name
+            )
+        except PairingError as exc:
+            raise _fail(str(exc)) from exc
 
     try:
         result = diff_reports(
@@ -757,6 +921,7 @@ def diff(
             b_label=str(results_b),
             cell_flip_threshold=cell_flip_threshold,
             cluster_intensify_threshold=cluster_intensify_threshold,
+            paired_comparison=paired_comparison,
         )
     except ValueError as exc:
         raise _fail(str(exc)) from exc
@@ -775,8 +940,9 @@ def diff(
 
     # Always emit a one-line stderr summary so the user can spot the
     # headline even when the body is redirected to a file / pipe.
+    paired_tag = " (paired)" if result.paired else ""
     _echo_err(
-        f"[ok]Diffed[/] {_fmt_path(results_a)} -> {_fmt_path(results_b)}: "
+        f"[ok]Diffed[/]{paired_tag} {_fmt_path(results_a)} -> {_fmt_path(results_b)}: "
         f"overall {_fmt_signed_pct(result.overall_success_rate_delta)}, "
         f"cell flips: {len(result.cell_flips)}, "
         f"clusters +{len(result.cluster_added)}/-{len(result.cluster_removed)}/"

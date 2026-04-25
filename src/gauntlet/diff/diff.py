@@ -32,6 +32,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
+from gauntlet.diff.paired import PairedCellDelta, PairedComparison
 from gauntlet.report import FailureCluster, Report
 
 __all__ = [
@@ -66,6 +67,19 @@ class CellFlip(BaseModel):
 
     ``direction`` is ``"regressed"`` when ``b_success_rate < a_success_rate``,
     ``"improved"`` otherwise.
+
+    ``paired`` is ``True`` when the flip was computed from a CRN-paired
+    run (``--paired``) and the ``delta_ci_low`` / ``delta_ci_high`` /
+    ``mcnemar_p_value`` fields carry the paired-CI bracket plus the
+    McNemar p-value on the per-episode pass/fail contingency table
+    (B-08). Under the unpaired path all four fields are ``None`` /
+    ``False`` so ``ReportDiff`` JSONs from the legacy code path remain
+    structurally identical except for the additional defaulted keys.
+
+    B-20 (regression-vs-noise attribution) consumes the paired CI to
+    decide whether a flip is ``regressed`` / ``improved`` in earnest or
+    ``within_noise``; without B-08's CRN reduction the bracket on the
+    delta is too loose to support that decision.
     """
 
     model_config = ConfigDict(extra="forbid", ser_json_inf_nan="strings")
@@ -75,6 +89,10 @@ class CellFlip(BaseModel):
     a_success_rate: float
     b_success_rate: float
     direction: Literal["regressed", "improved"]
+    paired: bool = False
+    delta_ci_low: float | None = None
+    delta_ci_high: float | None = None
+    mcnemar_p_value: float | None = None
 
 
 class ClusterDelta(BaseModel):
@@ -93,6 +111,14 @@ class ReportDiff(BaseModel):
 
     Field order is "headline first": the scalar overall delta and per-
     axis breakdowns precede the cell- and cluster-level surfacing.
+
+    ``paired`` and ``paired_comparison`` are populated when
+    :func:`diff_reports` is given a paired CRN payload (B-08). They are
+    ``False`` / ``None`` for the legacy unpaired call path, which keeps
+    the old JSON shape structurally compatible -- every existing
+    consumer (the dashboard's diff renderer, ``gauntlet diff --json |
+    jq`` recipes, B-20's regression-vs-noise attribution) sees the new
+    fields default cleanly.
     """
 
     model_config = ConfigDict(extra="forbid", ser_json_inf_nan="strings")
@@ -108,6 +134,8 @@ class ReportDiff(BaseModel):
     cluster_added: list[FailureCluster]
     cluster_removed: list[FailureCluster]
     cluster_intensified: list[ClusterDelta]
+    paired: bool = False
+    paired_comparison: PairedComparison | None = None
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -148,6 +176,7 @@ def diff_reports(
     b_label: str = "b",
     cell_flip_threshold: float = 0.10,
     cluster_intensify_threshold: float = 0.5,
+    paired_comparison: PairedComparison | None = None,
 ) -> ReportDiff:
     """Compute the structured per-axis / per-cell / per-cluster diff.
 
@@ -165,6 +194,15 @@ def diff_reports(
     cluster_intensify_threshold
         Inclusive minimum ``b.lift - a.lift`` for a *shared* failure
         cluster to be reported as intensified. One-sided (lift growth).
+    paired_comparison
+        Optional CRN paired-comparison artefact (B-08). When set, every
+        :class:`CellFlip` is enriched with the paired CI bracket on the
+        delta and the McNemar p-value, and the top-level
+        :attr:`ReportDiff.paired` flag flips to ``True``. The artefact
+        comes from :func:`gauntlet.diff.compute_paired_cells`. Per-cell
+        rows whose ``perturbation_config`` does not appear in the paired
+        artefact are left with the unpaired defaults (the diff is
+        permissive across mismatched grids).
 
     Returns
     -------
@@ -185,6 +223,19 @@ def diff_reports(
         raise ValueError(
             f"cluster_intensify_threshold must be >= 0; got {cluster_intensify_threshold}"
         )
+
+    # Index the paired comparison by ``cell_index`` for O(1) lookup
+    # while building CellFlip rows. ``cell_index`` is the most stable
+    # join key (the runner derives it from grid enumeration order); the
+    # perturbation_config pass-through stays as a defensive fallback for
+    # tests that hand-construct paired payloads with non-matching cell
+    # indices.
+    paired_by_cell_index: dict[int, PairedCellDelta] = {}
+    paired_by_config: dict[frozenset[tuple[str, float]], PairedCellDelta] = {}
+    if paired_comparison is not None:
+        for entry in paired_comparison.cells:
+            paired_by_cell_index[entry.cell_index] = entry
+            paired_by_config[_cell_key(entry.perturbation_config)] = entry
 
     # Per-axis rate deltas — only over axes present in both reports.
     a_axes = {ax.name: ax for ax in a.per_axis}
@@ -211,15 +262,37 @@ def diff_reports(
         delta = cb.success_rate - ca.success_rate
         if abs(delta) >= cell_flip_threshold:
             direction: Literal["regressed", "improved"] = "regressed" if delta < 0 else "improved"
-            flips.append(
-                CellFlip(
-                    cell_index=cb.cell_index,
-                    perturbation_config={k: _norm(v) for k, v in cb.perturbation_config.items()},
-                    a_success_rate=ca.success_rate,
-                    b_success_rate=cb.success_rate,
-                    direction=direction,
+            paired_cell: PairedCellDelta | None = paired_by_cell_index.get(cb.cell_index)
+            if paired_cell is None:
+                paired_cell = paired_by_config.get(key)
+            if paired_cell is not None:
+                flips.append(
+                    CellFlip(
+                        cell_index=cb.cell_index,
+                        perturbation_config={
+                            k: _norm(v) for k, v in cb.perturbation_config.items()
+                        },
+                        a_success_rate=ca.success_rate,
+                        b_success_rate=cb.success_rate,
+                        direction=direction,
+                        paired=True,
+                        delta_ci_low=paired_cell.delta_ci_low,
+                        delta_ci_high=paired_cell.delta_ci_high,
+                        mcnemar_p_value=paired_cell.mcnemar.p_value,
+                    )
                 )
-            )
+            else:
+                flips.append(
+                    CellFlip(
+                        cell_index=cb.cell_index,
+                        perturbation_config={
+                            k: _norm(v) for k, v in cb.perturbation_config.items()
+                        },
+                        a_success_rate=ca.success_rate,
+                        b_success_rate=cb.success_rate,
+                        direction=direction,
+                    )
+                )
     # Stable order: regressions first (most negative), then improvements
     # (most positive). Tie-break on cell_index then repr for determinism.
     flips.sort(key=lambda f: (f.b_success_rate - f.a_success_rate, f.cell_index))
@@ -262,4 +335,6 @@ def diff_reports(
         cluster_added=cluster_added,
         cluster_removed=cluster_removed,
         cluster_intensified=cluster_intensified,
+        paired=paired_comparison is not None,
+        paired_comparison=paired_comparison,
     )
