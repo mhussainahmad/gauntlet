@@ -351,3 +351,41 @@ def test_build_dashboard_creates_missing_out_dir(tmp_path: Path) -> None:
     assert not out.exists()
     build_dashboard(runs, out)
     assert (out / "index.html").is_file()
+
+
+# ---------------------------------------------------------------------------
+# Static assets — dashboard.js carries the chart wiring; dashboard.css ships.
+# ---------------------------------------------------------------------------
+
+
+def test_build_dashboard_copies_dashboard_js(tmp_path: Path) -> None:
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    _write_run(runs, _grid_report(), run_name="run-a")
+    out = tmp_path / "out"
+    build_dashboard(runs, out)
+
+    js_path = out / "dashboard.js"
+    assert js_path.is_file()
+    body = js_path.read_text(encoding="utf-8")
+    # The Chart.js wiring lives here (we bind ``window.Chart``); a
+    # missing reference means the chart-render path was lost during a
+    # refactor.
+    assert "window.Chart" in body
+    # Both chart helpers are exposed for downstream filter wiring.
+    assert "renderTimeSeries" in body
+    assert "renderAxisChart" in body
+
+
+def test_build_dashboard_index_html_loads_assets(tmp_path: Path) -> None:
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    _write_run(runs, _grid_report(), run_name="run-a")
+    out = tmp_path / "out"
+    build_dashboard(runs, out)
+    body = (out / "index.html").read_text(encoding="utf-8")
+    # The page references the sibling asset URLs (relative, not /abs).
+    assert 'href="dashboard.css"' in body
+    assert 'src="dashboard.js"' in body
+    # And pulls Chart.js from CDN — same convention as the per-run / fleet reports.
+    assert "cdn.jsdelivr.net/npm/chart.js" in body
