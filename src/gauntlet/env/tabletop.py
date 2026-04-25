@@ -301,6 +301,17 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         self._target_pos: NDArray[np.float64] = np.zeros(3, dtype=np.float64)
         self._success: bool = False
 
+        # B-21 actuator telemetry: per-control-step scratch slots
+        # populated inside :meth:`step` (one control step = one
+        # ``n_substeps``-long ``mj_step`` block). Surfaced through
+        # :meth:`_build_info` as ``actuator_energy_delta`` (joule-
+        # equivalent of ``|tau . qvel| * dt`` summed over the substeps)
+        # and ``actuator_torque_norm`` (L2 norm of ``actuator_force`` at
+        # the end of the block). Both are ``None`` after :meth:`reset`
+        # so the worker's accumulator only ticks on real control steps.
+        self._last_step_actuator_energy: float | None = None
+        self._last_step_torque_norm: float | None = None
+
         self.action_space: spaces.Box = spaces.Box(low=-1.0, high=1.0, shape=(7,), dtype=np.float64)
         obs_spaces: dict[str, spaces.Space[Any]] = {
             "cube_pos": spaces.Box(low=-np.inf, high=np.inf, shape=(3,), dtype=np.float64),
@@ -665,6 +676,14 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         self._gripper_state = self.GRIPPER_OPEN
         self._success = False
 
+        # Wipe per-control-step actuator telemetry: a freshly reset env
+        # has not driven the actuators yet, so :meth:`_build_info`
+        # MUST NOT report stale energy / torque from a prior episode.
+        # The ``None`` sentinel is also the worker's signal to skip
+        # the accumulator on the very first reset-time obs.
+        self._last_step_actuator_energy = None
+        self._last_step_torque_norm = None
+
         # Populate body_xpos / site_xpos before we read them for the obs.
         mujoco.mj_forward(self._model, self._data)
 
@@ -691,9 +710,52 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         self._gripper_state = self.GRIPPER_OPEN if a[6] > 0.0 else self.GRIPPER_CLOSED
         self._update_grasp_state()
 
-        # 3. Physics.
-        for _ in range(self._n_substeps):
-            mujoco.mj_step(self._model, self._data)
+        # 3. Physics. We integrate B-21 actuator-energy telemetry over
+        #    the substep loop (energy ~ |tau . qvel| * dt accumulated
+        #    per substep, since both ``actuator_force`` and ``qvel``
+        #    evolve inside the loop). The torque-norm sample is taken
+        #    after the final substep — that's the value the policy's
+        #    next observation reflects, and matches what a real
+        #    safety monitor would log.
+        #
+        #    The current Tabletop MJCF is mocap-driven (``model.nu == 0``,
+        #    no ``<actuator>`` elements), so ``qfrc_actuator`` /
+        #    ``actuator_force`` are identically zero / empty. Reporting
+        #    energy=0.0 in that case would be actively misleading next
+        #    to a high-failure cluster row ("the policy commanded zero
+        #    force") so we leave the per-step slots ``None``; the worker
+        #    sees absent ``info["actuator_*"]`` keys and the Episode
+        #    carries ``None``, same as a non-MuJoCo backend. A future
+        #    joint-torque MJCF asset will surface real values without
+        #    further wiring.
+        if self._model.nu > 0:
+            dt_substep = float(self._model.opt.timestep)
+            energy_accum = 0.0
+            for _ in range(self._n_substeps):
+                mujoco.mj_step(self._model, self._data)
+                # ``qfrc_actuator`` is the actuator-generated generalized
+                # force in qvel space (same dimension as ``qvel``), so
+                # the element-wise product and absolute-value sum is
+                # the well-defined |power| over the DOFs without an
+                # actuator-to-DOF index lookup.
+                qfrc = np.asarray(self._data.qfrc_actuator, dtype=np.float64)
+                qvel = np.asarray(self._data.qvel, dtype=np.float64)
+                energy_accum += float(np.sum(np.abs(qfrc * qvel))) * dt_substep
+            # Per-actuator force vector at the end of the substep block
+            # — the operationally relevant "what torque did the policy
+            # just command" sample. Always >= 0; the L2 norm is
+            # invariant to actuator ordering, which keeps cross-run
+            # comparisons stable even if the MJCF reorders <actuator>
+            # elements.
+            actuator_force = np.asarray(self._data.actuator_force, dtype=np.float64)
+            self._last_step_actuator_energy = energy_accum
+            self._last_step_torque_norm = float(np.linalg.norm(actuator_force))
+        else:
+            for _ in range(self._n_substeps):
+                mujoco.mj_step(self._model, self._data)
+            # Telemetry deliberately not populated — see comment above.
+            self._last_step_actuator_energy = None
+            self._last_step_torque_norm = None
 
         # 4. If grasped, snap cube to EE pose (post-physics, overrides
         #    any contact-induced drift).
@@ -877,11 +939,22 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         return out
 
     def _build_info(self) -> dict[str, Any]:
-        return {
+        info: dict[str, Any] = {
             "success": self._success,
             "grasped": self._grasped,
             "step": self._step_count,
         }
+        # B-21: only emit the actuator-telemetry keys when we actually
+        # have a fresh sample (i.e. inside the post-:meth:`step` info,
+        # never inside the post-:meth:`reset` info). The worker reads
+        # these keys with ``info.get(...)`` and only ticks its
+        # accumulator when both are present, so absence == "this is a
+        # reset, not a control step".
+        if self._last_step_actuator_energy is not None:
+            info["actuator_energy_delta"] = self._last_step_actuator_energy
+        if self._last_step_torque_norm is not None:
+            info["actuator_torque_norm"] = self._last_step_torque_norm
+        return info
 
     @staticmethod
     def _xy_distance(a: NDArray[np.float64], b: NDArray[np.float64]) -> float:

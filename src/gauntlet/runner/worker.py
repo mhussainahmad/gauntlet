@@ -413,6 +413,20 @@ def execute_one(
     terminated = False
     truncated = False
     info: dict[str, Any] = {}
+    # B-21 actuator-cost telemetry. We accumulate from the env's
+    # per-step ``info["actuator_energy_delta"]`` /
+    # ``info["actuator_torque_norm"]`` keys. Backends that do not
+    # publish these (PyBullet, Genesis, Isaac, fake test envs) leave
+    # ``telemetry_observed`` False and the Episode carries
+    # ``actuator_energy=None`` / ``mean_torque_norm=None`` /
+    # ``peak_torque_norm=None``. The "MuJoCo first, others None"
+    # contract from B-21 falls out of the env→worker info dict here
+    # rather than an ``isinstance(env, TabletopEnv)`` switch.
+    telemetry_observed = False
+    energy_total = 0.0
+    torque_norm_sum = 0.0
+    torque_norm_peak = 0.0
+    torque_norm_samples = 0
     while not (terminated or truncated):
         action = policy.act(obs)
         if record_trajectory:
@@ -430,6 +444,27 @@ def execute_one(
         obs, reward, terminated, truncated, info = env.step(action)
         total_reward += float(reward)
         step_count += 1
+        energy_delta = info.get("actuator_energy_delta")
+        torque_norm = info.get("actuator_torque_norm")
+        if energy_delta is not None and torque_norm is not None:
+            telemetry_observed = True
+            energy_total += float(energy_delta)
+            t = float(torque_norm)
+            torque_norm_sum += t
+            torque_norm_samples += 1
+            if t > torque_norm_peak:
+                torque_norm_peak = t
+
+    # Resolve the three Episode fields. ``telemetry_observed`` False
+    # collapses all three to ``None`` so the report's failure-cluster
+    # render shows a dash, not a misleading ``0.00``.
+    actuator_energy: float | None = None
+    mean_torque_norm: float | None = None
+    peak_torque_norm: float | None = None
+    if telemetry_observed and torque_norm_samples > 0:
+        actuator_energy = energy_total
+        mean_torque_norm = torque_norm_sum / torque_norm_samples
+        peak_torque_norm = torque_norm_peak
 
     success = bool(info.get("success", False))
 
@@ -481,6 +516,9 @@ def execute_one(
             "episodes_per_cell": int(item.episodes_per_cell),
         },
         video_path=relative_video_path,
+        actuator_energy=actuator_energy,
+        mean_torque_norm=mean_torque_norm,
+        peak_torque_norm=peak_torque_norm,
     )
 
     if record_trajectory:
