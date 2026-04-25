@@ -178,9 +178,20 @@ def test_determinism_single_worker_runs_match() -> None:
     b = runner.run(policy_factory=make_random_policy, suite=suite)
 
     assert len(a) == len(b)
+    # B-37: per-step inference-latency is wall-clock measurement and is
+    # fundamentally non-deterministic across runs (jitter, GIL,
+    # scheduler quanta). Exclude the three latency fields from the
+    # bit-equality contract — every other Episode field is determined
+    # by ``(master_seed, cell_index, episode_index)`` alone.
+    _wallclock_fields = {
+        "inference_latency_ms_p50",
+        "inference_latency_ms_p99",
+        "inference_latency_ms_max",
+    }
     for ea, eb in zip(a, b, strict=True):
-        # Bit-for-bit equality across every Pydantic field.
-        assert ea.model_dump() == eb.model_dump()
+        assert {k: v for k, v in ea.model_dump().items() if k not in _wallclock_fields} == {
+            k: v for k, v in eb.model_dump().items() if k not in _wallclock_fields
+        }
 
 
 # ----------------------------------------------------------------------------
@@ -221,10 +232,19 @@ def test_determinism_n_workers_one_vs_two() -> None:
     )
 
     assert len(serial) == len(parallel) == suite.num_cells() * suite.episodes_per_cell
+    # B-37: latency is wall-clock and fundamentally non-deterministic
+    # — see the comment in ``test_determinism_single_worker_runs_match``.
+    _wallclock_fields = {
+        "inference_latency_ms_p50",
+        "inference_latency_ms_p99",
+        "inference_latency_ms_max",
+    }
     for es, ep in zip(serial, parallel, strict=True):
-        assert es.model_dump() == ep.model_dump(), (
+        es_dump = {k: v for k, v in es.model_dump().items() if k not in _wallclock_fields}
+        ep_dump = {k: v for k, v in ep.model_dump().items() if k not in _wallclock_fields}
+        assert es_dump == ep_dump, (
             f"cell={es.cell_index} ep={es.episode_index} diverged across worker counts; "
-            f"serial={es.model_dump()} parallel={ep.model_dump()}"
+            f"serial={es_dump} parallel={ep_dump}"
         )
 
 
@@ -257,7 +277,16 @@ def test_master_seed_none_runs_and_records_master_seed() -> None:
     # ``seed=only`` while the first had ``seed=None`` (the bit the
     # SeedSequence consumed). The determinism contract is over the
     # outcome fields below, not the provenance trio.
-    _provenance = {"gauntlet_version", "suite_hash", "git_commit"}
+    # B-37: latency is wall-clock and is excluded from the equality
+    # contract for the same reason as the determinism tests above.
+    _provenance = {
+        "gauntlet_version",
+        "suite_hash",
+        "git_commit",
+        "inference_latency_ms_p50",
+        "inference_latency_ms_p99",
+        "inference_latency_ms_max",
+    }
     for a, b in zip(episodes, repro, strict=True):
         assert {k: v for k, v in a.model_dump().items() if k not in _provenance} == {
             k: v for k, v in b.model_dump().items() if k not in _provenance

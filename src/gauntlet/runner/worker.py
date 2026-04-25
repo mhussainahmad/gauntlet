@@ -46,6 +46,7 @@ way to extract a per-spawn-unique scalar.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -241,6 +242,17 @@ class WorkerInitArgs:
     # :attr:`Episode.energy_over_budget`. ``None`` (the default) keeps
     # the field ``None`` on every Episode, byte-identical to pre-B-30.
     energy_budget: float | None = None
+    # B-37: optional per-step inference-latency budget (milliseconds).
+    # When set AND a rollout's measured p99 ``policy.act`` latency
+    # exceeds this threshold, the worker stamps
+    # ``Episode.metadata["inference_budget_violated"] = True``. Anti-
+    # feature (deliberate): a soft flag, not a hard fail. The run
+    # continues so the user sees every offender, not just the first.
+    # ``None`` (the default) leaves ``metadata`` unchanged for the
+    # latency-budget key — pre-B-37 byte-identical for the ``metadata``
+    # contents. Latency itself is always measured (zero-config); only
+    # the *budget compare* is gated on this knob.
+    max_inference_ms: float | None = None
 
 
 # Worker-local cache shape. ``total=False`` because pre-init reads
@@ -258,6 +270,7 @@ class _WorkerState(TypedDict, total=False):
     video_config: VideoConfig | None
     measure_action_consistency: bool
     energy_budget: float | None
+    max_inference_ms: float | None
 
 
 # Worker-local cache. Populated by ``pool_initializer``; read by
@@ -288,6 +301,7 @@ def pool_initializer(args: WorkerInitArgs) -> None:
     _WORKER_STATE["video_config"] = args.video_config
     _WORKER_STATE["measure_action_consistency"] = args.measure_action_consistency
     _WORKER_STATE["energy_budget"] = args.energy_budget
+    _WORKER_STATE["max_inference_ms"] = args.max_inference_ms
 
 
 # ----------------------------------------------------------------------------
@@ -380,6 +394,7 @@ def execute_one(
     video_config: VideoConfig | None = None,
     measure_action_consistency: bool = False,
     energy_budget: float | None = None,
+    max_inference_ms: float | None = None,
 ) -> Episode:
     """Drive one (cell, episode) rollout to completion.
 
@@ -421,6 +436,30 @@ def execute_one(
     buffer still grows during the rollout. The default
     ``video_config=None`` keeps in-memory memory and disk I/O byte-
     identical to the pre-PR behaviour.
+
+    Inference-latency contract (B-37, always-on):
+    Every call to ``policy.act(obs)`` is bracketed by
+    :func:`time.perf_counter` deltas; the per-step values are
+    accumulated in milliseconds. At rollout end the worker computes
+    ``p50`` / ``p99`` / ``max`` via :func:`numpy.percentile` and writes
+    them to :attr:`Episode.inference_latency_ms_p50` etc. The B-18
+    ``policy.act_n`` sampling call (when active) is **deliberately not
+    timed**: it samples N=8 candidates and would inflate p99 by ~Nx on
+    every measured step, biasing the report toward measurement
+    overhead rather than the policy's deployed critical path. The
+    overhead of ``perf_counter`` itself is sub-microsecond on modern
+    Linux; the backlog's anti-feature concern about per-call overhead
+    is mitigated by that fact, so the measurement is unconditional
+    rather than gated behind a ``--track-latency`` flag.
+
+    Inference-budget gate (B-37, soft):
+    When ``max_inference_ms`` is set AND the rollout's p99 latency
+    exceeds it, the worker writes
+    ``Episode.metadata["inference_budget_violated"] = True``. The flag
+    is **soft**: it never aborts the run, never flips ``success``, and
+    is *absent* (rather than ``False``) when the budget was met or no
+    budget was configured. The user wants to see every offender, not
+    have the run die halfway and hide the rest.
     """
     env.restore_baseline()
     for name, value in item.perturbation_values.items():
@@ -519,6 +558,13 @@ def execute_one(
     peak_force_acc = 0.0
     last_control_dt: float | None = None
     success_step_count: int | None = None
+    # B-37 per-step inference-latency buffer. Always allocated — see
+    # the docstring's "always-on" contract above. One float per
+    # ``policy.act(obs)`` call, in milliseconds. ``policy.act_n``
+    # (B-18 measurement) is deliberately excluded — its N=8 sampling
+    # would inflate every measured step by ~Nx and bias p99 toward
+    # measurement overhead rather than the deployed critical path.
+    inference_latency_buffer: list[float] = []
     while not (terminated or truncated):
         if sample_policy is not None and step_count % CONSISTENCY_STRIDE == 0:
             # Sample N actions for the current obs (state-preserving on
@@ -530,7 +576,16 @@ def execute_one(
                 per_axis_var = stacked.var(axis=0)
                 variance_sum += float(per_axis_var.mean())
                 variance_count += 1
+        # B-37 per-step inference-latency measurement. Bracket
+        # ``policy.act`` with :func:`time.perf_counter` deltas; the
+        # ``policy.act_n`` call above is intentionally NOT timed. The
+        # measurement is always-on (see the docstring's anti-feature
+        # discussion); the overhead is sub-microsecond on modern Linux
+        # and dwarfed by any realistic ``policy.act`` cost.
+        _t0 = time.perf_counter()
         action = policy.act(obs)
+        _t1 = time.perf_counter()
+        inference_latency_buffer.append((_t1 - _t0) * 1000.0)
         if record_trajectory:
             # Capture the obs that was fed into ``policy.act`` and the
             # action produced for it. Arrays are defensively copied so a
@@ -706,6 +761,23 @@ def execute_one(
                 jerk_mag_sq = np.sum(jerk * jerk, axis=1)
                 jerk_rms = float(np.sqrt(jerk_mag_sq.mean()))
 
+    # B-37 inference-latency aggregation. ``policy.act`` was timed on
+    # every step (see the docstring's always-on contract); a T=0
+    # rollout (env truncates at reset, never reaches ``act``) leaves
+    # the buffer empty and the three Episode fields stay ``None``,
+    # honouring the same partial-coverage convention as the B-21 / B-30
+    # / B-02 telemetry trios. ``np.percentile`` with the default linear
+    # interpolation is the canonical p50 / p99 estimator and matches
+    # the wording in the B-37 spec / VLA-Perf framing.
+    inference_latency_ms_p50: float | None = None
+    inference_latency_ms_p99: float | None = None
+    inference_latency_ms_max: float | None = None
+    if inference_latency_buffer:
+        latency_arr = np.asarray(inference_latency_buffer, dtype=np.float64)
+        inference_latency_ms_p50 = float(np.percentile(latency_arr, 50))
+        inference_latency_ms_p99 = float(np.percentile(latency_arr, 99))
+        inference_latency_ms_max = float(latency_arr.max())
+
     # Compute the video path BEFORE Episode construction so the field
     # can be set in the same constructor call (keeping the schema
     # write-once). The path is None unless we will actually write a
@@ -737,6 +809,27 @@ def execute_one(
             # the user was warned in the Runner docstring.
             relative_video_path = str(absolute)
 
+    # Build the metadata dict up-front so the B-37 budget flag, when
+    # set, lands alongside the existing reproducibility echoes in a
+    # single ``Episode`` constructor call (keeping the schema write-
+    # once). The flag is *only* present when (a) a budget was
+    # configured AND (b) the rollout's p99 exceeded it — the absent-
+    # rather-than-False convention keeps the soft-flag semantics
+    # honest. Values are typed as ``int | float | str | bool`` per
+    # the Episode.metadata field annotation; the bool literal lands as
+    # bool, not int, under pydantic's mode="json" round-trip.
+    episode_metadata: dict[str, float | int | str | bool] = {
+        "master_seed": int(item.master_seed),
+        "n_cells": int(item.n_cells),
+        "episodes_per_cell": int(item.episodes_per_cell),
+    }
+    if (
+        max_inference_ms is not None
+        and inference_latency_ms_p99 is not None
+        and inference_latency_ms_p99 > max_inference_ms
+    ):
+        episode_metadata["inference_budget_violated"] = True
+
     episode = Episode(
         suite_name=item.suite_name,
         cell_index=item.cell_index,
@@ -748,11 +841,7 @@ def execute_one(
         truncated=bool(truncated),
         step_count=int(step_count),
         total_reward=float(total_reward),
-        metadata={
-            "master_seed": int(item.master_seed),
-            "n_cells": int(item.n_cells),
-            "episodes_per_cell": int(item.episodes_per_cell),
-        },
+        metadata=episode_metadata,
         video_path=relative_video_path,
         actuator_energy=actuator_energy,
         mean_torque_norm=mean_torque_norm,
@@ -767,6 +856,9 @@ def execute_one(
         jerk_rms=jerk_rms,
         near_collision_count=near_collision_count,
         peak_force=peak_force,
+        inference_latency_ms_p50=inference_latency_ms_p50,
+        inference_latency_ms_p99=inference_latency_ms_p99,
+        inference_latency_ms_max=inference_latency_ms_max,
     )
 
     if record_trajectory:
@@ -867,6 +959,11 @@ def run_work_item(item: WorkItem) -> Episode:
     # B-30 actuator-energy budget. ``None`` keeps Episode.energy_over_budget
     # ``None`` for workers initialised by pre-B-30 code paths.
     energy_budget: float | None = _WORKER_STATE.get("energy_budget")
+    # B-37 inference-latency budget. ``None`` leaves
+    # ``Episode.metadata["inference_budget_violated"]`` *absent* on
+    # every Episode; the latency p50 / p99 / max fields themselves are
+    # always populated regardless (always-on measurement).
+    max_inference_ms: float | None = _WORKER_STATE.get("max_inference_ms")
     return execute_one(
         env,
         policy_factory,
@@ -876,4 +973,5 @@ def run_work_item(item: WorkItem) -> Episode:
         video_config=video_config,
         measure_action_consistency=measure,
         energy_budget=energy_budget,
+        max_inference_ms=max_inference_ms,
     )

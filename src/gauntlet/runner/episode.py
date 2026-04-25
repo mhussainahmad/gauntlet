@@ -345,6 +345,58 @@ class Episode(BaseModel):
     peak_force: float | None = None
 
     # ------------------------------------------------------------------
+    # Per-step inference-latency telemetry (B-37) — wall-clock cost of
+    # the policy's ``act(obs)`` call, summarised across the rollout.
+    # Surfaces the deployment-blocking question VLA-Perf (arxiv
+    # 2602.18397) calls out: a policy can hit a high success rate and
+    # still be undeployable because its 99th-percentile per-step latency
+    # blows past the target hardware's control-loop budget.
+    #
+    # Fields are populated by :func:`gauntlet.runner.worker.execute_one`
+    # which wraps each ``policy.act(obs)`` call with a
+    # :func:`time.perf_counter` delta. ``policy.act_n`` (B-18 mode-collapse
+    # measurement) is intentionally NOT timed — it samples N candidates
+    # and would spike p99 by ~Nx on every measured step, biasing the
+    # report toward measurement overhead rather than the critical path.
+    #
+    # Backend-agnostic by construction: the timing happens around the
+    # policy interface, not inside any env. Every backend (MuJoCo,
+    # PyBullet, Genesis, Isaac, fakes) populates these fields uniformly.
+    #
+    # ``None`` semantics (mirrors B-21 / B-30 / B-02): the worker did
+    # not measure (legacy ``Episode.model_validate`` path on a pre-B-37
+    # JSON, or a T=0 rollout that produced zero ``act`` calls). A
+    # measured rollout that observed zero latency would still be
+    # >= 0.0, never ``None`` — so the HTML report renders ``None`` as a
+    # dash, never as ``0.00``.
+    #
+    # The budget gate lives on :attr:`metadata` rather than as a flat
+    # field — see :class:`gauntlet.runner.runner.Runner.max_inference_ms`
+    # / the ``--max-inference-ms`` CLI flag. Anti-feature (deliberate):
+    # ``inference_budget_violated`` is a SOFT flag — it tags the
+    # offending episode for sortable post-hoc inspection but never
+    # aborts the run, never flips ``success``, and is absent from
+    # ``metadata`` (rather than ``False``) when the budget was met or
+    # not configured. The user wants to see *every* slow rollout, not
+    # have the run die halfway through and hide the rest.
+    # ------------------------------------------------------------------
+
+    # 50th-percentile per-step ``policy.act`` latency in milliseconds.
+    inference_latency_ms_p50: float | None = None
+
+    # 99th-percentile per-step ``policy.act`` latency in milliseconds.
+    # The deployment-blocking percentile — VLA-Perf (arxiv 2602.18397)
+    # recommends 10-100 ms as the operating envelope; the ``--max-
+    # inference-ms`` flag compares against this field.
+    inference_latency_ms_p99: float | None = None
+
+    # Maximum per-step ``policy.act`` latency observed in any single
+    # step, in milliseconds. Useful when the operator cares about the
+    # worst-case rather than a percentile (e.g. real-time control with
+    # no jitter budget).
+    inference_latency_ms_max: float | None = None
+
+    # ------------------------------------------------------------------
     # Sim-vs-real provenance tag (B-28) — explicit "this episode came
     # from a sim rollout" / "real-robot rollout" marker. Default
     # ``None`` keeps the field semantically inert for the legacy

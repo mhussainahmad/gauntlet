@@ -292,6 +292,23 @@ def _failure_clusters(
         pair_nearcol_count: dict[tuple[float, float], int] = defaultdict(int)
         pair_peakforce_sum: dict[tuple[float, float], float] = defaultdict(float)
         pair_peakforce_count: dict[tuple[float, float], int] = defaultdict(int)
+        # B-37 inference-latency aggregates. Same partial-coverage
+        # handling as the actuator / safety / behavioural trios above
+        # — episodes whose Episode.inference_latency_ms_p99 is None
+        # (legacy pre-B-37 episodes.json, or T=0 rollouts) are dropped
+        # from BOTH numerator and denominator. The budget-violation
+        # rate has its own pair of dicts because a violation only
+        # surfaces when the user opted into ``--max-inference-ms`` —
+        # treating it like a separate column for the partial-coverage
+        # / "absent means not measured" gate.
+        pair_lat_p50_sum: dict[tuple[float, float], float] = defaultdict(float)
+        pair_lat_p50_count: dict[tuple[float, float], int] = defaultdict(int)
+        pair_lat_p99_sum: dict[tuple[float, float], float] = defaultdict(float)
+        pair_lat_p99_count: dict[tuple[float, float], int] = defaultdict(int)
+        pair_lat_max_sum: dict[tuple[float, float], float] = defaultdict(float)
+        pair_lat_max_count: dict[tuple[float, float], int] = defaultdict(int)
+        pair_budget_violations: dict[tuple[float, float], int] = defaultdict(int)
+        pair_budget_observed: dict[tuple[float, float], int] = defaultdict(int)
         for ep in episodes:
             if axis_a not in ep.perturbation_config or axis_b not in ep.perturbation_config:
                 continue
@@ -333,6 +350,34 @@ def _failure_clusters(
             if ep.peak_force is not None:
                 pair_peakforce_sum[(va, vb)] += ep.peak_force
                 pair_peakforce_count[(va, vb)] += 1
+            # B-37 inference-latency aggregation. The three percentile
+            # fields are populated together by the worker (always-on
+            # measurement); we still gate each independently so a
+            # mixed dataset of pre-B-37 and post-B-37 episodes.json
+            # files renders honestly. The budget-violation rate is
+            # derived from ``metadata['inference_budget_violated']`` —
+            # we only count the episode toward the rate when it had
+            # at least one latency sample (i.e. the budget compare was
+            # actually exercised), so a cluster that mixes "budget on"
+            # with "budget off" runs reports the rate over the subset
+            # that ran with a budget.
+            if ep.inference_latency_ms_p50 is not None:
+                pair_lat_p50_sum[(va, vb)] += ep.inference_latency_ms_p50
+                pair_lat_p50_count[(va, vb)] += 1
+            if ep.inference_latency_ms_p99 is not None:
+                pair_lat_p99_sum[(va, vb)] += ep.inference_latency_ms_p99
+                pair_lat_p99_count[(va, vb)] += 1
+                # Observed denominator for the budget-violation rate:
+                # any episode whose p99 is reported has a meaningful
+                # latency measurement, so it can be the denominator
+                # for the violation-rate fraction. The numerator is
+                # the episodes whose metadata flag is True.
+                pair_budget_observed[(va, vb)] += 1
+                if bool(ep.metadata.get("inference_budget_violated", False)):
+                    pair_budget_violations[(va, vb)] += 1
+            if ep.inference_latency_ms_max is not None:
+                pair_lat_max_sum[(va, vb)] += ep.inference_latency_ms_max
+                pair_lat_max_count[(va, vb)] += 1
 
         for (va, vb), (n_total, n_success) in pair_counts.items():
             if n_total < min_cluster_size:
@@ -378,6 +423,32 @@ def _failure_clusters(
             mean_peakforce: float | None = (
                 pair_peakforce_sum[(va, vb)] / peakforce_n if peakforce_n > 0 else None
             )
+            # B-37 inference-latency aggregates. The three percentile
+            # means follow the standard partial-coverage pattern. The
+            # budget-violation rate is reported only when at least one
+            # episode in the cluster was flagged — absent (i.e.
+            # ``None``) means "no budget configured for this run, OR
+            # every episode came in under the budget". The HTML report
+            # hides the column entirely when no cluster reports a
+            # rate, so a run without --max-inference-ms produces a
+            # visually identical layout to the pre-B-37 report.
+            lat_p50_n = pair_lat_p50_count.get((va, vb), 0)
+            mean_lat_p50: float | None = (
+                pair_lat_p50_sum[(va, vb)] / lat_p50_n if lat_p50_n > 0 else None
+            )
+            lat_p99_n = pair_lat_p99_count.get((va, vb), 0)
+            mean_lat_p99: float | None = (
+                pair_lat_p99_sum[(va, vb)] / lat_p99_n if lat_p99_n > 0 else None
+            )
+            lat_max_n = pair_lat_max_count.get((va, vb), 0)
+            mean_lat_max: float | None = (
+                pair_lat_max_sum[(va, vb)] / lat_max_n if lat_max_n > 0 else None
+            )
+            budget_n = pair_budget_violations.get((va, vb), 0)
+            budget_obs = pair_budget_observed.get((va, vb), 0)
+            budget_rate: float | None = (
+                budget_n / budget_obs if budget_n > 0 and budget_obs > 0 else None
+            )
             clusters.append(
                 FailureCluster(
                     axes={axis_a: va, axis_b: vb},
@@ -398,6 +469,10 @@ def _failure_clusters(
                     mean_jerk_rms=mean_jerk,
                     mean_near_collision_count=mean_nearcol,
                     mean_peak_force=mean_peakforce,
+                    mean_inference_latency_ms_p50=mean_lat_p50,
+                    mean_inference_latency_ms_p99=mean_lat_p99,
+                    mean_inference_latency_ms_max=mean_lat_max,
+                    inference_budget_violation_rate=budget_rate,
                 )
             )
 

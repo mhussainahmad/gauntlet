@@ -289,6 +289,23 @@ Data-embed conventions:
      (report.failure_clusters | rejectattr('mean_near_collision_count', 'none') | list | length > 0)
      or (report.failure_clusters | rejectattr('mean_peak_force', 'none') | list | length > 0)
    ) %}
+{# B-37: render the inference-latency column only when at least one
+   cluster carries the per-step latency measurement. Pre-B-37
+   episodes.json (or T=0 rollouts that never reached an ``act`` call)
+   leave the field ``None`` and the column is suppressed entirely.
+   The budget-violation rate sub-column is rendered only when at
+   least one cluster reports a rate (i.e. --max-inference-ms was set
+   AND at least one episode breached). Mirrors the actuator-energy
+   conditional-column pattern so non-measured reports stay visually
+   identical. #}
+{% set any_cluster_inference_latency = report.failure_clusters
+   and report.failure_clusters
+   | rejectattr('mean_inference_latency_ms_p99', 'none')
+   | list | length > 0 %}
+{% set any_cluster_inference_budget = report.failure_clusters
+   and report.failure_clusters
+   | rejectattr('inference_budget_violation_rate', 'none')
+   | list | length > 0 %}
 <section>
   <h2>Where it failed</h2>
   {% if report.failure_clusters %}
@@ -310,6 +327,8 @@ Data-embed conventions:
           {% if any_cluster_safety %}<th class="num">Collisions / jnt excursions</th>{% endif %}
           {% if any_cluster_behavior_traj %}<th class="num">Time / path / jerk (B-02)</th>{% endif %}
           {% if any_cluster_behavior_contact %}<th class="num">Near coll. / peak force (B-02)</th>{% endif %}
+          {% if any_cluster_inference_latency %}<th class="num">Latency p50 / p99 / max (ms)</th>{% endif %}
+          {% if any_cluster_inference_budget %}<th class="num">Budget violations</th>{% endif %}
           {% if any_cluster_video %}<th>Failed-rollout videos</th>{% endif %}
         </tr>
       </thead>
@@ -429,6 +448,45 @@ Data-embed conventions:
             {% else %}
             <span class="ci">/ -</span>
             {% endif %}
+          </td>
+          {% endif %}
+          {% if any_cluster_inference_latency %}
+          {# B-37: per-step inference-latency profile. The cluster mean
+             of the per-episode p50 / p99 / max in milliseconds.
+             ``data-sort-value`` carries p99 — the deployment-blocking
+             percentile per VLA-Perf (arxiv 2602.18397). ``-`` for
+             missing telemetry rather than ``0.00``; never collapses
+             a measured-zero to the unmeasured sentinel. #}
+          <td class="num" data-sort-value="{{ cluster.mean_inference_latency_ms_p99 if cluster.mean_inference_latency_ms_p99 is not none else -1 }}">
+            {%- if cluster.mean_inference_latency_ms_p50 is not none -%}
+              {{ '%.2f'|format(cluster.mean_inference_latency_ms_p50) }}
+            {%- else -%}
+              <span class="ci">-</span>
+            {%- endif -%}
+            {% if cluster.mean_inference_latency_ms_p99 is not none %}
+            <span class="ci">/ {{ '%.2f'|format(cluster.mean_inference_latency_ms_p99) }}</span>
+            {% else %}
+            <span class="ci">/ -</span>
+            {% endif %}
+            {% if cluster.mean_inference_latency_ms_max is not none %}
+            <span class="ci">/ {{ '%.2f'|format(cluster.mean_inference_latency_ms_max) }}</span>
+            {% else %}
+            <span class="ci">/ -</span>
+            {% endif %}
+          </td>
+          {% endif %}
+          {% if any_cluster_inference_budget %}
+          {# B-37: fraction of cluster's episodes whose p99 exceeded
+             the ``--max-inference-ms`` budget at run time. Soft-flag
+             column — the run never aborts on a violation, so the
+             user sees every offender. ``-`` for clusters where no
+             episode breached the budget (or the budget was off). #}
+          <td class="num" data-sort-value="{{ cluster.inference_budget_violation_rate if cluster.inference_budget_violation_rate is not none else -1 }}">
+            {%- if cluster.inference_budget_violation_rate is not none -%}
+              {{ '%.2f'|format(cluster.inference_budget_violation_rate) }}
+            {%- else -%}
+              <span class="ci">-</span>
+            {%- endif -%}
           </td>
           {% endif %}
           {% if any_cluster_video %}
