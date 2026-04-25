@@ -114,13 +114,29 @@ def _make_random_policy() -> Any:
 
 
 def test_default_runner_keeps_existing_episode_schema() -> None:
-    """``Runner(record_video=False)`` produces Episodes shaped exactly as pre-PR.
+    """``Runner(record_video=False)`` preserves the day-1 Episode contract.
 
-    The expected shape is the pre-PR field set + the new
-    ``video_path`` field defaulted to ``None``. If a future change
-    promotes ``record_video`` to default-on or routes any non-None
-    value into ``video_path`` without an explicit opt-in, this test
-    fails at the field check below.
+    Back-compat-only intent: the fields that the original
+    rollout-video PR promised to keep (``suite_name``, ``cell_index``,
+    ``episode_index``, ``seed``, ``perturbation_config``, ``success``,
+    ``terminated``, ``truncated``, ``step_count``, ``total_reward``,
+    ``metadata``, ``video_path``) MUST still be present on
+    :class:`Episode`, and the ones that were required on day 1 MUST
+    still be required (no default added). Optional-since-day-1
+    fields (``metadata``, ``video_path``) only need to be present —
+    their default semantics are checked separately at runtime.
+
+    The schema is allowed to GROW: new optional metric columns
+    (e.g. ``action_variance``, ``failure_score``, ``n_collisions``,
+    behavioural metrics, etc.) are intentional polish additions and
+    must NOT make this test fail. Do not reintroduce a literal
+    full-field-set equality check here — that pattern goes stale on
+    every polish PR. Derive expectations from
+    :attr:`Episode.model_fields` instead.
+
+    The runtime invariant — ``video_path`` is ``None`` on the
+    opt-out path — is a separate contract and is still asserted
+    below.
     """
     suite = Suite(
         name="backcompat-suite",
@@ -134,26 +150,37 @@ def test_default_runner_keeps_existing_episode_schema() -> None:
     episodes = runner.run(policy_factory=_make_random_policy, suite=suite)
 
     assert len(episodes) == 2
-    expected_field_set = {
-        "suite_name",
-        "cell_index",
-        "episode_index",
-        "seed",
-        "perturbation_config",
-        "success",
-        "terminated",
-        "truncated",
-        "step_count",
-        "total_reward",
-        "metadata",
-        "video_path",  # NEW — defaults to None for the opt-out path
-    }
+    # Day-1 required fields — promised never to gain a default.
+    historical_required: frozenset[str] = frozenset(
+        {
+            "suite_name",
+            "cell_index",
+            "episode_index",
+            "seed",
+            "perturbation_config",
+            "success",
+            "terminated",
+            "truncated",
+            "step_count",
+            "total_reward",
+        }
+    )
+    # Day-1 optional fields — promised to stay present (default semantics
+    # may evolve, but the field name is a public surface).
+    historical_optional: frozenset[str] = frozenset({"metadata", "video_path"})
+
+    fields = type(episodes[0]).model_fields
+    for name in historical_required:
+        assert name in fields, f"day-1 required field {name!r} dropped from Episode"
+        assert fields[name].is_required(), (
+            f"day-1 required field {name!r} silently gained a default; "
+            "back-compat says it MUST remain required"
+        )
+    for name in historical_optional:
+        assert name in fields, f"day-1 optional field {name!r} dropped from Episode"
+
     for ep in episodes:
-        # Field set check: pydantic's ``model_fields`` is the canonical
-        # schema surface; if any field is added/dropped, this is the
-        # earliest possible failure.
-        assert set(type(ep).model_fields.keys()) == expected_field_set
-        # The new field MUST be None when the user did not opt in.
+        # Runtime contract — opt-out path leaves video_path at the default.
         assert ep.video_path is None
 
 

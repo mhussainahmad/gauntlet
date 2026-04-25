@@ -565,39 +565,73 @@ def test_cache_stats_zero_when_no_cache_dir() -> None:
 
 
 def test_no_cache_episode_shape_pinned() -> None:
-    """The no-cache path must keep the Episode field set unchanged.
+    """The no-cache path must keep the day-1 Episode contract intact.
 
-    Field-by-field check on a fixed-seed run; if a future refactor adds
-    or drops an Episode field this test fails first, before any
-    byte-equality assertion further downstream goes mysteriously red.
+    Back-compat-only intent: the pre-cache field set
+    (``suite_name``, ``cell_index``, ``episode_index``, ``seed``,
+    ``perturbation_config``, ``success``, ``terminated``,
+    ``truncated``, ``step_count``, ``total_reward``, ``metadata``,
+    ``video_path``) MUST still exist on :class:`Episode`, and the
+    fields that were required on day 1 MUST still be required (no
+    default added). Optional-since-day-1 fields are checked for
+    presence only.
+
+    The schema is allowed to GROW: subsequent polish work added
+    optional metric columns (B-21 actuator energy, B-18
+    ``action_variance``, B-30 safety violations, B-04
+    ``failure_score`` / ``failure_alarm``, B-02 behavioural metrics,
+    B-22 provenance trio, B-28 ``source``, ...). Those additions are
+    intentional and must NOT fail this test. Do not reintroduce a
+    literal full-field-set equality check here — that pattern goes
+    stale on every polish PR. Derive expectations from
+    :attr:`Episode.model_fields` instead, and bump
+    ``CACHE_SCHEMA_VERSION`` in :mod:`gauntlet.runner.cache` only
+    when a CACHED Episode payload would deserialise into the WRONG
+    fields under the new schema (i.e. an actually-breaking change).
+
+    Runtime invariants — ``video_path is None`` on the no-cache,
+    no-video path, and the canonical no-opt-in ``metadata`` echo —
+    are separate contracts and are still asserted below.
     """
     suite = _make_suite(seed=12345, episodes_per_cell=1)
     runner = Runner(n_workers=1, env_factory=_make_fast_env)
     episodes = runner.run(policy_factory=_make_scripted_policy, suite=suite)
     assert len(episodes) == suite.num_cells()
 
-    expected_fields = {
-        "suite_name",
-        "cell_index",
-        "episode_index",
-        "seed",
-        "perturbation_config",
-        "success",
-        "terminated",
-        "truncated",
-        "step_count",
-        "total_reward",
-        "metadata",
-        "video_path",
-    }
+    # Day-1 required fields — promised never to gain a default.
+    historical_required: frozenset[str] = frozenset(
+        {
+            "suite_name",
+            "cell_index",
+            "episode_index",
+            "seed",
+            "perturbation_config",
+            "success",
+            "terminated",
+            "truncated",
+            "step_count",
+            "total_reward",
+        }
+    )
+    # Day-1 optional fields — promised to stay present.
+    historical_optional: frozenset[str] = frozenset({"metadata", "video_path"})
+
+    fields = Episode.model_fields
+    for name in historical_required:
+        assert name in fields, (
+            f"day-1 required field {name!r} dropped from Episode; if you "
+            "intentionally renamed it, bump CACHE_SCHEMA_VERSION in "
+            "src/gauntlet/runner/cache.py to invalidate older cache entries."
+        )
+        assert fields[name].is_required(), (
+            f"day-1 required field {name!r} silently gained a default; "
+            "back-compat says it MUST remain required."
+        )
+    for name in historical_optional:
+        assert name in fields, f"day-1 optional field {name!r} dropped from Episode"
+
     for ep in episodes:
         dumped = ep.model_dump()
-        assert set(dumped.keys()) == expected_fields, (
-            "Episode schema drifted; expected the pre-cache field set. "
-            "If you added a field, bump CACHE_SCHEMA_VERSION in "
-            "src/gauntlet/runner/cache.py to invalidate older cache "
-            "entries and update this test."
-        )
         # video_path stays None on the no-cache, no-video path.
         assert dumped["video_path"] is None
         # master_seed echo is the only metadata key the Runner writes
