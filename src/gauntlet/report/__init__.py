@@ -18,9 +18,11 @@ nothing in this package performs I/O.
 
 from __future__ import annotations
 
+from gauntlet.report.abstention import compute_abstention_metrics as compute_abstention_metrics
 from gauntlet.report.analyze import build_report as build_report
 from gauntlet.report.html import render_html as render_html
 from gauntlet.report.html import write_html as write_html
+from gauntlet.report.schema import AbstentionMetrics as AbstentionMetrics
 from gauntlet.report.schema import AxisBreakdown as AxisBreakdown
 from gauntlet.report.schema import CellBreakdown as CellBreakdown
 from gauntlet.report.schema import FailureCluster as FailureCluster
@@ -29,6 +31,7 @@ from gauntlet.report.schema import Report as Report
 from gauntlet.report.schema import SensitivityIndex as SensitivityIndex
 
 __all__ = [
+    "AbstentionMetrics",
     "AxisBreakdown",
     "CellBreakdown",
     "FailureCluster",
@@ -36,6 +39,7 @@ __all__ = [
     "Report",
     "SensitivityIndex",
     "build_report",
+    "compute_abstention_metrics",
     "render_html",
     "write_html",
 ]

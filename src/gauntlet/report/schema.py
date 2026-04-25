@@ -29,6 +29,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = [
+    "AbstentionMetrics",
     "AxisBreakdown",
     "CellBreakdown",
     "FailureCluster",
@@ -36,6 +37,47 @@ __all__ = [
     "Report",
     "SensitivityIndex",
 ]
+
+
+class AbstentionMetrics(BaseModel):
+    """Selective-prediction metrics for the B-01 conformal detector (B-04).
+
+    Populated only when at least one episode in the report carries a
+    :attr:`gauntlet.runner.Episode.failure_score` — i.e. the upstream
+    conformal detector ran on this dataset. ``None`` on
+    :attr:`Report.abstention_metrics` means "B-01 never ran here";
+    distinct from a zero-valued metric (which would mean "ran, but the
+    detector is no better than chance").
+
+    Field semantics — the abstention-vs-failure framing:
+
+    * ``n_with_score`` — number of episodes whose ``failure_score``
+      was populated. The denominator the AURC is computed over.
+    * ``aurc`` — area under the **coverage-accuracy** curve (NOT the
+      textbook risk-coverage AURC; see the module docstring on
+      :mod:`gauntlet.report.abstention` for the convention rationale).
+      Higher is better; perfect detector ≈ 1.0, useless detector ≈
+      overall success rate.
+    * ``abstention_corrected_success_rate`` — success rate among the
+      episodes the policy did NOT abstain on (``failure_alarm is not
+      True``). ``None`` when every scored episode triggered the alarm
+      and the kept set is empty.
+    * ``n_correctly_abstained`` — true positives: failed episodes the
+      detector flagged in advance.
+    * ``n_falsely_abstained`` — false positives: successful episodes
+      the detector flagged. The policy "left value on the table".
+
+    Refs: FIPER (arxiv 2510.09459, NeurIPS 2025), FAIL-Detect
+    (arxiv 2503.08558).
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, ser_json_inf_nan="strings")
+
+    n_with_score: int
+    aurc: float
+    abstention_corrected_success_rate: float | None = None
+    n_correctly_abstained: int
+    n_falsely_abstained: int
 
 
 class AxisBreakdown(BaseModel):
@@ -289,3 +331,14 @@ class Report(BaseModel):
     # B-30 round-trip via ``Report.model_validate`` because the field
     # defaults to ``None``.
     success_safe_rate: float | None = None
+    # B-04: calibration-aware abstention scoring. Populated only when at
+    # least one episode in the dataset carries a
+    # :attr:`gauntlet.runner.Episode.failure_score` (i.e. the B-01
+    # conformal detector ran upstream); ``None`` otherwise. Old
+    # report.json files written before B-04 round-trip via
+    # ``Report.model_validate`` because the field defaults to ``None``.
+    # The metric is only meaningful when the upstream calibration is
+    # itself trustworthy — see ``docs/backlog.md`` B-04 anti-feature
+    # (double-failure surface area). Refs: FIPER (arxiv 2510.09459),
+    # FAIL-Detect (arxiv 2503.08558).
+    abstention_metrics: AbstentionMetrics | None = None
