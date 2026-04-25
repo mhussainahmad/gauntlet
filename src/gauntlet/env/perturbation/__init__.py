@@ -25,6 +25,9 @@ from gauntlet.env.perturbation.axes import (
     DEFAULT_BOUNDS as DEFAULT_BOUNDS,
 )
 from gauntlet.env.perturbation.axes import (
+    OBJECT_SWAP_CLASSES as OBJECT_SWAP_CLASSES,
+)
+from gauntlet.env.perturbation.axes import (
     axis_for as axis_for,
 )
 from gauntlet.env.perturbation.axes import (
@@ -53,6 +56,9 @@ from gauntlet.env.perturbation.axes import (
 )
 from gauntlet.env.perturbation.axes import (
     object_initial_pose_y as object_initial_pose_y,
+)
+from gauntlet.env.perturbation.axes import (
+    object_swap as object_swap,
 )
 from gauntlet.env.perturbation.axes import (
     object_texture as object_texture,
@@ -98,6 +104,7 @@ AXIS_NAMES: Final[tuple[str, ...]] = (
     "initial_state_ood",
     "image_attack",
     "instruction_paraphrase",
+    "object_swap",
 )
 
 
@@ -107,6 +114,7 @@ __all__ = [
     "AXIS_KIND_INT",
     "AXIS_NAMES",
     "DEFAULT_BOUNDS",
+    "OBJECT_SWAP_CLASSES",
     "AxisKind",
     "AxisSampler",
     "PerturbationAxis",
@@ -123,5 +131,6 @@ __all__ = [
     "make_int_sampler",
     "object_initial_pose_x",
     "object_initial_pose_y",
+    "object_swap",
     "object_texture",
 ]

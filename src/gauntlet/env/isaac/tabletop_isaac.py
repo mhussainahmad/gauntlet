@@ -163,6 +163,11 @@ class IsaacSimTabletopEnv:
             "object_initial_pose_x",
             "object_initial_pose_y",
             "distractor_count",
+            # B-06 — declared so the loader / linter route this axis
+            # through ``VISUAL_ONLY_AXES``. Isaac ships no alternate
+            # asset library (anti-feature in the backlog), so a suite
+            # naming ``object_swap`` on this backend is rejected.
+            "object_swap",
         }
     )
     # State-only first cut (RFC-009 §6.6). The four cosmetic axes
@@ -173,12 +178,17 @@ class IsaacSimTabletopEnv:
     # YAML naming only cosmetic axes on ``tabletop-isaac`` is
     # rejected at load time. Same shape Genesis had pre-RFC-008 and
     # PyBullet had pre-RFC-006.
+    #
+    # B-06 — ``object_swap`` joins the cosmetic set on Isaac too: the
+    # state-only first cut has no asset-library coverage and cross-
+    # backend asset parity is the explicit anti-feature in the backlog.
     VISUAL_ONLY_AXES: ClassVar[frozenset[str]] = frozenset(
         {
             "lighting_intensity",
             "camera_offset_x",
             "camera_offset_y",
             "object_texture",
+            "object_swap",
         }
     )
 

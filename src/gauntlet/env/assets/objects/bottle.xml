@@ -1,0 +1,7 @@
+<!-- B-06 object-swap bottle. Single primitive ellipsoid (deep-blue
+     glass) — vertical major axis approximates a small bottle without
+     needing a compound neck/body. Hidden by default until the swap
+     axis selects this class. -->
+<geom name="swap_bottle_geom" type="ellipsoid" size="0.022 0.022 0.045"
+      rgba="0.15 0.25 0.65 0" mass="0.1"
+      contype="0" conaffinity="0"/>

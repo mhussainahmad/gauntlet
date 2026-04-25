@@ -56,6 +56,7 @@ from gymnasium import spaces
 from numpy.typing import NDArray
 
 from gauntlet.env.base import CameraSpec
+from gauntlet.env.perturbation import OBJECT_SWAP_CLASSES
 
 __all__ = ["TabletopEnv"]
 
@@ -72,6 +73,21 @@ N_DISTRACTOR_SLOTS: Final[int] = 10
 # so the material colour is what shows.
 _CUBE_MATERIAL_DEFAULT: Final[str] = "cube_mat"
 _CUBE_MATERIAL_ALT: Final[str] = "cube_alt_mat"
+
+# B-06 — geom names for the categorically-different object-swap
+# alternates co-resident inside the ``cube`` body in
+# ``assets/tabletop.xml``. Order matches the canonical class registry
+# :data:`gauntlet.env.perturbation.OBJECT_SWAP_CLASSES`: index 0 is the
+# baseline cube (``cube_geom``); indices 1..4 reveal the matching alt
+# geom and hide the cube. Each per-class MJCF fragment also lives under
+# ``assets/objects/`` for documentation / single-source-of-truth.
+_OBJECT_SWAP_GEOM_NAMES: Final[tuple[str, ...]] = (
+    "cube_geom",
+    "swap_mug_geom",
+    "swap_banana_geom",
+    "swap_screwdriver_geom",
+    "swap_bottle_geom",
+)
 
 # Observation / action type aliases for the gym.Env generic parameters.
 # We keep ``Any`` inside ``NDArray`` here only to match ``gauntlet.policy.base``;
@@ -130,6 +146,10 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
             # B-32 — initial-state OOD shift axis (LIBERO-PRO/Plus framing).
             # See ``set_initial_state_ood_prior`` for prior configuration.
             "initial_state_ood",
+            # B-06 — categorical object-swap axis (LIBERO-PRO inspired).
+            # MuJoCo-only; non-MuJoCo backends list it in
+            # ``VISUAL_ONLY_AXES`` so the loader rejects mixing.
+            "object_swap",
         }
     )
     VISUAL_ONLY_AXES: ClassVar[frozenset[str]] = frozenset()
@@ -262,6 +282,12 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         self._cube_material_default_id: int = 0
         self._cube_material_alt_id: int = 0
         self._distractor_geom_ids: tuple[int, ...] = ()
+        # B-06 — geom ids for the object-swap registry, parallel to
+        # :data:`_OBJECT_SWAP_GEOM_NAMES`. Index 0 is ``cube_geom``
+        # (also stored on ``self._cube_geom_id`` for legacy callers);
+        # indices 1..4 are the alt geoms whose visibility / collision
+        # the apply branch toggles.
+        self._object_swap_geom_ids: tuple[int, ...] = ()
         self._cache_indices()
 
         # Baseline snapshot of every model field a perturbation may touch.
@@ -285,6 +311,14 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         # YAML ``prior_mean`` / ``prior_std`` axis fields).
         self._ood_prior_mean: tuple[float, float, float] = type(self)._OOD_DEFAULT_PRIOR_MEAN
         self._ood_prior_std: tuple[float, float, float] = type(self)._OOD_DEFAULT_PRIOR_STD
+
+        # B-06 — active object-swap class registry. Defaults to the
+        # canonical 5-class list; suite YAMLs that subset (e.g.
+        # ``values: [cube, mug, banana]``) rebind the registry via
+        # :meth:`set_object_swap_classes` so the index handed to
+        # :meth:`set_perturbation` resolves to the right MJCF geom.
+        # Stored as a tuple of class names in registry order.
+        self._object_swap_classes: tuple[str, ...] = OBJECT_SWAP_CLASSES
         # Snapshot of the seed last passed to :meth:`reset`. Used to
         # build a deterministic, isolated sub-stream for OOD sign draws
         # so that adding the ``initial_state_ood`` axis to a queued set
@@ -407,6 +441,18 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
             distractor_ids.append(gid)
         self._distractor_geom_ids = tuple(distractor_ids)
 
+        # B-06 — resolve the object-swap geom ids in registry order.
+        # ``cube_geom`` already resolved above; we re-look-it-up here so
+        # the index map ``OBJECT_SWAP_CLASSES[i] -> _object_swap_geom_ids[i]``
+        # stays a single lookup instead of a special-case branch on i==0.
+        swap_ids: list[int] = []
+        for geom_name in _OBJECT_SWAP_GEOM_NAMES:
+            gid = int(mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_GEOM, geom_name))
+            if gid < 0:
+                raise RuntimeError(f"expected object-swap geom '{geom_name}' missing from MJCF")
+            swap_ids.append(gid)
+        self._object_swap_geom_ids = tuple(swap_ids)
+
         # Resolve injected multi-cam ids (no-op when ``cameras=None``).
         # Each injected element is named ``cam_<spec.name>`` to avoid
         # colliding with the existing ``main`` camera.
@@ -434,6 +480,7 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         m = self._model
         cube_g = self._cube_geom_id
         d_ids = list(self._distractor_geom_ids)
+        swap_ids = list(self._object_swap_geom_ids)
         cam = self._main_cam_id
         snap: dict[str, NDArray[np.float64]] = {
             "light_diffuse_0": np.array(m.light_diffuse[0], dtype=np.float64).copy(),
@@ -451,6 +498,21 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
             "distractor_conaffinity": np.array(
                 [m.geom_conaffinity[g] for g in d_ids], dtype=np.float64
             ).copy(),
+            # B-06 — visibility (rgba) + collision (contype/conaffinity)
+            # baseline for every object-swap geom. Index order matches
+            # ``_OBJECT_SWAP_GEOM_NAMES``: index 0 is the cube (visible
+            # + colliding by default), 1..4 are the alts (hidden +
+            # non-colliding by default). The apply branch flips these
+            # per cell; restore_baseline copies them back.
+            "object_swap_rgba": np.array(
+                [m.geom_rgba[g] for g in swap_ids], dtype=np.float64
+            ).copy(),
+            "object_swap_contype": np.array(
+                [m.geom_contype[g] for g in swap_ids], dtype=np.float64
+            ).copy(),
+            "object_swap_conaffinity": np.array(
+                [m.geom_conaffinity[g] for g in swap_ids], dtype=np.float64
+            ).copy(),
         }
         self._baseline = snap
 
@@ -466,6 +528,7 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         cube_g = self._cube_geom_id
         cam = self._main_cam_id
         d_ids = self._distractor_geom_ids
+        swap_ids = self._object_swap_geom_ids
         m.light_diffuse[0] = self._baseline["light_diffuse_0"]
         m.cam_pos[cam] = self._baseline["cam_pos_main"]
         m.geom_rgba[cube_g] = self._baseline["cube_geom_rgba"]
@@ -474,6 +537,14 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
             m.geom_rgba[gid] = self._baseline["distractor_rgba"][i]
             m.geom_contype[gid] = int(self._baseline["distractor_contype"][i])
             m.geom_conaffinity[gid] = int(self._baseline["distractor_conaffinity"][i])
+        # B-06 — restore object-swap geom visibility / collision so a
+        # prior episode's swap class cannot leak into the next reset.
+        # Cube (index 0) returns to visible + colliding; alts return to
+        # hidden + non-colliding.
+        for i, gid in enumerate(swap_ids):
+            m.geom_rgba[gid] = self._baseline["object_swap_rgba"][i]
+            m.geom_contype[gid] = int(self._baseline["object_swap_contype"][i])
+            m.geom_conaffinity[gid] = int(self._baseline["object_swap_conaffinity"][i])
 
     # ---------------------------------------------------------- perturbation
 
@@ -507,7 +578,52 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
             # encodes "how many sigma out", with the sign drawn per-dim
             # from the env seed at apply time.
             raise ValueError(f"initial_state_ood: sigma multiplier must be >= 0; got {value}")
+        if name == "object_swap":
+            # B-06 — index into the active object-swap registry. Float
+            # to int via banker's rounding (matching the categorical
+            # axis convention) so a fractional value like 1.5 rounds to
+            # the nearest legal slot. Out-of-range indices fail loud
+            # rather than silently snapping to a sentinel class.
+            idx = round(float(value))
+            n_classes = len(self._object_swap_classes)
+            if idx < 0 or idx >= n_classes:
+                raise ValueError(
+                    f"object_swap: index {idx} (rounded from {value!r}) out of "
+                    f"range [0, {n_classes}); registry currently has "
+                    f"{n_classes} class(es): {list(self._object_swap_classes)}"
+                )
         self._pending_perturbations[name] = float(value)
+
+    def set_object_swap_classes(self, classes: tuple[str, ...]) -> None:
+        """Rebind the active object-swap class registry (B-06).
+
+        ``classes`` is a tuple of class names in the order the suite
+        YAML's ``values:`` shape declared them. Each entry must appear
+        in the canonical
+        :data:`gauntlet.env.perturbation.OBJECT_SWAP_CLASSES` registry
+        (the names map to MJCF geoms via the
+        :data:`_OBJECT_SWAP_GEOM_NAMES` table). Calling this method
+        does NOT touch the model — the index → geom dispatch happens
+        at :meth:`_apply_one_perturbation` time.
+
+        Raises:
+            ValueError: if ``classes`` is empty or contains a name not
+                in the canonical registry.
+        """
+        if len(classes) == 0:
+            raise ValueError("object_swap: classes registry must be non-empty")
+        unknown = [c for c in classes if c not in OBJECT_SWAP_CLASSES]
+        if unknown:
+            raise ValueError(
+                f"object_swap: unknown class(es) {unknown}; legal names are "
+                f"{list(OBJECT_SWAP_CLASSES)}"
+            )
+        self._object_swap_classes = tuple(classes)
+
+    @property
+    def object_swap_classes(self) -> tuple[str, ...]:
+        """Return the active object-swap registry (B-06)."""
+        return self._object_swap_classes
 
     def set_initial_state_ood_prior(
         self,
@@ -608,6 +724,48 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
                     m.geom_rgba[gid] = self._baseline["distractor_rgba"][i]
                     m.geom_contype[gid] = int(self._baseline["distractor_contype"][i])
                     m.geom_conaffinity[gid] = int(self._baseline["distractor_conaffinity"][i])
+        elif name == "object_swap":
+            # B-06 — replace the cube's visible / colliding geom with
+            # the registry's selected class. The body, freejoint, qpos
+            # slot and grasp-radius constants stay valid because every
+            # alt geom is co-resident inside the ``cube`` body
+            # (assets/tabletop.xml). Index 0 (``cube``) is the baseline
+            # — restore_baseline already put us there, so the
+            # explicit-toggle below is a redundancy belt + braces.
+            idx = round(float(value))
+            n_classes = len(self._object_swap_classes)
+            # set_perturbation already validated the index range; this
+            # check is defence in depth against a direct caller that
+            # bypassed the queue.
+            if idx < 0 or idx >= n_classes:
+                raise ValueError(f"object_swap apply: index {idx} out of range [0, {n_classes})")
+            target_class = self._object_swap_classes[idx]
+            try:
+                geom_index = OBJECT_SWAP_CLASSES.index(target_class)
+            except ValueError as exc:  # pragma: no cover — set_object_swap_classes guards
+                raise ValueError(
+                    f"object_swap apply: class {target_class!r} not in canonical "
+                    f"registry {list(OBJECT_SWAP_CLASSES)}"
+                ) from exc
+            for i, gid in enumerate(self._object_swap_geom_ids):
+                if i == geom_index:
+                    # Reveal: alpha to 1.0 (preserve baseline RGB),
+                    # collision flags on so the gripper can interact
+                    # with this geom the same way it does with the
+                    # cube. Cube (index 0) keeps its baseline collision
+                    # flags (contype/conaffinity == 1) on this branch.
+                    base_rgba = self._baseline["object_swap_rgba"][i].copy()
+                    base_rgba[3] = 1.0
+                    m.geom_rgba[gid] = base_rgba
+                    m.geom_contype[gid] = 1
+                    m.geom_conaffinity[gid] = 1
+                else:
+                    # Hide every other class: alpha to 0, collision off.
+                    hidden_rgba = self._baseline["object_swap_rgba"][i].copy()
+                    hidden_rgba[3] = 0.0
+                    m.geom_rgba[gid] = hidden_rgba
+                    m.geom_contype[gid] = 0
+                    m.geom_conaffinity[gid] = 0
 
     # --------------------------------------------------------------- gym API
 

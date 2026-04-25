@@ -1,0 +1,9 @@
+<!-- B-06 object-swap mug. Single primitive cylinder injected into the
+     cube body so the env's cached body id, qpos slot and grasp logic
+     stay valid. Distinguishable colour (porcelain off-white) for
+     downstream renderers. Same half-extent footprint as the cube
+     (0.025 m radius / half-height) so contact and grasp tolerances
+     read identically across swaps. -->
+<geom name="swap_mug_geom" type="cylinder" size="0.025 0.025"
+      rgba="0.95 0.92 0.85 0" mass="0.1"
+      contype="0" conaffinity="0"/>
