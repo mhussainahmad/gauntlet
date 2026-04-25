@@ -37,7 +37,14 @@ jobs:
       # de-selected; any accidental torch import in gauntlet.core would
       # trigger ModuleNotFoundError here.
       - name: Sync dependencies (no extras)
-        run: uv sync --dev --python ${{ matrix.python-version }}
+        # ``--reinstall-package gauntlet`` forces uv to rebuild the
+        # editable wheel for the local project on every run. Entry-point
+        # additions to ``[project.entry-points.*]`` in pyproject.toml do
+        # NOT change uv.lock, so without this flag uv reuses a cached
+        # editable build and the new entry-points never land in
+        # ``.venv/.../gauntlet-*.dist-info/entry_points.txt``. The
+        # plugin-discovery tests then see an empty registry and fail.
+        run: uv sync --dev --python ${{ matrix.python-version }} --reinstall-package gauntlet
 
       - name: Lint (ruff)
         run: uv run ruff check .
@@ -72,7 +79,7 @@ jobs:
         run: uv python install ${{ matrix.python-version }}
 
       - name: Sync dependencies (with hf extra + hf-dev group)
-        run: uv sync --extra hf --group hf-dev --python ${{ matrix.python-version }}
+        run: uv sync --extra hf --group hf-dev --python ${{ matrix.python-version }} --reinstall-package gauntlet
 
       # hf-tests mock at the transformers ``from_pretrained`` seam — no
       # real weights downloaded, no GPU needed. See RFC-001 §6.
@@ -100,7 +107,7 @@ jobs:
         run: uv python install ${{ matrix.python-version }}
 
       - name: Sync dependencies (with lerobot extra + lerobot-dev group)
-        run: uv sync --extra lerobot --group lerobot-dev --python ${{ matrix.python-version }}
+        run: uv sync --extra lerobot --group lerobot-dev --python ${{ matrix.python-version }} --reinstall-package gauntlet
 
       - name: Run lerobot tests
         run: uv run pytest -m lerobot
@@ -126,7 +133,7 @@ jobs:
         run: uv python install ${{ matrix.python-version }}
 
       - name: Sync dependencies (with [monitor] extra + monitor-dev group)
-        run: uv sync --extra monitor --group monitor-dev --python ${{ matrix.python-version }}
+        run: uv sync --extra monitor --group monitor-dev --python ${{ matrix.python-version }} --reinstall-package gauntlet
 
       - name: Run monitor-marked tests
         run: uv run pytest -m monitor
@@ -158,7 +165,7 @@ jobs:
         run: uv python install ${{ matrix.python-version }}
 
       - name: Sync dependencies (with [video] extra + video-dev group)
-        run: uv sync --extra video --group video-dev --python ${{ matrix.python-version }}
+        run: uv sync --extra video --group video-dev --python ${{ matrix.python-version }} --reinstall-package gauntlet
 
       - name: Run video-marked tests
         run: uv run pytest -m video tests/video/ -q
@@ -189,6 +196,7 @@ jobs:
           --extra pybullet
           --group pybullet-dev
           --python ${{ matrix.python-version }}
+          --reinstall-package gauntlet
 
       - name: Run pybullet-marked tests
         run: uv run pytest -m pybullet -q
@@ -219,6 +227,7 @@ jobs:
           --extra genesis
           --group genesis-dev
           --python ${{ matrix.python-version }}
+          --reinstall-package gauntlet
 
       - name: Run genesis-marked tests
         run: uv run pytest -m genesis -q
@@ -256,6 +265,7 @@ jobs:
           --extra ros2
           --group ros2-dev
           --python ${{ matrix.python-version }}
+          --reinstall-package gauntlet
 
       - name: Run ros2-marked tests (rclpy mocked at module boundary)
         run: uv run pytest -m ros2 -q
@@ -300,6 +310,7 @@ jobs:
           --extra isaac
           --group isaac-dev
           --python ${{ matrix.python-version }}
+          --reinstall-package gauntlet
 
       - name: Run isaac-marked tests (zero-collection tolerated)
         # No tests carry the `isaac` marker in this PR (RFC-009 §8 —
@@ -343,7 +354,7 @@ jobs:
       # genesis, isaacsim) are audited in their own backend jobs by
       # virtue of being installed there.
       - name: Sync core dependencies (no extras)
-        run: uv sync --dev --python 3.11
+        run: uv sync --dev --python 3.11 --reinstall-package gauntlet
 
       # Project-mode pip-audit: scans the resolved dependency tree for
       # the gauntlet project at the given path. ``--vulnerability-service
