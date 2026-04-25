@@ -33,7 +33,9 @@ from gauntlet.report.schema import (
     FailureCluster,
     Heatmap2D,
     Report,
+    SensitivityIndex,
 )
+from gauntlet.report.sobol_indices import compute_sobol_indices
 from gauntlet.report.wilson import DEFAULT_CONFIDENCE, wilson_interval
 from gauntlet.runner.episode import Episode
 
@@ -321,6 +323,7 @@ def build_report(
     min_cluster_size: int = 3,
     suite_env: str | None = None,
     confidence: float = DEFAULT_CONFIDENCE,
+    sampling: str | None = None,
 ) -> Report:
     """Aggregate a list of :class:`Episode` into a :class:`Report`.
 
@@ -344,6 +347,13 @@ def build_report(
             interval attached to every per-cell, per-axis-value, and
             failure-cluster rate (B-03). Defaults to
             :data:`DEFAULT_CONFIDENCE` (0.95). Must be in ``(0, 1)``.
+        sampling: Suite sampling mode (``"sobol"``, ``"lhs"``,
+            ``"cartesian"`` ...) carried through to the per-axis Sobol
+            sensitivity indices (B-19). Anything other than
+            ``"sobol"`` (including the default ``None``) tags the
+            indices ``approximate=True`` so the HTML report can warn
+            that the sample structure is not the quasi-MC grid Sobol
+            indices were derived for.
 
     Returns:
         A fully populated :class:`Report`.
@@ -391,6 +401,22 @@ def build_report(
     )
     heatmap_2d = _heatmaps_2d(episodes, axis_names)
 
+    sensitivity_indices: dict[str, SensitivityIndex] | None
+    if axis_names:
+        approximate = sampling != "sobol"
+        raw = compute_sobol_indices(episodes, axis_names)
+        sensitivity_indices = {
+            name: SensitivityIndex(
+                first_order=raw[name][0],
+                total_order=raw[name][1],
+                approximate=approximate,
+            )
+            for name in axis_names
+            if name in raw
+        }
+    else:
+        sensitivity_indices = None
+
     return Report(
         suite_name=suite_name,
         suite_env=suite_env,
@@ -403,4 +429,5 @@ def build_report(
         overall_success_rate=overall_success_rate,
         overall_failure_rate=overall_failure_rate,
         cluster_multiple=cluster_multiple,
+        sensitivity_indices=sensitivity_indices,
     )

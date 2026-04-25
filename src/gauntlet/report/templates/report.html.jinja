@@ -297,6 +297,29 @@ Data-embed conventions:
   {% endif %}
 </section>
 
+{# ─── 2b. Per-axis Sobol sensitivity bar (B-19) ───
+   "Which axis matters most" — single horizontal bar of total-order
+   indices, sorted descending. Sits above the per-axis success-rate
+   strip so the reader sees the *ranking* before the rate-per-bucket
+   detail. Bar colour is Hairline chrome (NOT the pass/fail palette —
+   DESIGN.md Two-System Rule: chrome and semantic vocabularies never
+   blend). When ``approximate`` is set (any non-Sobol suite) the
+   subtitle warns the indices are an indicator, not a calibrated
+   estimate. #}
+{% if report.sensitivity_indices %}
+{%- set _idx_list = report.sensitivity_indices.values() | list -%}
+{%- set _approx = _idx_list and _idx_list[0].approximate -%}
+<section>
+  <h2>Per-axis sensitivity (Sobol)</h2>
+  {% if _approx %}
+  <p class="subtle">Approximate — suite sampling is cartesian, not Sobol-quasi-MC.</p>
+  {% endif %}
+  <div class="chart-card" style="max-width:640px">
+    <canvas id="sobol-sensitivity"></canvas>
+  </div>
+</section>
+{% endif %}
+
 {# ─── 3. Per-axis bar charts ─── #}
 <section>
   <h2>Per-axis success rate</h2>
@@ -536,8 +559,64 @@ Data-embed conventions:
     });
   }
 
+  function renderSobol() {
+    // B-19: horizontal bar of total-order Sobol indices per axis,
+    // sorted descending. Hairline chrome bar (DESIGN.md Two-System
+    // Rule — never the pass/fail palette here). ``null`` indices
+    // (Var(Y) == 0 on all-success / all-fail runs) are skipped.
+    const canvas = document.getElementById('sobol-sensitivity');
+    if (!canvas) return;
+    const indices = data.sensitivity_indices || {};
+    const rows = Object.keys(indices)
+      .map(function (k) {
+        const ent = indices[k];
+        return {
+          name: k,
+          first: ent.first_order,
+          total: ent.total_order,
+        };
+      })
+      .filter(function (r) { return r.total !== null && r.total !== undefined; })
+      .sort(function (a, b) { return b.total - a.total; });
+    if (rows.length === 0) return;
+    new Chart(canvas, {
+      type: 'bar',
+      data: {
+        labels: rows.map(function (r) { return r.name; }),
+        datasets: [{
+          label: 'Total-order Sobol index',
+          data: rows.map(function (r) { return r.total; }),
+          backgroundColor: '#e1e1e1',
+          borderColor: '#555',
+          borderWidth: 1
+        }]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: { x: { min: 0, max: 1 } },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: function (ctx) {
+                const r = rows[ctx.dataIndex];
+                const first = (r.first === null || r.first === undefined)
+                  ? 'n/a'
+                  : r.first.toFixed(3);
+                return 'S_T=' + r.total.toFixed(3) + '  S=' + first;
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+
   renderAxisCharts();
   renderHeatmaps();
+  renderSobol();
 })();
 </script>
 

@@ -26,6 +26,7 @@ from gauntlet.report.schema import CellBreakdown as CellBreakdown
 from gauntlet.report.schema import FailureCluster as FailureCluster
 from gauntlet.report.schema import Heatmap2D as Heatmap2D
 from gauntlet.report.schema import Report as Report
+from gauntlet.report.schema import SensitivityIndex as SensitivityIndex
 
 __all__ = [
     "AxisBreakdown",
@@ -33,6 +34,7 @@ __all__ = [
     "FailureCluster",
     "Heatmap2D",
     "Report",
+    "SensitivityIndex",
     "build_report",
     "render_html",
     "write_html",

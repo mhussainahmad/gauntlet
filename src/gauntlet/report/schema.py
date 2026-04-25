@@ -34,6 +34,7 @@ __all__ = [
     "FailureCluster",
     "Heatmap2D",
     "Report",
+    "SensitivityIndex",
 ]
 
 
@@ -161,6 +162,37 @@ class Heatmap2D(BaseModel):
     success_rate: list[list[float]]
 
 
+class SensitivityIndex(BaseModel):
+    """Per-axis Sobol sensitivity index (B-19).
+
+    ``first_order`` (``S_i``) is the share of outcome variance
+    explained by axis ``i`` alone; ``total_order`` (``S_T_i``) is the
+    share of variance lost when ``i`` is held fixed (``>= first_order``;
+    the gap is the interaction share). Both are in ``[0, 1]`` when
+    populated.
+
+    Both fields are ``None`` only when the run is all-success or
+    all-fail (``Var(Y) == 0`` and the indices are undefined). A
+    single-value axis is reported as ``0.0`` for both — by construction
+    it can carry no variance and the closed-form total-order would
+    otherwise leak the within-cell noise into a non-zero number.
+
+    ``approximate`` is set when the source suite is not Sobol-sampled
+    (e.g. cartesian or LHS): the closed-form decomposition is still
+    well-defined, but the sample structure does not satisfy the
+    quasi-MC assumptions Saltelli's bias bounds rely on, so the
+    indices read as a useful indicator rather than a calibrated
+    estimate. The HTML report carries this flag through to a "this is
+    approximate" callout above the chart.
+    """
+
+    model_config = ConfigDict(extra="forbid", ser_json_inf_nan="strings")
+
+    first_order: float | None
+    total_order: float | None
+    approximate: bool
+
+
 class Report(BaseModel):
     """Top-level failure-analysis report.
 
@@ -187,3 +219,8 @@ class Report(BaseModel):
     overall_success_rate: float
     overall_failure_rate: float
     cluster_multiple: float
+    # B-19: per-axis Sobol sensitivity indices, keyed by axis name.
+    # ``None`` for backwards-compat: report.json files written before
+    # B-19 do not carry the field; ``Report.model_validate`` accepts
+    # them unchanged.
+    sensitivity_indices: dict[str, SensitivityIndex] | None = None
