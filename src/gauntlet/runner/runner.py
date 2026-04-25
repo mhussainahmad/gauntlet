@@ -111,6 +111,7 @@ class Runner:
         cache_dir: Path | None = None,
         policy_id: str | None = None,
         max_steps: int | None = None,
+        measure_action_consistency: bool = False,
     ) -> None:
         """Configure the runner.
 
@@ -198,6 +199,22 @@ class Runner:
                 :class:`GauntletEnv` does not expose a public getter;
                 an honest cache key needs the value as input. Ignored
                 when ``cache_dir is None``.
+            measure_action_consistency: B-18 opt-in for the action
+                mode-collapse metric. When ``True`` and the policy
+                implements :class:`gauntlet.policy.SamplablePolicy`
+                (e.g. :class:`RandomPolicy`,
+                :class:`gauntlet.policy.LeRobotPolicy`,
+                :class:`gauntlet.policy.pi0.Pi0Policy`), the worker
+                samples N candidate actions every
+                :data:`gauntlet.runner.worker.CONSISTENCY_STRIDE`-th
+                rollout step and reports the mean per-axis variance on
+                :attr:`Episode.action_variance`. Greedy / open-loop
+                policies (Scripted, OpenVLA-greedy) report ``None`` —
+                an asymmetric column is the documented anti-feature
+                (``docs/backlog.md`` B-18). Default ``False`` keeps
+                rollouts byte-identical to the pre-B-18 path; the
+                measurement adds N policy-inference calls per measured
+                step and is opt-in for that reason.
 
         Raises:
             ValueError: If ``n_workers < 1``, ``start_method != "spawn"``,
@@ -237,6 +254,7 @@ class Runner:
         self._cache_dir = cache_dir
         self._policy_id = policy_id
         self._max_steps = max_steps
+        self._measure_action_consistency = measure_action_consistency
         # Lazily constructed on the first ``run`` call when caching is
         # enabled. Held on the instance so :meth:`cache_stats` can be
         # called by callers (and by the CLI) after the run completes.
@@ -737,6 +755,7 @@ class Runner:
                         trajectory_dir=self._trajectory_dir,
                         trajectory_format=trajectory_format,
                         video_config=video_config,
+                        measure_action_consistency=self._measure_action_consistency,
                     )
                     fresh.append(episode)
                     running_n += 1
@@ -827,6 +846,7 @@ class Runner:
                     trajectory_dir=self._trajectory_dir,
                     trajectory_format=trajectory_format,
                     video_config=video_config,
+                    measure_action_consistency=self._measure_action_consistency,
                 )
                 for item in work_items
             ]
@@ -856,6 +876,7 @@ class Runner:
             trajectory_dir=self._trajectory_dir,
             trajectory_format=trajectory_format,
             video_config=video_config,
+            measure_action_consistency=self._measure_action_consistency,
         )
         with ctx.Pool(
             processes=self._n_workers,

@@ -153,3 +153,35 @@ class Episode(BaseModel):
     # single step. Same ``None`` semantics as ``actuator_energy``;
     # always ``>= mean_torque_norm`` when both are populated.
     peak_torque_norm: float | None = None
+
+    # ------------------------------------------------------------------
+    # Action mode-collapse telemetry (B-18) — measures policy-action
+    # consistency by sampling N candidate actions per (sub-sampled)
+    # rollout step from a stochastic / chunked policy and reporting the
+    # mean per-step per-axis variance, averaged over the measured steps.
+    #
+    # Computation contract (see :func:`gauntlet.runner.worker.execute_one`):
+    # at every ``_CONSISTENCY_STRIDE``-th rollout step the worker calls
+    # :meth:`gauntlet.policy.SamplablePolicy.act_n` (default ``n=8``),
+    # computes per-axis variance ``np.var(actions, axis=0)`` (length =
+    # action_dim), reduces to a scalar via mean across axes, and
+    # averages those scalars across the measured steps. The per-axis
+    # framing matches the B-18 spec ("per-axis 'action consistency'
+    # column"), and the cross-axis mean keeps the field a single
+    # float rather than a variable-length vector.
+    #
+    # ``None`` semantics — same shape as the actuator-cost trio above:
+    # the policy did not implement :class:`SamplablePolicy` (greedy
+    # baselines, :class:`gauntlet.policy.ScriptedPolicy`, OpenVLA-greedy)
+    # OR the user did not opt in via ``Runner(measure_action_consistency=True)``.
+    # ``0.0`` would be ambiguous: a sampleable policy that has truly
+    # collapsed onto a single mode reports ``0.0``; an un-measured
+    # rollout reports ``None``. The HTML report renders ``None`` as a
+    # dash, never as zero.
+    #
+    # Anti-feature (documented in ``docs/backlog.md`` B-18): the
+    # column is asymmetric across the policy zoo; greedy policies
+    # cannot expose it without stochasticity to sample from.
+    # ------------------------------------------------------------------
+
+    action_variance: float | None = None

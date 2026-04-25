@@ -150,6 +150,16 @@ class FailureCluster(BaseModel):
     # ("-") instead of "0.00".
     mean_actuator_energy: float | None = None
     mean_peak_torque_norm: float | None = None
+    # B-18: per-cluster mean of :attr:`gauntlet.runner.Episode.action_variance`
+    # across the cluster's episodes that reported one. Same partial-
+    # coverage handling as the actuator trio above: episodes whose
+    # ``action_variance is None`` (greedy policies, or runs that did
+    # not opt into ``--measure-action-consistency``) are dropped from
+    # both numerator and denominator. ``None`` here means "no episode
+    # in this cluster carried action-variance telemetry" — the HTML
+    # report renders this as a dash, distinct from a measured
+    # ``0.0`` (which would mean true mode collapse).
+    mean_action_variance: float | None = None
 
 
 class Heatmap2D(BaseModel):

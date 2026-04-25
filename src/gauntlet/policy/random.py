@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import numpy as np
 
 from gauntlet.policy.base import Action, Observation
@@ -62,3 +64,40 @@ class RandomPolicy:
     def reset(self, rng: np.random.Generator) -> None:
         """Adopt the runner's episode RNG so rollouts are reproducible."""
         self._rng = rng
+
+    def act_n(self, obs: Observation, n: int = 8) -> Sequence[Action]:
+        """Draw ``n`` independently-sampled actions for the same observation.
+
+        State-preserving (B-18 :class:`SamplablePolicy` contract): the
+        per-episode :attr:`_rng` is snapshotted before the draws and
+        restored after, so calling ``act_n`` between two ``act`` calls
+        does not perturb the rollout's RNG stream. Without this guard
+        the runner's mode-collapse measurement would chew ``n`` draws
+        from the rollout RNG and the rollout would diverge from an
+        un-measured rerun with the same ``Episode.seed`` — silently
+        breaking B-08 paired-CRN compare.
+
+        ``obs`` is ignored by design (random baseline reads no
+        observation). ``n`` must be ``>= 1``.
+        """
+        del obs  # random policy ignores observations by design
+        if n < 1:
+            raise ValueError(f"n must be >= 1; got {n}")
+        # Snapshot bit-generator state and restore after sampling so
+        # _rng is byte-identical to its pre-call state.
+        snapshot = self._rng.bit_generator.state
+        try:
+            samples = [
+                np.asarray(
+                    self._rng.uniform(
+                        low=self.action_low,
+                        high=self.action_high,
+                        size=self.action_dim,
+                    ),
+                    dtype=np.float64,
+                )
+                for _ in range(n)
+            ]
+        finally:
+            self._rng.bit_generator.state = snapshot
+        return samples
