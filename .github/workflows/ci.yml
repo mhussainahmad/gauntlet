@@ -14,6 +14,13 @@ jobs:
   lint-typecheck-test:
     name: lint + mypy + pytest (torch-free, py${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    # Hard 15-minute cap so a regression of the 6h-hang failure mode
+    # surfaces in 15min, not 6h. The job historically completes in
+    # ~50s; 15min is a generous-but-bounded ceiling. NOT a workaround
+    # for the hang — that is fixed by the coverage subprocess
+    # concurrency settings in pyproject.toml + the worker / thread
+    # caps in this stanza.
+    timeout-minutes: 15
     # Pin every ``uv`` invocation in this job to the matrix python so
     # ``uv run`` does not fall back to the runner's system python and
     # silently recreate ``.venv`` from scratch (wiping the synced
@@ -81,7 +88,15 @@ jobs:
         # runner has no DISPLAY and no GPU, so the C-level renderer
         # aborts the worker — gating with the marker keeps the default
         # job clean. Run those locally via ``MUJOCO_GL=egl``.
-        run: uv run pytest -m "not hf and not lerobot and not monitor and not pybullet and not genesis and not ros2 and not isaac and not video and not render"
+        #
+        # ``-v`` is intentional: the previous (silent) ``-q`` form
+        # made it impossible to see WHICH test was hanging when the
+        # job got cancelled — the ``..`` dot stream goes to stdout
+        # buffers that flush only at line boundaries, so a wedged
+        # test shows up as silence rather than its name. Verbose mode
+        # prints the test ID before each call so the next regression
+        # is one log lookup away from a fix.
+        run: uv run pytest -v -m "not hf and not lerobot and not monitor and not pybullet and not genesis and not ros2 and not isaac and not video and not render"
 
   hf-tests:
     name: hf tests (py${{ matrix.python-version }})

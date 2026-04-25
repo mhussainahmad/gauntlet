@@ -605,6 +605,16 @@ markers = [
 [tool.coverage.run]
 source = ["gauntlet"]
 branch = true
+# ``concurrency = ["multiprocessing"]`` + ``parallel = true`` are
+# required because Runner uses ``multiprocessing.Pool`` (spawn start
+# method) and pytest-cov spans those workers. Without these settings
+# the per-worker coverage data files do not get registered for the
+# final combine step, and pytest-cov's atexit handler can wedge the
+# worker shutdown sequence — observed as a 6h hang at ~78% in
+# the torch-free CI job. See PR hotfix/ci-pytest-hang.
+concurrency = ["multiprocessing"]
+parallel = true
+sigterm = true
 
 [tool.coverage.report]
 exclude_lines = [
