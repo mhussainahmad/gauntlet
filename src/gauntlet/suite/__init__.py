@@ -18,6 +18,9 @@ Public surface:
 
 from __future__ import annotations
 
+from gauntlet.suite.linter import LintFinding as LintFinding
+from gauntlet.suite.linter import LintSeverity as LintSeverity
+from gauntlet.suite.linter import lint_suite as lint_suite
 from gauntlet.suite.loader import load_suite as load_suite
 from gauntlet.suite.loader import load_suite_from_string as load_suite_from_string
 from gauntlet.suite.schema import BUILTIN_BACKEND_IMPORTS as BUILTIN_BACKEND_IMPORTS
@@ -31,9 +34,12 @@ __all__ = [
     "BUILTIN_BACKEND_IMPORTS",
     "SAMPLING_MODES",
     "AxisSpec",
+    "LintFinding",
+    "LintSeverity",
     "SamplingMode",
     "Suite",
     "SuiteCell",
+    "lint_suite",
     "load_suite",
     "load_suite_from_string",
 ]

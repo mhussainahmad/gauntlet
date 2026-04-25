@@ -41,7 +41,7 @@ from gauntlet.replay import OverrideError, parse_override, replay_one
 from gauntlet.report import Report, build_report, write_html
 from gauntlet.report.html import _nan_to_none
 from gauntlet.runner import Episode, Runner
-from gauntlet.suite import load_suite
+from gauntlet.suite import LintFinding, lint_suite, load_suite
 
 __all__ = ["app"]
 
@@ -1696,6 +1696,92 @@ def realsim_info(
     _echo_err(f"  intrinsics: {len(intrinsics_ids)} ({', '.join(intrinsics_ids) or '-'})")
     _echo_err(f"  frames: {len(scene.frames)}")
     _echo_err(f"  time range: {time_summary}")
+
+
+# ──────────────────────────────────────────────────────────────────────
+# `suite` subcommand group — Phase 3 polish (B-25).
+# ──────────────────────────────────────────────────────────────────────
+#
+# ``check`` — lint a suite YAML for the common authoring footguns the
+#             schema validators do not catch (unused axes, cartesian
+#             explosion, visual-only axes on a state-only backend,
+#             insufficient ``episodes_per_cell`` for tight CIs, empty
+#             suites). The Python API
+#             (:func:`gauntlet.suite.lint_suite`) is the lint engine;
+#             this subcommand is the thin wrapper.
+#
+# Exit codes:
+#   * 0 — clean OR warnings only.
+#   * 1 — load failure OR at least one ``error`` finding.
+
+
+suite_app = typer.Typer(
+    name="suite",
+    help="Suite YAML utilities.",
+    no_args_is_help=True,
+    add_completion=False,
+)
+app.add_typer(suite_app)
+
+
+def _print_lint_finding(finding: LintFinding) -> None:
+    """Render one :class:`LintFinding` to stderr through the rich Console.
+
+    Rich treats square-bracket runs as markup, so the rule name is
+    wrapped in escaped brackets (``\\[name]``) — keeps the visual hint
+    without colliding with rich's ``[style]`` syntax. Tests assert on
+    the raw rule string surviving that escape unmangled.
+    """
+    prefix = "[err]error:[/]" if finding.severity == "error" else "[warn]warning:[/]"
+    _echo_err(rf"{prefix} \[{finding.rule}] {finding.message}")
+
+
+@suite_app.command("check")
+def suite_check(
+    suite_path: Annotated[
+        Path,
+        typer.Argument(
+            help="Path to a suite YAML file.",
+            exists=False,  # checked manually for a friendlier message
+            dir_okay=False,
+            file_okay=True,
+        ),
+    ],
+) -> None:
+    """Lint a suite YAML for common authoring footguns.
+
+    Exits 0 on a clean suite or one with warnings only. Exits 1 if the
+    suite fails to load OR if any rule produces an ``error`` finding
+    (currently only the ``visual-only-axis-on-state-only-backend``
+    rule). Warnings are printed regardless of exit code.
+    """
+    if not suite_path.is_file():
+        raise _fail(f"suite file not found: {suite_path}")
+
+    try:
+        suite = load_suite(suite_path)
+    except (ValidationError, ValueError) as exc:
+        raise _fail(f"{suite_path}: invalid suite YAML: {exc}") from exc
+    except OSError as exc:
+        raise _fail(f"{suite_path}: could not read file: {exc}") from exc
+
+    findings = lint_suite(suite)
+
+    for finding in findings:
+        _print_lint_finding(finding)
+
+    n_errors = sum(1 for f in findings if f.severity == "error")
+    n_warnings = sum(1 for f in findings if f.severity == "warning")
+
+    if n_errors == 0 and n_warnings == 0:
+        _echo_err(f"[ok]ok[/] {_fmt_path(suite_path)}: no lint issues")
+        return
+
+    summary = f"{_fmt_path(suite_path)}: {n_errors} error(s), {n_warnings} warning(s)"
+    if n_errors > 0:
+        _echo_err(f"[err]failed[/] {summary}")
+        raise typer.Exit(code=1)
+    _echo_err(f"[warn]ok with warnings[/] {summary}")
 
 
 # ``python -m gauntlet.cli`` parity with the installed entry point.
