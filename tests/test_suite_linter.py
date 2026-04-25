@@ -491,12 +491,15 @@ def _write_yaml(tmp_path: Path, body: str, *, name: str = "suite.yaml") -> Path:
 
 
 def test_cli_check_clean_suite_exits_zero(runner: CliRunner, tmp_path: Path) -> None:
+    # ``episodes_per_cell`` must clear the B-41 RULE_LOW_STATISTICAL_POWER
+    # floor (paired-CRN at delta=0.1 / alpha=0.05 / power=0.8 / rho=0.5
+    # → 195) for the suite to report "no lint issues".
     suite_path = _write_yaml(
         tmp_path,
         """\
         name: clean
         env: tabletop
-        episodes_per_cell: 20
+        episodes_per_cell: 200
         axes:
           lighting_intensity:
             low: 0.3
