@@ -138,6 +138,19 @@ class FailureCluster(BaseModel):
     ci_high: float | None = None
     video_paths: list[str] = Field(default_factory=list)
 
+    # B-21: per-cluster aggregates of the rollout-level actuator
+    # telemetry that lives on :class:`gauntlet.runner.Episode`. Each
+    # field is the mean across the cluster's episodes that *did*
+    # report a value; episodes whose backend left telemetry unset
+    # (``Episode.actuator_energy is None``) are dropped from both the
+    # numerator and the denominator so a partial-coverage cluster is
+    # not biased to zero. ``None`` means "no episode in this cluster
+    # carried telemetry" — typically a non-MuJoCo backend or a fake
+    # env in a unit test. The HTML report renders ``None`` as a dash
+    # ("-") instead of "0.00".
+    mean_actuator_energy: float | None = None
+    mean_peak_torque_norm: float | None = None
+
 
 class Heatmap2D(BaseModel):
     """2D success-rate matrix for a pair of axes.

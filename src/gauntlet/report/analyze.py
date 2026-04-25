@@ -211,6 +211,16 @@ def _failure_clusters(
         # looks when reading a report. Successful videos belong on the
         # per-cell row, not here.
         pair_videos: dict[tuple[float, float], list[str]] = defaultdict(list)
+        # B-21 actuator-cost aggregates. We sum + count separately
+        # (instead of carrying a running mean) so a backend that emits
+        # telemetry on some episodes but not others doesn't bias the
+        # cluster mean toward zero — episodes whose
+        # ``actuator_energy is None`` are dropped from BOTH the
+        # numerator and the denominator.
+        pair_energy_sum: dict[tuple[float, float], float] = defaultdict(float)
+        pair_energy_count: dict[tuple[float, float], int] = defaultdict(int)
+        pair_peak_sum: dict[tuple[float, float], float] = defaultdict(float)
+        pair_peak_count: dict[tuple[float, float], int] = defaultdict(int)
         for ep in episodes:
             if axis_a not in ep.perturbation_config or axis_b not in ep.perturbation_config:
                 continue
@@ -222,6 +232,12 @@ def _failure_clusters(
                 bucket[1] += 1
             elif ep.video_path is not None:
                 pair_videos[(va, vb)].append(ep.video_path)
+            if ep.actuator_energy is not None:
+                pair_energy_sum[(va, vb)] += ep.actuator_energy
+                pair_energy_count[(va, vb)] += 1
+            if ep.peak_torque_norm is not None:
+                pair_peak_sum[(va, vb)] += ep.peak_torque_norm
+                pair_peak_count[(va, vb)] += 1
 
         for (va, vb), (n_total, n_success) in pair_counts.items():
             if n_total < min_cluster_size:
@@ -239,6 +255,12 @@ def _failure_clusters(
                 n_total,
                 confidence=confidence,
             )
+            energy_n = pair_energy_count.get((va, vb), 0)
+            mean_energy: float | None = (
+                pair_energy_sum[(va, vb)] / energy_n if energy_n > 0 else None
+            )
+            peak_n = pair_peak_count.get((va, vb), 0)
+            mean_peak: float | None = pair_peak_sum[(va, vb)] / peak_n if peak_n > 0 else None
             clusters.append(
                 FailureCluster(
                     axes={axis_a: va, axis_b: vb},
@@ -249,6 +271,8 @@ def _failure_clusters(
                     ci_low=ci_low,
                     ci_high=ci_high,
                     video_paths=list(pair_videos.get((va, vb), [])),
+                    mean_actuator_energy=mean_energy,
+                    mean_peak_torque_norm=mean_peak,
                 )
             )
 

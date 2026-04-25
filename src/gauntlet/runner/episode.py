@@ -113,3 +113,43 @@ class Episode(BaseModel):
     # run time, or ``None`` when the run happened outside a git checkout
     # (e.g. a packaged tarball or a CI shallow without ``.git``).
     git_commit: str | None = None
+
+    # ------------------------------------------------------------------
+    # Actuation-cost telemetry (B-21) — per-rollout summary of how much
+    # the policy works the actuators. Surfaced in the failure-clusters
+    # table so a "succeeds at 5x the energy cost" policy is visible
+    # before it ships to real hardware (Safe-control-gym, arxiv
+    # 2109.06325; Safety-Gymnasium, NeurIPS 2023).
+    #
+    # Cross-backend caveat (anti-feature, deliberately documented):
+    # torque semantics differ across simulators. MuJoCo envs that ship
+    # joint actuators populate these from ``mj_data.actuator_force``
+    # and ``mj_data.qvel`` (joint-space torque & velocity). PyBullet,
+    # Genesis, and Isaac envs do not surface comparable per-step
+    # torque to the worker yet, so they leave all three fields
+    # ``None`` and the report renders blanks (not zero).
+    #
+    # The shipped :class:`gauntlet.env.tabletop.TabletopEnv` is itself
+    # mocap-driven (``model.nu == 0`` — no ``<actuator>`` elements) so
+    # it ALSO leaves these fields ``None`` rather than emit a
+    # misleading ``0.0``. Wiring the metric to PyBullet / Genesis /
+    # Isaac, and shipping a joint-torque tabletop MJCF asset, are
+    # B-21 follow-ups.
+    # ------------------------------------------------------------------
+
+    # Cumulative actuator energy over the rollout, in joule-equivalent
+    # units (``sum(|tau . qvel| * dt)`` over all control steps).
+    # ``None`` means "this backend doesn't capture torque telemetry"
+    # — distinct from ``0.0`` ("backend captured, the policy did
+    # nothing"). The report renders ``None`` as a dash.
+    actuator_energy: float | None = None
+
+    # Mean L2 norm of the actuator-force vector across all control
+    # steps (per-step ``np.linalg.norm(actuator_force)``, averaged).
+    # Same ``None`` semantics as ``actuator_energy``.
+    mean_torque_norm: float | None = None
+
+    # Peak (max) L2 norm of the actuator-force vector observed in any
+    # single step. Same ``None`` semantics as ``actuator_energy``;
+    # always ``>= mean_torque_norm`` when both are populated.
+    peak_torque_norm: float | None = None
