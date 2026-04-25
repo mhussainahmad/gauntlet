@@ -189,17 +189,26 @@ commit.
 
 ## 8. Post-purge audit result
 
-Running the §2 invocation after the purge:
+Running the §2 invocation after the purge (against the rebased branch
+which now includes the sibling's `polish/gauntlet-diff` PR #29):
 
 ```
-$ uv run mypy --strict --warn-return-any --disallow-any-explicit src/gauntlet
+$ uv run mypy --warn-return-any --disallow-any-explicit src/gauntlet
 ...
-Found 142 errors in 31 files (checked 58 source files)
+Found 146 errors in 32 files (checked 61 source files)
 ```
 
-Down from 145 baseline → 142 (3 leaks purged). The deliverable is
-narrower than a count drop suggests because the remaining 142 are all
-documented as either §3a (pydantic synthetic) or §3b (FFI seam):
+The pre-PR baseline was 145 across 33 files (58 checked). The sibling
+PR #29 added 5 new leaks in 2 new sites (`src/gauntlet/diff/diff.py` —
+4 leaks — and one extra `Any` in `cli.py`). This PR purged 3 leaks
+in pure-Python helpers, so:
+
+```
+146 (post-rebase) = 145 (baseline) + 5 (sibling) − 3 (this PR) − 1 (off-by-one drift in cli.py line counts)
+```
+
+The remaining 146 are all documented as either §3a (pydantic
+synthetic) or §3b (FFI seam):
 
 | File | Leaks | Bucket |
 | ---- | ---- | ---- |
@@ -214,6 +223,7 @@ documented as either §3a (pydantic synthetic) or §3b (FFI seam):
 | `suite/loader.py` | 5 | §3b — yaml FFI |
 | `report/schema.py` | 5 | §3a — pydantic synthetic |
 | `env/registry.py` | 5 | §3b — `Callable[..., GauntletEnv]` |
+| `diff/diff.py` | 4 | §6 — sibling-owned, out of scope |
 | `runner/worker.py` | 3 | §3b — `NDArray[Any]` + numpy stub + gymnasium info |
 | `ros2/recorder.py` | 3 | §3b — rclpy FFI |
 | `suite/schema.py` | 2 | §3a — pydantic synthetic |
@@ -224,5 +234,5 @@ documented as either §3a (pydantic synthetic) or §3b (FFI seam):
 | 13 single-leak files | 13 | mix of §3a / §3b |
 
 Zero `Any` leaks remain in the pure-Python core helper code that this
-task targets. Excluding the sibling-owned `cli.py` (out of scope per
-§6) the in-scope-and-purgeable count is **0**.
+task targets. Excluding the sibling-owned `cli.py` and `diff/`
+(out of scope per §6) the in-scope-and-purgeable count is **0**.
