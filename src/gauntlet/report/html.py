@@ -23,13 +23,33 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import Any
+from typing import TypeAlias
 
 from jinja2 import Environment, PackageLoader, select_autoescape
 
 from gauntlet.report.schema import Report
 
 __all__ = ["render_html", "write_html"]
+
+
+# Recursive type for the JSON-style structure pydantic's
+# ``model_dump(mode="json")`` returns. Narrowed from ``Any`` so the
+# ``_nan_to_none`` walker carries the actual shape it accepts. Tuples
+# appear because pydantic encodes ``tuple[...]`` fields as Python tuples
+# in dump mode (the v2 contract); the walker normalises them back to a
+# tuple of normalised members so a tuple in == tuple out is preserved.
+# Same shape as :data:`gauntlet.aggregate.html._JsonValue`; intentionally
+# duplicated to keep the two report packages decoupled.
+_JsonValue: TypeAlias = (
+    float
+    | int
+    | str
+    | bool
+    | None
+    | dict[str, "_JsonValue"]
+    | list["_JsonValue"]
+    | tuple["_JsonValue", ...]
+)
 
 
 # Single module-level environment — building one per call would re-load
@@ -44,7 +64,7 @@ _ENV = Environment(
 )
 
 
-def _nan_to_none(value: Any) -> Any:
+def _nan_to_none(value: _JsonValue) -> _JsonValue:
     """Recursively replace non-finite floats with ``None``.
 
     ``Report.model_dump(mode="json")`` returns a JSON-style nested dict

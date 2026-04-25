@@ -49,7 +49,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 import numpy as np
 from numpy.typing import NDArray
@@ -201,11 +201,23 @@ class WorkerInitArgs:
     video_config: VideoConfig | None = None
 
 
+# Worker-local cache shape. ``total=False`` because pre-init reads
+# (and tests that bypass the pool path) see an empty dict; the
+# initializer sets all four keys atomically. The TypedDict replaces
+# the previous ``dict[str, Any]`` so consumers get the precise type
+# of each ``_WORKER_STATE.get(...)`` lookup; runtime semantics are
+# unchanged (identical key set, identical ``dict.get(...)``-with-
+# ``None``-fallback read pattern in ``run_work_item``).
+class _WorkerState(TypedDict, total=False):
+    env: GauntletEnv
+    policy_factory: Callable[[], Policy]
+    trajectory_dir: Path | None
+    video_config: VideoConfig | None
+
+
 # Worker-local cache. Populated by ``pool_initializer``; read by
-# ``run_work_item``. Typed as ``Any`` because the values change shape
-# across the lifecycle and mypy does not need to track per-worker
-# globals across the pickle boundary.
-_WORKER_STATE: dict[str, Any] = {}
+# ``run_work_item``.
+_WORKER_STATE: _WorkerState = {}
 
 
 def pool_initializer(args: WorkerInitArgs) -> None:
