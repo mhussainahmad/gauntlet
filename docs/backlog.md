@@ -2,23 +2,24 @@
 
 Open candidates for future work, sourced from the 2024–2026 robot-policy-evaluation literature plus an internal dependency-drift scan as of 2026-04-25. Each item is independent, has a clear paper or open-source precedent, and is sized in one of three buckets (S ≤ 1 day, M ≤ 3 days, L ≤ 1 week of focused work).
 
+> All 36 original items shipped 2026-04-25. New candidates B-37+ added 2026-04-25.
+
 ## How to use
 
 Pick the next backlog item by topology, not by ID. Items in the same category may share files; items across categories generally don't. Each entry's **Disjoint with** line names the modules it touches and any other backlog items that conflict.
 
 Suggested ordering for the next continuous-polish loop (smallest, highest-rigour-payoff first):
 
-1. **B-03** Wilson CIs on per-cell success — S, pure rigour, no deps.
-2. **B-08** Common-random-numbers paired comparison — S, halves required samples for `compare`/`diff`.
-3. **B-20** Regression-vs-noise attribution in `diff` — S, depends on B-03 + B-08; kills the cry-wolf rate.
-4. **B-22** Episode-level seed manifest + `gauntlet repro <id>` — S, pure DX win.
-5. **B-25** Suite linter — S, catches authoring footguns at parse time.
-6. **B-19** Sobol sensitivity indices — S, payoff for the already-shipped Sobol sampler.
-7. **B-32** Initial-state OOD axis — S, extends existing `ObjectInitialPose`.
-8. **B-31** Image-attack perturbation axis — S, backend-agnostic post-render axis.
-9. Dep bumps (**B-33** to **B-36**) — S each, can batch.
+1. **B-40** Suite-level provenance hash + result cache key — S, extends `runner/provenance.py`, pure DX.
+2. **B-41** Statistical power calculator on `gauntlet suite plan` — S, extends `report/wilson.py` + B-08; tells the user how many samples they actually need.
+3. **B-42** Camera-extrinsics perturbation axis — S, viewpoint is the highest-yield robustness axis per RoboView-Bias.
+4. **B-43** Color / saturation visual-bias axis — S, backend-agnostic post-render, complements B-31.
+5. **B-37** Inference-latency / wall-clock budget tracking — S, fills the `runner/` gap VLA-Perf flagged.
+6. **B-38** Inference-delay jitter perturbation axis — S, builds on B-37; tests RTC-style real-time chunking.
+7. **B-39** Cross-checkpoint regression bisection (`gauntlet bisect`) — M, git-bisect for policy regressions.
+8. **B-44** Worst-case continuous-perturbation search (Eva-VLA-style) — M, complements but does not duplicate B-07.
 
-After those eight S-class items the medium / large items become viable in pairs.
+After those S-class items the medium items become viable in pairs.
 
 ---
 
@@ -93,6 +94,13 @@ After those eight S-class items the medium / large items become viable in pairs.
 - **Scope:** L
 - **Disjoint with:** New env, action-space contract (variable-width).
 - **Anti-feature?** Variable action-dim breaks the "one shared action/obs space" elegance gauntlet currently sells. Probably needs a `tabletop-2` family kept separate.
+
+### B-44: Worst-case continuous-perturbation search (Eva-VLA-style)
+- **What:** New `sampling: worst_case_continuous` mode that, for axes with continuous parameters (light intensity, camera pose offset, object SE(3) jitter), runs a small gradient-free optimiser (CMA-ES via `cma`, or finite-difference inside the existing scipy stack) against a per-episode failure-score surrogate to find adversarial points. Surfaces a "worst observed configuration" cell next to the heatmap.
+- **Why:** Eva-VLA (arxiv 2509.18953) demonstrates that worst-case search over continuous physical variations exposes failure modes invisible to grid/Sobol sampling — OpenVLA fails >90% on LIBERO-Long under their found worst-cases vs. ~20% on uniform sampling. Gauntlet's existing samplers all sample *configurations*; this samples *attacks*.
+- **Scope:** M
+- **Disjoint with:** `suite/sampling.py`, new `suite/worst_case.py`. **Distinct from B-07**: B-07 is a discrete-bandit search over the existing axis grid (Thompson sampling); B-44 is gradient-free continuous optimisation over the underlying physical parameters. Same user-facing pitch (find failures), different mechanism. Document the contrast.
+- **Anti-feature?** Continuous worst-case is the strongest possible cherry-pick — a "this policy fails 100% on the adversarial cell" headline reads as alarmist when the cell is measure-zero. Must report alongside the unbiased baseline rate, never standalone.
 
 ## Backends (new sim backends)
 
@@ -221,6 +229,41 @@ After those eight S-class items the medium / large items become viable in pairs.
 - **Disjoint with:** `runner/`, new optional extras.
 - **Anti-feature?** **Directly contradicts PRODUCT.md "no cloud, no telemetry, no internet round-trip required at view time."** This is a sink that *may* be cloud and the auditor for that line is the user's network egress logs, not gauntlet. Only ship if it's purely opt-in, off by default, and the docs say "this leaves your machine."
 
+### B-37: Per-step inference-latency tracking + budget gate
+- **What:** New `runner/latency.py`. Wraps `policy.act()` with `time.perf_counter_ns()`, stores `inference_latency_ms: list[float]` on Episode (per-step), and surfaces `p50_ms`, `p95_ms`, `max_ms`, `over_budget_steps` as Episode columns. New CLI flag `--latency-budget-ms 100` marks an episode `latency_violated: True` when p95 exceeds the budget. Report HTML grows a "latency profile" subsection.
+- **Why:** VLA-Perf (arxiv 2602.18397) is explicit that real-time deployability is a model-level property invisible to success-rate eval, and recommends 10–100 ms as the operating envelope. The Efficient-VLA survey (arxiv 2510.17111) reinforces that latency drives deployability decisions more than accuracy. Gauntlet measures success but not whether the policy can run on the target hardware — a critical gap for the fleet-operator persona in PRODUCT.md.
+- **Scope:** S
+- **Disjoint with:** `runner/runner.py`, `runner/episode.py` schema, `report/html.py`. No conflict.
+- **Anti-feature?** Per-step `perf_counter` adds a tiny but non-zero overhead to every act call; on a 200-Hz control loop it's measurable. Default-on flag risks polluting the very thing it measures — gate behind `--track-latency`.
+
+### B-38: Inference-delay jitter perturbation axis
+- **What:** New `PerturbationAxis` of categorical type `inference_delay_jitter` with values like `0ms, 50ms, 200ms, 500ms`. Wraps `policy.act()` with `time.sleep(delay)` injected per step; the env continues forward-simulating during the sleep so the action arrives stale. Pairs with B-37's latency machinery.
+- **Why:** Real-Time Chunking (arxiv 2506.07339, Black et al.) and the LeRobot RTC integration (huggingface.co/docs/lerobot/rtc) demonstrate that inference delay is a first-class cause of policy failure independent of model accuracy — "Leave No Observation Behind" (arxiv 2509.23224) shows even 100 ms of staleness collapses naive chunked policies. Gauntlet currently assumes zero-latency action delivery, masking this failure mode entirely.
+- **Scope:** S
+- **Disjoint with:** New axis class in `env/perturbation/axes.py`, hook in the runner's act-call path. Backend-agnostic (operates on the policy interface, not the sim).
+- **Anti-feature?** Sleep-based delay is a sim of a sim — real-world inference delay co-occurs with thermal throttling, batch-pipeline contention, and network jitter that a flat `time.sleep` doesn't model. Useful as a coarse axis, dishonest as an exact predictor.
+
+### B-39: Cross-checkpoint regression bisection (`gauntlet bisect`)
+- **What:** New CLI `gauntlet bisect --good <ckpt-a> --bad <ckpt-b> --suite <suite.yaml> --target-cell <cell-id>` that, given two policy checkpoints and a single failing cell, binary-searches the intermediate checkpoints (linearly interpolating weights for compatible architectures, or sampling user-provided checkpoint paths) to find the first regression. Re-uses the paired-CRN engine from B-08 so the bisect signal is variance-reduced.
+- **Why:** WorldEval (arxiv 2505.19017) and AutoEval (arxiv 2503.24278) both establish that automated per-checkpoint ranking is feasible and useful; the engineering extension — git-bisect for policy training runs — is the natural CLI manifestation but is not shipped by either. Direct fit for the "what changed?" question every fleet operator asks. Re-uses the paired-comparison machinery already in `diff/paired.py`.
+- **Scope:** M
+- **Disjoint with:** New `bisect/` module, new CLI subcommand, depends on B-08 (paired CRN) for variance reduction. Conflicts mildly with B-26 (early-stop pruning) since bisect needs a full deterministic cell-level result.
+- **Anti-feature?** Weight interpolation only makes sense for same-architecture LoRA-style fine-tunes; for the general case the user must supply intermediate checkpoint paths, which means they need to have saved them, which most training runs don't. Falls back gracefully to "linear-search the user's provided list" but loses its bisect-y appeal.
+
+### B-40: Suite-level provenance hash + result cache key
+- **What:** Extend `runner/provenance.py` so each Suite emits a deterministic 16-char hash of `(suite YAML AST, axis values sorted, episodes_per_cell, gauntlet version, env asset SHAs)`. Use this hash as the on-disk cache key in `runner/cache.py`. New CLI `gauntlet suite hash <suite.yaml>` prints it. Two suites with identical semantics produce identical hashes regardless of YAML key ordering.
+- **Why:** vla-eval (arxiv 2603.13966) explicitly identifies the "is this result from the same eval config?" provenance question as the dominant source of cross-paper irreproducibility, and recommends content-addressed config hashes as the fix. Gauntlet has per-episode provenance (B-22) but no suite-level fingerprint, so two suites that differ in formatting alone re-run instead of cache-hitting.
+- **Scope:** S
+- **Disjoint with:** `runner/provenance.py`, `runner/cache.py`, `suite/loader.py`. No conflicts.
+- **Anti-feature?** Hash stability across gauntlet versions is brittle — a bug-fix to the YAML loader's normalisation invalidates every cached run. Need an explicit hash-version field and a graceful "stale cache, re-run" path.
+
+### B-41: Statistical-power calculator on `gauntlet suite plan`
+- **What:** Extend `report/wilson.py` with `required_episodes(p1, p2, alpha=0.05, power=0.8) -> int` (two-proportion z-test, paired-CRN-aware via B-08). New CLI `gauntlet suite plan <suite.yaml> --detect-delta 0.1 --power 0.8` reads each cell's existing rate (or a user-supplied baseline) and prints how many `episodes_per_cell` are needed to detect the requested effect size. Surfaces in B-25's suite-linter as a warning when the configured count is too low.
+- **Why:** "Beyond Binary Success" (arxiv 2603.13616) and RoboEval (arxiv 2507.00435) both call out that 90% of published robot-policy comparisons run with statistically insufficient sample sizes — the operator infers "policy A beats B" from a difference smaller than the standard error. The fix is the standard pre-eval power calculation that every adjacent ML field does and gauntlet doesn't.
+- **Scope:** S
+- **Disjoint with:** `report/wilson.py`, `suite/linter.py`, new CLI subcommand. Synergises with B-03 + B-08.
+- **Anti-feature?** A power-calc that says "you need 400 episodes per cell" gives the user license to *run only 400* and never look at the long tail of failure modes that only show up at 10× that count. Power-calc optimises for the binary-success summary statistic; it's exactly the rule that "failures over averages" §1 warns against.
+
 ## Real-world / Sim-to-real
 
 ### B-28: Sim-vs-real correlation report (SureSim-style)
@@ -259,6 +302,20 @@ After those eight S-class items the medium / large items become viable in pairs.
 - **Scope:** S
 - **Disjoint with:** Extends existing `ObjectInitialPose` axis with OOD framing; one new axis class.
 - **Anti-feature?** "OOD" is only meaningful relative to a training distribution the user must declare; if they don't, the axis collapses to "more aggressive ObjectInitialPose" and the framing is hollow.
+
+### B-42: Camera-extrinsics perturbation axis
+- **What:** New axis `camera_extrinsics` with structured values `{translation: [dx, dy, dz], rotation: [drx, dry, drz]}` applied to the rendering camera at episode start. Suite YAML supports both an enumerated list and a Sobol-friendly continuous range. Operates on the env's render camera, not the policy.
+- **Why:** RoboView-Bias (arxiv 2509.22356) found viewpoint to be the *single most influential* visual factor across every evaluated agent — success rates fluctuate sharply between near-identical viewpoints — and "Do You Know Where Your Camera Is?" (arxiv 2510.02268) shows ACT / Diffusion Policy / SmolVLA all rely on background visual shortcuts when extrinsics aren't conditioned, so a tiny camera shift collapses them. LIBERO-Plus (already-cited 2510.13626) names camera-view-shift as one of seven canonical robustness dimensions. Gauntlet has `CameraNoise` but nothing that perturbs *pose*.
+- **Scope:** S
+- **Disjoint with:** New axis class in `env/perturbation/axes.py`; touches `TabletopEnv.set_perturbation` to wire the camera-pose offset. MuJoCo / PyBullet first; Genesis / Isaac follow the existing visual-axis backend-restriction pattern.
+- **Anti-feature?** Camera-extrinsics as a numeric axis tempts users to over-fit Sobol indices on a parameterisation that's actually a 6-DoF non-Euclidean manifold (SO(3) rotations don't compose linearly). Disclaimer in the report or risk false-precision rankings.
+
+### B-43: Color / saturation visual-bias perturbation axis
+- **What:** New axis `color_shift` with values like `hue_+30, hue_-30, saturation_0.5, saturation_1.5, achromatic` applied as an HSV transform on `obs["image"]` post-render. Backend-agnostic, layered on top of the existing post-render `image_attack` infrastructure (B-31).
+- **Why:** RoboView-Bias (arxiv 2509.22356) demonstrated all evaluated VLAs have a strong, asymmetric performance bias toward high-saturation hues over achromatic / low-saturation scenes — a grounding failure orthogonal to viewpoint and lighting. LIBERO-Plus's "image noise" dimension partially covers this; the explicit color/saturation cut is what RoboView-Bias adds and gauntlet currently lacks.
+- **Scope:** S
+- **Disjoint with:** Reuses the post-render hook from B-31. New small `env/color_attack.py` next to `env/image_attack.py`. No backend changes.
+- **Anti-feature?** HSV-shift on the rendered RGB does not faithfully simulate real-world illumination changes (which alter materials' specular response too) — it's a stand-in. Honest path: name the axis `color_shift_synthetic` and warn that it's the post-render proxy, not the real-world thing.
 
 ## Dependency Drift (internal scan, 2026-04-25)
 
@@ -327,3 +384,15 @@ Primary papers and benchmarks cited by the items above:
 - Open X-Embodiment / DROID (arXiv 2310.08864)
 - Task-Driven Detection of Distribution Shifts With Statistical Guarantees for Robot Learning (IEEE T-RO 2024)
 - Exploring the Robustness of VLAs against Sensor Attacks (ACM 10.1145/3733800.3763262)
+
+Added 2026-04-25 (B-37+ scan):
+
+- How Fast Can I Run My VLA? Demystifying VLA Inference Performance with VLA-Perf (arXiv 2602.18397)
+- Efficient Vision-Language-Action Models for Embodied Manipulation: A Systematic Survey (arXiv 2510.17111)
+- Real-Time Execution of Action Chunking Flow Policies (arXiv 2506.07339)
+- Leave No Observation Behind: Real-time Correction for VLA Action Chunks (arXiv 2509.23224)
+- vla-eval: A Unified Evaluation Harness for Vision-Language-Action Models (arXiv 2603.13966)
+- WorldEval: World Model as Real-World Robot Policies Evaluator (arXiv 2505.19017)
+- Eva-VLA: Evaluating Vision-Language-Action Models' Robustness Under Real-World Physical Variations (arXiv 2509.18953)
+- RoboView-Bias: Benchmarking Visual Bias in Embodied Agents for Robotic Manipulation (arXiv 2509.22356)
+- Do You Know Where Your Camera Is? View-Invariant Policy Learning with Camera Conditioning (arXiv 2510.02268)
