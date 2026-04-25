@@ -143,6 +143,13 @@ class PyBulletTabletopEnv:
             # to combine ``object_swap`` with this backend (anti-feature:
             # cross-backend asset parity is yak-shave; see backlog B-06).
             "object_swap",
+            # B-42 — categorical render-camera extrinsics axis. Real
+            # impl: the apply branch stores the index on a shadow
+            # attribute, ``_render_obs_image`` and
+            # ``_render_obs_images_multi`` consume it via
+            # :func:`_apply_extrinsics_to_camera_basis`. RoboView-Bias
+            # (arXiv 2509.22356) inspired.
+            "camera_extrinsics",
         }
     )
     # Empty once image rendering exists (RFC-006 §3.5): every cosmetic axis
@@ -156,6 +163,13 @@ class PyBulletTabletopEnv:
     # has no asset library for the alternate semantic objects (anti-
     # feature note in the backlog), so the loader / linter rejects any
     # suite naming this axis on PyBullet.
+    #
+    # B-42 — ``camera_extrinsics`` is intentionally NOT in this set:
+    # the PyBullet renderer mutates the view matrix on the way to
+    # ``getCameraImage``, so the axis is observable on
+    # ``obs["image"]`` when ``render_in_obs=True``. State-only obs
+    # remain pairwise-identical across cells, same caveat as the
+    # other cosmetic axes.
     VISUAL_ONLY_AXES: ClassVar[frozenset[str]] = frozenset({"object_swap"})
 
     MAX_LINEAR_STEP: float = 0.05
@@ -332,6 +346,19 @@ class PyBulletTabletopEnv:
         self._light_intensity: float = 1.0
         self._cam_eye_offset: NDArray[np.float64] = np.zeros(2, dtype=np.float64)
         self._current_texture_id: int = -1  # populated by _build_scene
+
+        # B-42 — active camera-extrinsics registry. Each entry is a
+        # 6-tuple ``(dx, dy, dz, drx, dry, drz)`` (translation in
+        # metres, rotation in radians, XYZ Euler) applied as a delta
+        # to the render camera's baseline pose at render time. Index 0
+        # defaults to the no-op baseline; the runner rebinds via
+        # :meth:`set_camera_extrinsics_list`. ``_extrinsics_index``
+        # tracks the active cell's index — read by the render path.
+        _ExtrinsicsTuple = tuple[float, float, float, float, float, float]
+        self._camera_extrinsics_list: tuple[_ExtrinsicsTuple, ...] = (
+            (0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        )
+        self._extrinsics_index: int = 0
 
         self._build_scene()
 
@@ -622,7 +649,78 @@ class PyBulletTabletopEnv:
                 raise ValueError(
                     f"distractor_count must be in [0, {_N_DISTRACTOR_SLOTS}]; got {count}"
                 )
+        if name == "camera_extrinsics":
+            # B-42 — index into the active camera-extrinsics registry.
+            # Mirrors the MuJoCo ``set_perturbation`` validation path:
+            # round float to int, reject out-of-range loud rather
+            # than silently snapping to the baseline.
+            idx = round(float(value))
+            n_entries = len(self._camera_extrinsics_list)
+            if idx < 0 or idx >= n_entries:
+                raise ValueError(
+                    f"camera_extrinsics: index {idx} (rounded from {value!r}) "
+                    f"out of range [0, {n_entries}); registry currently has "
+                    f"{n_entries} entry(ies). Set the registry via "
+                    "set_camera_extrinsics_list before queueing."
+                )
         self._pending_perturbations[name] = float(value)
+
+    def set_camera_extrinsics_list(
+        self,
+        entries: tuple[tuple[float, float, float, float, float, float], ...],
+    ) -> None:
+        """Rebind the active camera-extrinsics registry (B-42).
+
+        Each entry is a 6-tuple ``(dx, dy, dz, drx, dry, drz)`` where
+        translation deltas are in metres and rotation deltas are
+        radians (XYZ Euler, PyBullet camera convention — same axis
+        order as the MuJoCo backend so a single suite YAML drives both
+        backends consistently). Index 0 is the baseline by convention;
+        the runner sets the per-cell index via :meth:`set_perturbation`
+        and the apply branch stores it on a shadow attribute that the
+        render path consumes.
+
+        Calling this method does NOT touch the renderer — the index
+        → 6-tuple dispatch happens at render time. Mirrors the MuJoCo
+        :meth:`gauntlet.env.tabletop.TabletopEnv.set_camera_extrinsics_list`
+        contract.
+
+        Anti-feature note (spec): SO(3) rotations don't compose
+        linearly so per-axis Sobol sensitivity indices on this axis
+        are biased. The report module emits a :class:`UserWarning`
+        when the axis is present in a Sobol report.
+
+        Raises:
+            ValueError: if ``entries`` is empty or any entry has a
+                length other than 6.
+        """
+        if len(entries) == 0:
+            raise ValueError("camera_extrinsics: registry must be non-empty")
+        sanitised: list[tuple[float, float, float, float, float, float]] = []
+        for i, e in enumerate(entries):
+            if len(e) != 6:
+                raise ValueError(
+                    f"camera_extrinsics: entry {i} must be a 6-tuple "
+                    f"(dx, dy, dz, drx, dry, drz); got length {len(e)}"
+                )
+            sanitised.append(
+                (
+                    float(e[0]),
+                    float(e[1]),
+                    float(e[2]),
+                    float(e[3]),
+                    float(e[4]),
+                    float(e[5]),
+                )
+            )
+        self._camera_extrinsics_list = tuple(sanitised)
+
+    @property
+    def camera_extrinsics_list(
+        self,
+    ) -> tuple[tuple[float, float, float, float, float, float], ...]:
+        """Return the active camera-extrinsics registry (B-42)."""
+        return self._camera_extrinsics_list
 
     def restore_baseline(self) -> None:
         """Return the env to its post-``__init__`` observable state.
@@ -637,6 +735,10 @@ class PyBulletTabletopEnv:
         # Cosmetic-axis scratchpads revert to baseline values.
         self._light_intensity = 1.0
         self._cam_eye_offset = np.zeros(2, dtype=np.float64)
+        # B-42 — extrinsics index resets to 0 (baseline). The
+        # registry itself stays bound across resets — the runner
+        # rebinds it once per suite, not once per cell.
+        self._extrinsics_index = 0
 
     def close(self) -> None:
         """Release the PyBullet client. Idempotent."""
@@ -827,6 +929,22 @@ class PyBulletTabletopEnv:
             self._cam_eye_offset[1] = float(value)
             return
 
+        if name == "camera_extrinsics":
+            # B-42 — store the index on a shadow attribute; the render
+            # path reads ``_camera_extrinsics_list[_extrinsics_index]``
+            # and applies the structured 6-tuple as a delta on top of
+            # the baseline (eye, target, up) basis. ``set_perturbation``
+            # already validated the index range; the apply branch
+            # re-checks defensively.
+            idx = round(float(value))
+            n_entries = len(self._camera_extrinsics_list)
+            if idx < 0 or idx >= n_entries:
+                raise ValueError(
+                    f"camera_extrinsics apply: index {idx} out of range [0, {n_entries})"
+                )
+            self._extrinsics_index = idx
+            return
+
         # Unreachable — set_perturbation validates before queueing.
         raise ValueError(f"internal: unknown perturbation axis {name!r}")
 
@@ -877,15 +995,22 @@ class PyBulletTabletopEnv:
         """
         assert self._proj_matrix is not None  # gate: render_in_obs=True
         h, w = self._render_size
-        eye = [
+        eye0 = (
             _CAM_EYE_BASELINE[0] + float(self._cam_eye_offset[0]),
             _CAM_EYE_BASELINE[1] + float(self._cam_eye_offset[1]),
             _CAM_EYE_BASELINE[2],
-        ]
+        )
+        # B-42 — apply the active extrinsics delta on top of the
+        # camera_offset baseline. ``_apply_extrinsics_to_basis`` is a
+        # no-op when the active index points at the (0, 0, 0, 0, 0, 0)
+        # registry slot, so the legacy single-cam path is unchanged
+        # for callers that do not opt into the axis.
+        delta = self._camera_extrinsics_list[self._extrinsics_index]
+        eye, target, up = _apply_extrinsics_to_basis(eye0, _CAM_TARGET, _CAM_UP, delta)
         view = p.computeViewMatrix(
-            cameraEyePosition=eye,
-            cameraTargetPosition=list(_CAM_TARGET),
-            cameraUpVector=list(_CAM_UP),
+            cameraEyePosition=list(eye),
+            cameraTargetPosition=list(target),
+            cameraUpVector=list(up),
         )
         _, _, rgb, _, _ = p.getCameraImage(
             width=w,
@@ -1003,6 +1128,79 @@ def _validate_pybullet_camera_specs(specs: tuple[CameraSpec, ...]) -> None:
             raise ValueError(
                 f"camera {spec.name!r} pose must be (x, y, z, rx, ry, rz); got {spec.pose!r}"
             )
+
+
+def _apply_extrinsics_to_basis(
+    eye: tuple[float, float, float],
+    target: tuple[float, float, float],
+    up: tuple[float, float, float],
+    delta: tuple[float, float, float, float, float, float],
+) -> tuple[
+    tuple[float, float, float],
+    tuple[float, float, float],
+    tuple[float, float, float],
+]:
+    """B-42 — apply a 6-D extrinsics delta to a camera basis.
+
+    ``delta`` is ``(dx, dy, dz, drx, dry, drz)``: translation in
+    metres, rotation in radians (XYZ Euler, body-fixed). The camera
+    is treated as a *rigid* mount: a pure translation shifts the
+    eye in world frame, the look direction is unchanged, and the
+    target re-anchors at ``new_eye + old_forward * dist`` so the
+    rendered image matches "the camera is mounted slightly off" —
+    not "the camera orbits a fixed point". This matches the MuJoCo
+    backend's contract (mutating ``cam_pos`` alone leaves the look
+    direction fixed via ``cam_quat``) and the
+    RoboView-Bias / "Do You Know Where Your Camera Is?" paper
+    framing (camera misalignment, not orbital perturbation).
+
+    Rotation is applied as ``R = Rx @ Ry @ Rz`` to the camera's
+    local basis: the new forward / up are ``R @ forward_unit`` /
+    ``R @ up``, and the new target is reconstructed as
+    ``new_eye + new_forward * |target - eye|`` so the look
+    distance is preserved.
+
+    A zero delta returns the input basis unchanged (numerically: the
+    rotation matrix is the identity and translation adds zero).
+    """
+    dx, dy, dz, drx, dry, drz = delta
+    eye_arr = np.array(eye, dtype=np.float64)
+    tgt_arr = np.array(target, dtype=np.float64)
+    up_arr = np.array(up, dtype=np.float64)
+
+    # Translation in world frame: shift eye, keep target stationary.
+    new_eye = eye_arr + np.array([dx, dy, dz], dtype=np.float64)
+
+    # Rotation in the camera's local frame (right-multiply convention,
+    # matching the MuJoCo backend): build R = Rx @ Ry @ Rz, then
+    # apply to forward / up.
+    cx, sx = float(np.cos(drx)), float(np.sin(drx))
+    cy, sy = float(np.cos(dry)), float(np.sin(dry))
+    cz, sz = float(np.cos(drz)), float(np.sin(drz))
+    rot_x = np.array([[1.0, 0.0, 0.0], [0.0, cx, -sx], [0.0, sx, cx]], dtype=np.float64)
+    rot_y = np.array([[cy, 0.0, sy], [0.0, 1.0, 0.0], [-sy, 0.0, cy]], dtype=np.float64)
+    rot_z = np.array([[cz, -sz, 0.0], [sz, cz, 0.0], [0.0, 0.0, 1.0]], dtype=np.float64)
+    rot = rot_x @ rot_y @ rot_z
+
+    forward_world = tgt_arr - eye_arr
+    look_dist = float(np.linalg.norm(forward_world))
+    if look_dist > 0.0:
+        forward_unit = forward_world / look_dist
+    else:
+        # Degenerate: eye and target coincide. Fall back to "+x" so
+        # the math stays well-defined; in practice the env never
+        # passes a zero-length basis.
+        forward_unit = np.array([1.0, 0.0, 0.0], dtype=np.float64)
+        look_dist = 1.0
+    new_forward = rot @ forward_unit
+    new_up = rot @ up_arr
+    new_target = new_eye + new_forward * look_dist
+
+    return (
+        (float(new_eye[0]), float(new_eye[1]), float(new_eye[2])),
+        (float(new_target[0]), float(new_target[1]), float(new_target[2])),
+        (float(new_up[0]), float(new_up[1]), float(new_up[2])),
+    )
 
 
 def _camera_basis_from_pose(

@@ -107,7 +107,9 @@ def test_observation_space_keys_match_genesis_state_only() -> None:
 
 
 def test_axis_names_are_canonical_seven() -> None:
-    """`AXIS_NAMES` matches the canonical 7 (RFC-009 §6.7)."""
+    """`AXIS_NAMES` covers the 7 base axes plus the visual-only-on-Isaac
+    extensions ``object_swap`` (B-06) and ``camera_extrinsics`` (B-42).
+    """
     from gauntlet.env.isaac.tabletop_isaac import IsaacSimTabletopEnv
 
     expected = frozenset(
@@ -119,21 +121,31 @@ def test_axis_names_are_canonical_seven() -> None:
             "object_initial_pose_x",
             "object_initial_pose_y",
             "distractor_count",
+            "object_swap",
+            "camera_extrinsics",
         }
     )
     assert expected == IsaacSimTabletopEnv.AXIS_NAMES
 
 
 def test_visual_only_axes_are_four_cosmetic() -> None:
-    """State-only first cut declares the four cosmetic axes
-    `VISUAL_ONLY_AXES` (RFC-009 §6.6). The Suite loader's
+    """State-only first cut declares the four cosmetic axes plus
+    ``object_swap`` (B-06) and ``camera_extrinsics`` (B-42) in
+    `VISUAL_ONLY_AXES` (RFC-009 §6.6 + backlog). The Suite loader's
     `_reject_purely_visual_suites` guard fires off this set; tests
     pinning the rejection live in `test_suite_loader_isaac.py`.
     """
     from gauntlet.env.isaac.tabletop_isaac import IsaacSimTabletopEnv
 
     expected = frozenset(
-        {"lighting_intensity", "camera_offset_x", "camera_offset_y", "object_texture"}
+        {
+            "lighting_intensity",
+            "camera_offset_x",
+            "camera_offset_y",
+            "object_texture",
+            "object_swap",
+            "camera_extrinsics",
+        }
     )
     assert expected == IsaacSimTabletopEnv.VISUAL_ONLY_AXES
 

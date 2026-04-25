@@ -27,11 +27,27 @@ Edge cases:
   undefined; both fields return ``None`` and the caller surfaces them
   as "no signal" rather than 0.
 
+B-42 anti-feature warning (SO(3) bias)
+--------------------------------------
+The ``camera_extrinsics`` axis carries a 6-D pose delta (translation
++ XYZ-Euler rotation) collapsed to a categorical-by-index for the
+cell-value channel. The closed-form Saltelli decomposition treats
+each unique index as a discrete bucket — but the rotation half of
+each bucket is a non-linearly-composing rotation in SO(3), so the
+per-bucket conditional mean does NOT decompose into the per-rotation-
+component contributions. The reported per-axis indices on
+``camera_extrinsics`` are therefore an *indicator* of viewpoint
+sensitivity, not a calibrated estimate. :func:`compute_sobol_indices`
+emits a :class:`UserWarning` whenever the axis is present in the
+input episode set so consumers (CLI, HTML report) can surface the
+caveat to readers.
+
 The module is pure: numpy only, no scipy.
 """
 
 from __future__ import annotations
 
+import warnings
 from collections import defaultdict
 from collections.abc import Iterable
 
@@ -39,7 +55,25 @@ import numpy as np
 
 from gauntlet.runner.episode import Episode
 
-__all__ = ["compute_sobol_indices"]
+__all__ = ["CAMERA_EXTRINSICS_SO3_WARNING", "compute_sobol_indices"]
+
+
+# B-42 — SO(3) bias warning. Surfaced once per
+# :func:`compute_sobol_indices` call when the ``camera_extrinsics``
+# axis is in the episode set; the HTML report consumer reads the
+# warning text via :func:`warnings.catch_warnings` to render the
+# banner row above the sensitivity-index chart.
+CAMERA_EXTRINSICS_SO3_WARNING: str = (
+    "Sobol indices on the 'camera_extrinsics' axis (B-42) are biased: "
+    "each cell value is a categorical index into a structured 6-D pose "
+    "delta (translation + XYZ-Euler rotation), and SO(3) rotations do "
+    "NOT compose linearly — so the closed-form Saltelli decomposition "
+    "treats every unique extrinsics bucket as discrete and discards the "
+    "per-rotation-component variance structure. Treat the reported "
+    "S_i / S_T_i on this axis as a viewpoint-sensitivity indicator, not "
+    "a calibrated estimate. References: RoboView-Bias (arXiv 2509.22356), "
+    "'Do You Know Where Your Camera Is?' (arXiv 2510.02268)."
+)
 
 
 def _conditional_variance(
@@ -80,6 +114,15 @@ def compute_sobol_indices(
     """
     if not episodes or not axis_names:
         return {}
+
+    # B-42 — emit the SO(3)-bias warning once per call when the
+    # ``camera_extrinsics`` axis is present in the requested axis set.
+    # We check ``axis_names`` (not the per-episode config) because the
+    # caller controls which axes get scored — checking the episode
+    # config would also fire for a side-channel axis that the caller
+    # explicitly excluded from this run's report.
+    if "camera_extrinsics" in axis_names:
+        warnings.warn(CAMERA_EXTRINSICS_SO3_WARNING, UserWarning, stacklevel=2)
 
     y = np.asarray([1 if ep.success else 0 for ep in episodes], dtype=np.float64)
     overall = float(y.mean())
