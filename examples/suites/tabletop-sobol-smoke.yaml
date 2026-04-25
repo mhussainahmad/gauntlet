@@ -1,0 +1,41 @@
+# tabletop-sobol-smoke — Sobol low-discrepancy perturbation sampling demo.
+#
+# Same five-axis perturbation surface as ``tabletop-lhs-smoke.yaml`` but
+# drawn from the Joe-Kuo 6.21201 Sobol sequence. Where LHS only
+# guarantees marginal (1-D) coverage, Sobol additionally bounds the
+# discrepancy of every 2-D projection — the property that matters when
+# the failure mode lives on a *joint* of two axes (e.g. lighting AND
+# camera_offset_x together) rather than either axis alone.
+#
+# Total work: 32 cells * 2 episodes = 64 rollouts (vs 5 ** 5 = 3,125
+# cells under cartesian). Finishes in seconds on a laptop and
+# demonstrates the joint-coverage bonus that motivates picking Sobol
+# over LHS for sweeps where 2+ axes are suspected to interact.
+#
+# The Sobol sequence is fully deterministic — re-running this suite
+# produces byte-identical cells regardless of ``seed``. The ``seed``
+# field below is retained for the per-episode RNG inside the runner,
+# not for the sampler itself.
+
+name: tabletop-sobol-smoke
+env: tabletop
+seed: 42
+sampling: sobol
+n_samples: 32
+episodes_per_cell: 2
+axes:
+  lighting_intensity:
+    low: 0.3
+    high: 1.5
+  camera_offset_x:
+    low: -0.05
+    high: 0.05
+  camera_offset_y:
+    low: -0.05
+    high: 0.05
+  object_initial_pose_x:
+    low: -0.15
+    high: 0.15
+  object_initial_pose_y:
+    low: -0.15
+    high: 0.15
