@@ -604,7 +604,30 @@ class Runner:
                 env_name=suite.env,
                 policy_id=policy_id,
             )
+            # B-40 back-compat: a cache directory written before the
+            # suite-provenance-hash upgrade still has entries under
+            # the pre-B-40 sha256-based key. Probe the new key first;
+            # on miss, *only* if a legacy entry actually exists on
+            # disk consult it via :meth:`EpisodeCache.get_legacy`.
+            # That helper does NOT touch the miss counter, so the
+            # public ``misses`` counter remains "uncached work
+            # items", not "filesystem lookups". Any new ``put``
+            # always writes under the new B-40 key, so legacy
+            # entries age out organically as the suite or asset
+            # tree changes.
             cached = cache.get(key)
+            if cached is None:
+                legacy_key = EpisodeCache.make_legacy_key(
+                    suite,
+                    axis_config=item.perturbation_values,
+                    seed=env_seed,
+                    episodes_per_cell=item.episodes_per_cell,
+                    max_steps=max_steps,
+                    env_name=suite.env,
+                    policy_id=policy_id,
+                )
+                if legacy_key != key and cache.has(legacy_key):
+                    cached = cache.get_legacy(legacy_key)
             if cached is not None:
                 hits.append(cached)
             else:
