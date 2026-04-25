@@ -231,6 +231,14 @@ Data-embed conventions:
    identical to the pre-PR layout. #}
 {% set any_cluster_video = report.failure_clusters
    and report.failure_clusters | selectattr('video_paths') | list | length > 0 %}
+{# B-21: render the actuator-cost column only when at least one
+   cluster carries telemetry (i.e. a MuJoCo run). Same conditional-
+   column pattern as the videos column above — keeps the no-telemetry
+   report visually identical to the pre-PR layout. #}
+{% set any_cluster_energy = report.failure_clusters
+   and report.failure_clusters
+   | rejectattr('mean_actuator_energy', 'none')
+   | list | length > 0 %}
 <section>
   <h2>Where it failed</h2>
   {% if report.failure_clusters %}
@@ -247,6 +255,7 @@ Data-embed conventions:
              PRODUCT.md "expert confidence" rule says we trust. #}
           <th class="num">Failure rate</th>
           <th class="num">Lift (×)</th>
+          {% if any_cluster_energy %}<th class="num">Energy / peak τ</th>{% endif %}
           {% if any_cluster_video %}<th>Failed-rollout videos</th>{% endif %}
         </tr>
       </thead>
@@ -270,6 +279,25 @@ Data-embed conventions:
             {%- endif %}
           </td>
           <td class="num">{{ '%.2f'|format(cluster.lift) }}×</td>
+          {% if any_cluster_energy %}
+          {# B-21: tabular nums in the existing ``num`` class so the
+             column is right-aligned and digit-stable. ``-`` for
+             missing telemetry rather than ``0.00`` — a backend that
+             does not surface torque is not the same as a policy that
+             commands zero. #}
+          <td class="num">
+            {%- if cluster.mean_actuator_energy is not none -%}
+              {{ '%.3f'|format(cluster.mean_actuator_energy) }}
+            {%- else -%}
+              <span class="ci">-</span>
+            {%- endif -%}
+            {% if cluster.mean_peak_torque_norm is not none %}
+            <span class="ci">/ {{ '%.2f'|format(cluster.mean_peak_torque_norm) }}</span>
+            {% else %}
+            <span class="ci">/ -</span>
+            {% endif %}
+          </td>
+          {% endif %}
           {% if any_cluster_video %}
           <td>
             {% if cluster.video_paths %}
