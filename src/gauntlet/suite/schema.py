@@ -374,9 +374,11 @@ class Suite(BaseModel):
     #   byte-identical to the historical itertools.product behaviour.
     # * ``"latin_hypercube"`` — :class:`LatinHypercubeSampler`,
     #   ``n_samples`` rows, RNG seeded from :attr:`seed`.
-    # * ``"sobol"`` — :class:`SobolSampler` (NotImplementedError, see
-    #   ``docs/polish-exploration-lhs-sampling.md`` for the deferral
-    #   rationale).
+    # * ``"sobol"`` — :class:`SobolSampler`, the Joe-Kuo low-discrepancy
+    #   sequence; ``n_samples`` rows, deterministic from
+    #   :attr:`seed`-independent (Sobol is fully deterministic; the
+    #   sampler ignores the RNG it receives). See
+    #   ``docs/polish-exploration-sobol-sampler.md``.
     # ------------------------------------------------------------------
 
     def cells(self) -> Iterator[SuiteCell]:
