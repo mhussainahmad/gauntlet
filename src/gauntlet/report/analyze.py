@@ -27,6 +27,7 @@ import itertools
 from collections import defaultdict
 from collections.abc import Iterable
 
+from gauntlet.report.abstention import compute_abstention_metrics
 from gauntlet.report.schema import (
     AxisBreakdown,
     CellBreakdown,
@@ -530,6 +531,12 @@ def build_report(
     else:
         sensitivity_indices = None
 
+    # B-04: calibration-aware abstention scoring. ``None`` when no
+    # episode in the dataset carries a populated ``failure_score`` —
+    # see :func:`gauntlet.report.abstention.compute_abstention_metrics`
+    # for the gate.
+    abstention_metrics = compute_abstention_metrics(episodes)
+
     return Report(
         suite_name=suite_name,
         suite_env=suite_env,
@@ -544,4 +551,5 @@ def build_report(
         cluster_multiple=cluster_multiple,
         sensitivity_indices=sensitivity_indices,
         success_safe_rate=success_safe_rate,
+        abstention_metrics=abstention_metrics,
     )
