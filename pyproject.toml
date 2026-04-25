@@ -180,6 +180,25 @@ isaac = [
 video = [
     "imageio[ffmpeg]>=2.34,<3",
 ]
+# Independent extras for B-27 "W&B / MLflow optional sinks". Both
+# default OFF at the CLI (``--wandb`` / ``--mlflow`` flags default to
+# ``False``); a default ``gauntlet run`` invocation never imports
+# either backend. Opting in directly contradicts PRODUCT.md's
+# local-first / no-telemetry contract — the CLI helptext loudly says
+# so and :mod:`gauntlet.runner.sinks` repeats the warning in every
+# sink's docstring. ``[wandb]`` is the riskier extra (cloud-by-
+# default unless ``WANDB_BASE_URL`` / ``WANDB_MODE=offline`` redirect
+# it); ``[mlflow]`` is local-by-default (writes to ``./mlruns``)
+# until ``MLFLOW_TRACKING_URI`` points at a remote endpoint. Lazy-
+# imported inside ``WandbSink.__init__`` / ``MlflowSink.__init__``
+# so a missing extra surfaces a clean ``ImportError`` only when the
+# user opts in.
+wandb = [
+    "wandb>=0.16,<1",
+]
+mlflow = [
+    "mlflow>=2.10,<4",
+]
 # Independent extra for B-23 "Parquet trajectory dumps" — the shared,
 # language-agnostic format for non-Python users (a fleet operator with
 # a Tableau seat) to query trajectory data alongside DuckDB / pandas /
@@ -577,6 +596,15 @@ ignore_missing_imports = true
 module = ["pyarrow", "pyarrow.*"]
 ignore_missing_imports = true
 
+# wandb / mlflow ship partial-or-no type stubs and the optional
+# [wandb] / [mlflow] extras (B-27) are off by default. Same FFI-
+# boundary carve-out shape as imageio / pyarrow above — lets mypy
+# import-check ``gauntlet.runner.sinks`` even when neither extra is
+# installed (the default job state).
+[[tool.mypy.overrides]]
+module = ["wandb", "wandb.*", "mlflow", "mlflow.*"]
+ignore_missing_imports = true
+
 # ---------- ``disallow_any_explicit`` per-module carve-outs ----------
 #
 # The two buckets below relax the project-wide
@@ -667,6 +695,12 @@ module = [
     # partial pyarrow stubs (and absent entirely on the default extras-
     # free job, see ``[[tool.mypy.overrides]]`` for ``pyarrow``).
     "gauntlet.runner.parquet",
+    # B-27 — wandb / mlflow are FFI seams (see ``[[tool.mypy.overrides]]``
+    # for ``wandb`` / ``mlflow``). The lazy-imported ``self._wandb`` /
+    # ``self._mlflow`` handles + the metric dict's ``int | float``
+    # union force ``Any`` at the boundary; the sink module declares
+    # the carve-out via this entry.
+    "gauntlet.runner.sinks",
     # ``yaml.safe_load`` returns ``Any`` (yaml stubs do not narrow).
     "gauntlet.suite.loader",
     # External calibration-JSON ingest — ``json.loads`` of a user-
@@ -713,6 +747,8 @@ markers = [
     "isaac: tests that require a real Isaac Sim install (isaacsim>=5.0) and a CUDA GPU; the default tests/isaac/ suite is mock-driven and unmarked",
     "video: tests that require the [video] extra (imageio[ffmpeg]>=2.34) for MP4 rollout recording",
     "parquet: tests that require the [parquet] extra (pyarrow>=15.0) for trajectory Parquet dumps (B-23)",
+    "wandb: tests that require the [wandb] extra (wandb>=0.16) for the optional Weights & Biases mirror sink (B-27)",
+    "mlflow: tests that require the [mlflow] extra (mlflow>=2.10) for the optional MLflow mirror sink (B-27)",
     "render: tests that exercise the offscreen mujoco GL renderer and need a working EGL/OSMesa stack; deselected by default CI runners where mujoco.Renderer aborts at the C level (no DISPLAY, no GPU)",
 ]
 
