@@ -1429,6 +1429,160 @@ def ros2_record(
     _echo_err(f"[ok]Recorded[/] {n_received} messages from [path]{topic}[/] -> {_fmt_path(out)}")
 
 
+# ──────────────────────────────────────────────────────────────────────
+# `realsim` subcommand group — Phase 3 Task 18 (RFC 021).
+# ──────────────────────────────────────────────────────────────────────
+#
+# ``ingest``  — validate a directory of robot camera frames + a
+#               calibration JSON and emit a self-contained scene
+#               directory (``manifest.json`` + frame copies / symlinks).
+# ``info``    — dump a one-screen summary of an existing scene
+#               directory's manifest.
+#
+# The renderer Protocol + module-local registry live next to the
+# pipeline (:mod:`gauntlet.realsim.renderer`); a future RFC decides
+# whether a CLI ``realsim render`` subcommand makes sense alongside
+# whatever first concrete renderer implementation lands. The schema
+# changes nothing for that follow-up.
+
+
+realsim_app = typer.Typer(
+    name="realsim",
+    help="Real-to-sim scene reconstruction inputs (gaussian-splatting renderer deferred).",
+    no_args_is_help=True,
+    add_completion=False,
+)
+app.add_typer(realsim_app)
+
+
+@realsim_app.command("ingest")
+def realsim_ingest(
+    frames_dir: Annotated[
+        Path,
+        typer.Argument(
+            help="Directory holding the raw camera frames referenced by --calib.",
+            exists=False,  # checked manually for a friendlier message
+            dir_okay=True,
+            file_okay=False,
+        ),
+    ],
+    calib: Annotated[
+        Path,
+        typer.Option(
+            "--calib",
+            help="Path to the calibration JSON (intrinsics + per-frame poses).",
+            dir_okay=False,
+            file_okay=True,
+        ),
+    ],
+    out: Annotated[
+        Path,
+        typer.Option(
+            "--out",
+            "-o",
+            help="Output scene directory; created if missing.",
+            dir_okay=True,
+            file_okay=False,
+        ),
+    ],
+    source: Annotated[
+        str | None,
+        typer.Option(
+            "--source",
+            help="Freeform metadata tag (robot id, log id, etc.).",
+        ),
+    ] = None,
+    symlink: Annotated[
+        bool,
+        typer.Option(
+            "--symlink",
+            help="Symlink frames into <out> instead of copying. Default OFF.",
+        ),
+    ] = False,
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            help="Allow overwriting an existing manifest at <out>/manifest.json.",
+        ),
+    ] = False,
+) -> None:
+    """Ingest a directory of frames + calibration into a scene directory."""
+    if not frames_dir.is_dir():
+        raise _fail(f"frames_dir not found: {frames_dir}")
+    if not calib.is_file():
+        raise _fail(f"calibration file not found: {calib}")
+
+    # Lazy import — keeps `gauntlet --help` snappy and pulls the
+    # pipeline / IO modules only when the subcommand actually runs.
+    from gauntlet.realsim import (
+        IngestionError,
+        SceneIOError,
+        ingest_frames,
+        save_scene,
+    )
+
+    try:
+        scene = ingest_frames(frames_dir, calib, source=source)
+    except IngestionError as exc:
+        raise _fail(str(exc)) from exc
+
+    try:
+        manifest_path = save_scene(
+            scene,
+            out,
+            frames_dir=frames_dir,
+            symlink=symlink,
+            overwrite=overwrite,
+        )
+    except SceneIOError as exc:
+        raise _fail(str(exc)) from exc
+
+    _echo_err(f"[ok]Wrote[/] {_fmt_path(manifest_path)}")
+    _echo_err(
+        f"  scene: {len(scene.frames)} frames / {len(scene.intrinsics)} intrinsics "
+        f"(source: {scene.source!r})"
+    )
+
+
+@realsim_app.command("info")
+def realsim_info(
+    scene_dir: Annotated[
+        Path,
+        typer.Argument(
+            help="Path to a scene directory (containing manifest.json).",
+            exists=False,  # checked manually for a friendlier message
+            dir_okay=True,
+            file_okay=False,
+        ),
+    ],
+) -> None:
+    """Print a one-screen summary of SCENE_DIR's manifest."""
+    if not scene_dir.is_dir():
+        raise _fail(f"scene_dir not found: {scene_dir}")
+
+    from gauntlet.realsim import SceneIOError, load_scene
+
+    try:
+        scene = load_scene(scene_dir)
+    except SceneIOError as exc:
+        raise _fail(str(exc)) from exc
+
+    intrinsics_ids = sorted(scene.intrinsics.keys())
+    timestamps = [f.timestamp for f in scene.frames]
+    if timestamps:
+        time_summary = f"{min(timestamps):.3f}s -> {max(timestamps):.3f}s"
+    else:
+        time_summary = "(no frames)"
+
+    _echo_err(f"[ok]scene:[/] {_fmt_path(scene_dir)}")
+    _echo_err(f"  version: {scene.version}")
+    _echo_err(f"  source: {scene.source!r}")
+    _echo_err(f"  intrinsics: {len(intrinsics_ids)} ({', '.join(intrinsics_ids) or '-'})")
+    _echo_err(f"  frames: {len(scene.frames)}")
+    _echo_err(f"  time range: {time_summary}")
+
+
 # ``python -m gauntlet.cli`` parity with the installed entry point.
 if __name__ == "__main__":  # pragma: no cover
     app()
