@@ -150,6 +150,12 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
             # MuJoCo-only; non-MuJoCo backends list it in
             # ``VISUAL_ONLY_AXES`` so the loader rejects mixing.
             "object_swap",
+            # B-42 — categorical render-camera extrinsics axis. Cell
+            # value is the integer index into the active extrinsics
+            # registry (rebound via ``set_camera_extrinsics_list``);
+            # baseline (index 0) is the unperturbed scene.
+            # RoboView-Bias (arXiv 2509.22356) inspired.
+            "camera_extrinsics",
         }
     )
     VISUAL_ONLY_AXES: ClassVar[frozenset[str]] = frozenset()
@@ -330,6 +336,20 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         # :meth:`set_perturbation` resolves to the right MJCF geom.
         # Stored as a tuple of class names in registry order.
         self._object_swap_classes: tuple[str, ...] = OBJECT_SWAP_CLASSES
+
+        # B-42 — active camera-extrinsics registry. Each entry is a
+        # ``(dx, dy, dz, drx, dry, drz)`` 6-tuple (translation in
+        # metres, rotation in radians, XYZ Euler) applied as a delta
+        # to the render camera's baseline pose at apply time. Index 0
+        # defaults to the no-op baseline so a caller that does not opt
+        # into the axis preserves the env's pre-B-42 behaviour. Suite
+        # YAMLs override via the ``extrinsics_values`` /
+        # ``extrinsics_range`` shape and the runner rebinds the
+        # registry via :meth:`set_camera_extrinsics_list`.
+        _ExtrinsicsTuple = tuple[float, float, float, float, float, float]
+        self._camera_extrinsics_list: tuple[_ExtrinsicsTuple, ...] = (
+            (0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        )
         # Snapshot of the seed last passed to :meth:`reset`. Used to
         # build a deterministic, isolated sub-stream for OOD sign draws
         # so that adding the ``initial_state_ood`` axis to a queued set
@@ -511,6 +531,11 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         snap: dict[str, NDArray[np.float64]] = {
             "light_diffuse_0": np.array(m.light_diffuse[0], dtype=np.float64).copy(),
             "cam_pos_main": np.array(m.cam_pos[cam], dtype=np.float64).copy(),
+            # B-42 — render camera orientation baseline. MuJoCo stores
+            # camera orientations as wxyz quaternions in ``cam_quat``;
+            # the apply branch composes a delta quat from the YAML's
+            # XYZ Euler rotation onto this baseline.
+            "cam_quat_main": np.array(m.cam_quat[cam], dtype=np.float64).copy(),
             # cube_geom_rgba is the per-geom override; with a material attached
             # MuJoCo loads it as 0.5,0.5,0.5,1 by default. We snapshot it so
             # restore_baseline puts it back if anyone ever overwrites it.
@@ -557,6 +582,10 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         swap_ids = self._object_swap_geom_ids
         m.light_diffuse[0] = self._baseline["light_diffuse_0"]
         m.cam_pos[cam] = self._baseline["cam_pos_main"]
+        # B-42 — restore camera orientation. The apply branch composes
+        # a rotation delta onto this baseline; restore puts it back so
+        # a prior episode's rotation cannot leak into the next reset.
+        m.cam_quat[cam] = self._baseline["cam_quat_main"]
         m.geom_rgba[cube_g] = self._baseline["cube_geom_rgba"]
         m.geom_matid[cube_g] = int(self._baseline["cube_geom_matid"][0])
         for i, gid in enumerate(d_ids):
@@ -618,6 +647,20 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
                     f"range [0, {n_classes}); registry currently has "
                     f"{n_classes} class(es): {list(self._object_swap_classes)}"
                 )
+        if name == "camera_extrinsics":
+            # B-42 — index into the active camera-extrinsics registry.
+            # Same validation pattern as ``object_swap``: round float
+            # to int, reject out-of-range indices loud rather than
+            # silently snapping to the baseline.
+            idx = round(float(value))
+            n_entries = len(self._camera_extrinsics_list)
+            if idx < 0 or idx >= n_entries:
+                raise ValueError(
+                    f"camera_extrinsics: index {idx} (rounded from {value!r}) "
+                    f"out of range [0, {n_entries}); registry currently has "
+                    f"{n_entries} entry(ies). Set the registry via "
+                    "set_camera_extrinsics_list before queueing."
+                )
         self._pending_perturbations[name] = float(value)
 
     def set_object_swap_classes(self, classes: tuple[str, ...]) -> None:
@@ -650,6 +693,62 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
     def object_swap_classes(self) -> tuple[str, ...]:
         """Return the active object-swap registry (B-06)."""
         return self._object_swap_classes
+
+    def set_camera_extrinsics_list(
+        self,
+        entries: tuple[tuple[float, float, float, float, float, float], ...],
+    ) -> None:
+        """Rebind the active camera-extrinsics registry (B-42).
+
+        Each entry is a 6-tuple ``(dx, dy, dz, drx, dry, drz)`` where
+        translation deltas are in metres and rotation deltas are
+        radians (XYZ Euler, MuJoCo camera convention). Index 0 is the
+        baseline by convention; the runner sets the per-cell index via
+        :meth:`set_perturbation` and the apply branch composes the
+        delta onto the baseline ``cam_pos`` / ``cam_quat`` snapshot.
+
+        Calling this method does NOT touch the model — the index →
+        6-tuple dispatch happens at :meth:`_apply_one_perturbation`
+        time. Mirrors the B-06 :meth:`set_object_swap_classes` posture.
+
+        Anti-feature note (spec): SO(3) rotations don't compose
+        linearly so per-axis Sobol sensitivity indices on this axis
+        are biased. The report module
+        (:func:`gauntlet.report.sobol_indices.compute_sobol_indices`)
+        emits a :class:`UserWarning` when the axis is present in a
+        Sobol report.
+
+        Raises:
+            ValueError: if ``entries`` is empty or any entry has a
+                length other than 6.
+        """
+        if len(entries) == 0:
+            raise ValueError("camera_extrinsics: registry must be non-empty")
+        sanitised: list[tuple[float, float, float, float, float, float]] = []
+        for i, e in enumerate(entries):
+            if len(e) != 6:
+                raise ValueError(
+                    f"camera_extrinsics: entry {i} must be a 6-tuple "
+                    f"(dx, dy, dz, drx, dry, drz); got length {len(e)}"
+                )
+            sanitised.append(
+                (
+                    float(e[0]),
+                    float(e[1]),
+                    float(e[2]),
+                    float(e[3]),
+                    float(e[4]),
+                    float(e[5]),
+                )
+            )
+        self._camera_extrinsics_list = tuple(sanitised)
+
+    @property
+    def camera_extrinsics_list(
+        self,
+    ) -> tuple[tuple[float, float, float, float, float, float], ...]:
+        """Return the active camera-extrinsics registry (B-42)."""
+        return self._camera_extrinsics_list
 
     def set_initial_state_ood_prior(
         self,
@@ -750,6 +849,38 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
                     m.geom_rgba[gid] = self._baseline["distractor_rgba"][i]
                     m.geom_contype[gid] = int(self._baseline["distractor_contype"][i])
                     m.geom_conaffinity[gid] = int(self._baseline["distractor_conaffinity"][i])
+        elif name == "camera_extrinsics":
+            # B-42 — index into the active extrinsics registry. The
+            # apply branch reads the structured 6-tuple and composes
+            # ``baseline_pos + (dx, dy, dz)`` for translation, plus
+            # ``baseline_quat * delta_quat`` (camera-local frame) for
+            # rotation. ``set_perturbation`` already validated the
+            # index range; this defence-in-depth raise covers direct
+            # callers that bypass the queue.
+            idx = round(float(value))
+            n_entries = len(self._camera_extrinsics_list)
+            if idx < 0 or idx >= n_entries:
+                raise ValueError(
+                    f"camera_extrinsics apply: index {idx} out of range [0, {n_entries})"
+                )
+            dx, dy, dz, drx, dry, drz = self._camera_extrinsics_list[idx]
+            base_pos = self._baseline["cam_pos_main"]
+            m.cam_pos[self._main_cam_id] = np.array(
+                [base_pos[0] + dx, base_pos[1] + dy, base_pos[2] + dz],
+                dtype=np.float64,
+            )
+            base_quat = self._baseline["cam_quat_main"]
+            delta_quat = _quat_from_xyz_euler(drx, dry, drz)
+            # Right-multiply: rotation expressed in the camera's local
+            # frame. RoboView-Bias / "Do You Know Where Your Camera Is?"
+            # paper conventions.
+            new_quat = _quat_mul_wxyz(base_quat, delta_quat)
+            # Normalise to absorb floating-point drift; MuJoCo expects
+            # unit quaternions on cam_quat.
+            n = float(np.linalg.norm(new_quat))
+            if n > 0.0:
+                new_quat = new_quat / n
+            m.cam_quat[self._main_cam_id] = new_quat
         elif name == "object_swap":
             # B-06 — replace the cube's visible / colliding geom with
             # the registry's selected class. The body, freejoint, qpos
@@ -1349,3 +1480,37 @@ def _inject_camera_elements(xml_str: str, specs: tuple[CameraSpec, ...]) -> str:
         )
     block = "\n".join(inserts)
     return xml_str.replace(close_tag, f"{block}\n  {close_tag}", 1)
+
+
+def _quat_from_xyz_euler(rx: float, ry: float, rz: float) -> NDArray[np.float64]:
+    """B-42 — XYZ Euler (radians) → wxyz quaternion.
+
+    Matches the MuJoCo / PyBullet camera convention: rotations applied
+    in order X, then Y, then Z (intrinsic, body-fixed). The composed
+    quaternion is ``q = q_x * q_y * q_z``.
+    """
+    half_x = 0.5 * rx
+    half_y = 0.5 * ry
+    half_z = 0.5 * rz
+    cx, sx = float(np.cos(half_x)), float(np.sin(half_x))
+    cy, sy = float(np.cos(half_y)), float(np.sin(half_y))
+    cz, sz = float(np.cos(half_z)), float(np.sin(half_z))
+    qx = np.array([cx, sx, 0.0, 0.0], dtype=np.float64)
+    qy = np.array([cy, 0.0, sy, 0.0], dtype=np.float64)
+    qz = np.array([cz, 0.0, 0.0, sz], dtype=np.float64)
+    return _quat_mul_wxyz(_quat_mul_wxyz(qx, qy), qz)
+
+
+def _quat_mul_wxyz(a: NDArray[np.float64], b: NDArray[np.float64]) -> NDArray[np.float64]:
+    """B-42 — Hamilton product ``a * b`` in wxyz order."""
+    aw, ax, ay, az = float(a[0]), float(a[1]), float(a[2]), float(a[3])
+    bw, bx, by, bz = float(b[0]), float(b[1]), float(b[2]), float(b[3])
+    return np.array(
+        [
+            aw * bw - ax * bx - ay * by - az * bz,
+            aw * bx + ax * bw + ay * bz - az * by,
+            aw * by - ax * bz + ay * bw + az * bx,
+            aw * bz + ax * by - ay * bx + az * bw,
+        ],
+        dtype=np.float64,
+    )
