@@ -56,7 +56,12 @@ jobs:
         run: uv run mypy
 
       - name: Run tests (excludes extras-gated markers)
-        run: uv run pytest -m "not hf and not lerobot and not monitor and not pybullet and not genesis and not ros2 and not isaac and not video"
+        # ``render`` covers tests that drive ``mujoco.Renderer`` and need
+        # a working offscreen GL stack. The GitHub ``ubuntu-latest``
+        # runner has no DISPLAY and no GPU, so the C-level renderer
+        # aborts the worker — gating with the marker keeps the default
+        # job clean. Run those locally via ``MUJOCO_GL=egl``.
+        run: uv run pytest -m "not hf and not lerobot and not monitor and not pybullet and not genesis and not ros2 and not isaac and not video and not render"
 
   hf-tests:
     name: hf tests (py${{ matrix.python-version }})
