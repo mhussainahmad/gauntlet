@@ -286,16 +286,22 @@ example wires that automatically.
 
 Once you've accumulated more than a few `report.json` files
 (different policies, different seeds, nightly runs), eyeballing each
-HTML report individually stops scaling. `gauntlet.dashboard` builds a
-self-contained static SPA that indexes every `report.json` under a
-directory:
+HTML report individually stops scaling. `gauntlet dashboard build`
+materialises a self-contained static SPA that indexes every
+`report.json` under a directory:
+
+```bash
+gauntlet dashboard build runs/ --out dashboard-out/
+# Open dashboard-out/index.html via file:// — no web server needed.
+```
+
+The Python API is also exposed for notebook / custom-pipeline use:
 
 ```python
 from pathlib import Path
 from gauntlet.dashboard import build_dashboard
 
 build_dashboard(Path("runs/"), Path("dashboard-out/"))
-# Open dashboard-out/index.html via file:// — no web server needed.
 ```
 
 The output directory contains exactly three files (`index.html`,
@@ -306,10 +312,7 @@ without tripping CORS. The dashboard surfaces an index card
 filterable by env / suite / policy, a time-series chart of success
 rate keyed off `report.json` mtime, and per-axis aggregate bars
 pooled across the matching runs. Sibling `report.html` files (from
-the originating `gauntlet run`) are auto-linked from each row.
-
-The CLI surface (`gauntlet dashboard build <runs-dir> --out <out>`)
-is RFC-shaped but the shipped path is the Python API above; see
+the originating `gauntlet run`) are auto-linked from each row. See
 [`docs/phase3-rfc-020-web-dashboard.md`](./docs/phase3-rfc-020-web-dashboard.md)
 for the full design.
 
@@ -440,8 +443,7 @@ src/gauntlet/
   realsim/     # Real-to-sim scene ingestion + RealSimRenderer Protocol (renderer deferred)
   plugins.py   # Entry-point discovery for third-party policies / envs
   cli.py       # gauntlet run / report / compare / diff / aggregate /
-               # realsim / monitor / replay / ros2
-               # (dashboard ships as a Python API — see ## Fleet dashboard)
+               # dashboard / realsim / monitor / replay / ros2
 ```
 
 ## License
