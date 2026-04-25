@@ -186,3 +186,43 @@ pattern. The `_nan_to_none` helpers keep the same recursion and the
 same identity behaviour for non-float, non-container leaves. mypy
 `--strict`, ruff, and the in-scope pytest subset all pass on every
 commit.
+
+## 8. Post-purge audit result
+
+Running the §2 invocation after the purge:
+
+```
+$ uv run mypy --strict --warn-return-any --disallow-any-explicit src/gauntlet
+...
+Found 142 errors in 31 files (checked 58 source files)
+```
+
+Down from 145 baseline → 142 (3 leaks purged). The deliverable is
+narrower than a count drop suggests because the remaining 142 are all
+documented as either §3a (pydantic synthetic) or §3b (FFI seam):
+
+| File | Leaks | Bucket |
+| ---- | ---- | ---- |
+| `env/genesis/tabletop_genesis.py` | 18 | §3b — Genesis FFI |
+| `env/isaac/tabletop_isaac.py` | 17 | §3b — Isaac Sim FFI |
+| `policy/lerobot.py` | 13 | §3b — LeRobot FFI |
+| `policy/huggingface.py` | 13 | §3b — HuggingFace FFI |
+| `env/tabletop.py` | 13 | §3b — MuJoCo FFI |
+| `env/pybullet/tabletop_pybullet.py` | 10 | §3b — PyBullet FFI |
+| `cli.py` | 8 | §6 — sibling-owned, out of scope |
+| `env/base.py` | 6 | §3b — gymnasium Protocol |
+| `suite/loader.py` | 5 | §3b — yaml FFI |
+| `report/schema.py` | 5 | §3a — pydantic synthetic |
+| `env/registry.py` | 5 | §3b — `Callable[..., GauntletEnv]` |
+| `runner/worker.py` | 3 | §3b — `NDArray[Any]` + numpy stub + gymnasium info |
+| `ros2/recorder.py` | 3 | §3b — rclpy FFI |
+| `suite/schema.py` | 2 | §3a — pydantic synthetic |
+| `ros2/publisher.py` | 2 | §3b — rclpy FFI |
+| `plugins.py` | 2 | §3b — entry-point FFI |
+| `monitor/schema.py` | 2 | §3a — pydantic synthetic |
+| `aggregate/schema.py` | 2 | §3a — pydantic synthetic |
+| 13 single-leak files | 13 | mix of §3a / §3b |
+
+Zero `Any` leaks remain in the pure-Python core helper code that this
+task targets. Excluding the sibling-owned `cli.py` (out of scope per
+§6) the in-scope-and-purgeable count is **0**.
