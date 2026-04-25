@@ -97,6 +97,21 @@ rdt = [
     "huggingface_hub>=0.20,<1",
     "pillow>=10.0,<12",
 ]
+# Independent extra for the Decision Transformer (offline-RL baseline)
+# adapter — backlog B-16. DT is the canonical "tiny model trained on
+# your own trajectory dump" baseline; the adapter loads any
+# ``transformers.DecisionTransformerModel`` checkpoint and runs
+# inference. NO training surface ships here (B-16 anti-feature) — users
+# train externally on parquet trajectory dumps (B-23 / [parquet] extra)
+# and point the adapter at the resulting checkpoint. Mirrors the [rdt]
+# extra exactly; ``huggingface_hub`` is carried so checkpoint downloads
+# work even when transformers' own version pin drifts away from the
+# version we depend on.
+dt = [
+    "transformers>=4.40,<5",
+    "torch>=2.2,<3",
+    "huggingface_hub>=0.20,<1",
+]
 # Drift detector (Phase 2 Task 3).
 # Torch is the only heavy dep; pillow is carried along so the optional
 # image-AE path (deferred follow-up) does not silently ImportError on a
@@ -637,6 +652,7 @@ module = [
     "gauntlet.policy.pi0",
     "gauntlet.policy.groot",
     "gauntlet.policy.rdt",
+    "gauntlet.policy.dt",
     # Lazy-import ``__getattr__`` (PEP 562) — narrowing defeats lazy load.
     "gauntlet.monitor",
     # rclpy ``Node`` typed as ``Any`` in upstream stubs (RFC-010 §3).
@@ -689,6 +705,7 @@ markers = [
     "pi0: tests that require the [pi0] extra (lerobot[pi], torch, PIL) — backlog B-14",
     "groot: tests that require the [groot] extra (lerobot[groot], torch, PIL) — backlog B-15",
     "rdt: tests that require the [rdt] extra (transformers, torch, PIL, huggingface_hub) — backlog B-15",
+    "dt: tests that require the [dt] extra (transformers, torch, huggingface_hub) — backlog B-16",
     "monitor: tests that require the [monitor] extra (torch, PIL)",
     "pybullet: tests that require the [pybullet] extra (pybullet>=3.2)",
     "genesis: tests that require the [genesis] extra (genesis-world>=0.4, torch)",
