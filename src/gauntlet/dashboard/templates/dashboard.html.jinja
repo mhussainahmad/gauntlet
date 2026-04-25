@@ -1,12 +1,158 @@
 <!DOCTYPE html>
+{# Gauntlet self-contained dashboard SPA — RFC 020.
+
+The page ships with NO server. Every per-run datum lives in the
+inline JSON literal at the bottom of the file. The companion
+``dashboard.js`` (loaded from a sibling URL) reads
+``document.getElementById('dashboard-data').textContent``, parses
+it once, and drives the chart + filter UI off the resulting object.
+
+Autoescape is on (PackageLoader idiom from
+``gauntlet.aggregate.html``); the user-supplied ``title`` and every
+``run`` field are escaped on the way through ``{{ ... }}``. The data
+block uses the ``|tojson`` escape pattern (same as the per-run and
+fleet reports) to defeat ``</script>`` breakouts.
+#}
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <title>{{ title }}</title>
+<link rel="stylesheet" href="dashboard.css">
 </head>
 <body>
-<h1>{{ title }}</h1>
-<p>Dashboard SPA scaffolding — full template arrives in step 3.</p>
+
+<header class="page-header">
+  <h1>{{ title }}</h1>
+  <p class="subtle">Self-contained dashboard rendered from <code>report.json</code> files.</p>
+</header>
+
+{# --- 1. Summary card --- #}
+<section>
+  <div class="card">
+    <div class="summary-metrics">
+      <div>
+        <div class="metric-label">Runs</div>
+        <div class="metric-value" id="metric-n-runs">{{ data.summary.n_runs }}</div>
+      </div>
+      <div>
+        <div class="metric-label">Episodes</div>
+        <div class="metric-value" id="metric-n-episodes">{{ data.summary.n_total_episodes }}</div>
+      </div>
+      <div>
+        <div class="metric-label">Mean success</div>
+        <div class="metric-value" id="metric-mean-success">
+          {{ '%.1f'|format(data.summary.mean_success_rate * 100) }}%
+          <span class="subtle">&plusmn; {{ '%.1f'|format(data.summary.std_success_rate * 100) }}%</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+{# --- 2. Filter UI (placeholder; wiring lands in step 7) --- #}
+<section>
+  <div class="card filter-bar">
+    <label>
+      env
+      <select id="filter-env">
+        <option value="">(all)</option>
+        {% for env in data.envs %}
+        <option value="{{ env }}">{{ env }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      suite
+      <select id="filter-suite">
+        <option value="">(all)</option>
+        {% for s in data.suite_names %}
+        <option value="{{ s }}">{{ s }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      policy
+      <select id="filter-policy">
+        <option value="">(all)</option>
+        {% for p in data.policy_labels %}
+        <option value="{{ p }}">{{ p }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </div>
+</section>
+
+{# --- 3. Time-series chart (success_rate over mtime) --- #}
+<section>
+  <h2>Success rate over time</h2>
+  <div class="card chart-card">
+    <canvas id="chart-time-series"></canvas>
+  </div>
+</section>
+
+{# --- 4. Per-axis aggregate charts --- #}
+<section>
+  <h2>Per-axis success rate (filtered aggregate)</h2>
+  <div id="per-axis-chart-row" class="chart-row">
+    {% for axis_name in data.per_axis_aggregate.keys() %}
+    <div class="chart-card">
+      <h3>{{ axis_name }}</h3>
+      <canvas id="chart-axis-{{ loop.index0 }}" data-axis-name="{{ axis_name }}"></canvas>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+{# --- 5. Per-run table --- #}
+<section>
+  <h2>Runs</h2>
+  <div class="card">
+    <table id="runs-table">
+      <thead>
+        <tr>
+          <th>Run</th>
+          <th>Policy</th>
+          <th>Suite</th>
+          <th>Env</th>
+          <th class="num">Episodes</th>
+          <th class="num">Success</th>
+          <th>Report</th>
+        </tr>
+      </thead>
+      <tbody id="runs-tbody">
+        {% for run in data.runs %}
+        <tr data-env="{{ run.env or '' }}" data-suite="{{ run.suite_name }}" data-policy="{{ run.policy_label }}">
+          <td><code>{{ run.run_id }}</code></td>
+          <td><code>{{ run.policy_label }}</code></td>
+          <td><code>{{ run.suite_name }}</code></td>
+          <td>{% if run.env %}<code>{{ run.env }}</code>{% else %}<span class="subtle">-</span>{% endif %}</td>
+          <td class="num">{{ run.n_episodes }}</td>
+          <td class="num">{{ '%.1f'|format(run.success_rate * 100) }}%</td>
+          <td>
+            {% if run.report_html %}
+            <a href="{{ run.report_html }}">report.html</a>
+            {% else %}
+            <span class="subtle">-</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if not data.runs %}
+    <p class="empty-state">No runs discovered.</p>
+    {% endif %}
+  </div>
+</section>
+
+{# Embed the full dashboard index as inline JSON. NaNs / infs have
+been replaced with nulls in Python (``gauntlet.dashboard.build._nan_to_none``)
+so this block is always valid JSON. ``|tojson`` defeats
+``</script>`` breakouts (Jinja's autoescape contract). #}
 <script id="dashboard-data" type="application/json">{{ data|tojson }}</script>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="dashboard.js"></script>
+
 </body>
 </html>

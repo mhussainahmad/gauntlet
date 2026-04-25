@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from gauntlet.dashboard import (
+    build_dashboard,
     build_dashboard_index,
     discover_reports,
 )
@@ -248,3 +249,105 @@ def test_build_dashboard_index_invalid_report_includes_path(tmp_path: Path) -> N
     with pytest.raises(ValueError) as exc_info:
         build_dashboard_index(paths, base_dir=tmp_path)
     assert "wrong/report.json" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# Rendered HTML — index card + per-run table + embedded JSON literal.
+# ---------------------------------------------------------------------------
+
+
+def test_build_dashboard_writes_index_html(tmp_path: Path) -> None:
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    _write_run(runs, _grid_report(), run_name="run-a", sibling_html=True)
+    _write_run(runs, _grid_report(failing_cluster=(0.3, 0.0)), run_name="run-b")
+    out = tmp_path / "out"
+
+    build_dashboard(runs, out)
+
+    index_html = out / "index.html"
+    assert index_html.is_file()
+    body = index_html.read_text(encoding="utf-8")
+    assert body.startswith("<!DOCTYPE html>")
+
+
+def test_build_dashboard_renders_summary_card(tmp_path: Path) -> None:
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    _write_run(runs, _grid_report(), run_name="run-a")
+    _write_run(runs, _grid_report(failing_cluster=(0.3, 0.0)), run_name="run-b")
+    out = tmp_path / "out"
+    build_dashboard(runs, out)
+    body = (out / "index.html").read_text(encoding="utf-8")
+
+    # Index card: numeric counts and rendered mean appear as DOM text.
+    assert 'id="metric-n-runs"' in body
+    assert ">2<" in body  # n_runs = 2
+    assert 'id="metric-n-episodes"' in body
+    assert ">90<" in body  # 45 + 45 episodes
+    assert 'id="metric-mean-success"' in body
+
+
+def test_build_dashboard_renders_per_run_table(tmp_path: Path) -> None:
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    _write_run(runs, _grid_report(), run_name="run-a", sibling_html=True)
+    _write_run(runs, _grid_report(failing_cluster=(0.3, 0.0)), run_name="run-b")
+    out = tmp_path / "out"
+    build_dashboard(runs, out)
+    body = (out / "index.html").read_text(encoding="utf-8")
+
+    assert 'id="runs-tbody"' in body
+    # Each run gets a row with its run_id rendered as <code>.
+    assert "<code>run-a</code>" in body
+    assert "<code>run-b</code>" in body
+    # Sibling report.html is linked when present.
+    assert 'href="run-a/report.html"' in body
+    # No sibling report.html for run-b -> no anchor for it.
+    assert 'href="run-b/report.html"' not in body
+
+
+def test_build_dashboard_embeds_data_block(tmp_path: Path) -> None:
+    """The JSON literal sits in a typed script tag and re-parses cleanly."""
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    _write_run(runs, _grid_report(), run_name="run-a")
+    out = tmp_path / "out"
+    build_dashboard(runs, out)
+    body = (out / "index.html").read_text(encoding="utf-8")
+
+    assert '<script id="dashboard-data" type="application/json">' in body
+    start = body.index('id="dashboard-data"')
+    payload_start = body.index(">", start) + 1
+    payload_end = body.index("</script>", payload_start)
+    parsed = json.loads(body[payload_start:payload_end])
+    assert parsed["summary"]["n_runs"] == 1
+    assert parsed["runs"][0]["run_id"] == "run-a"
+
+
+def test_build_dashboard_title_is_autoescaped(tmp_path: Path) -> None:
+    """User-supplied title flows through Jinja autoescape; raw `<` is escaped."""
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    _write_run(runs, _grid_report(), run_name="run-a")
+    out = tmp_path / "out"
+    build_dashboard(runs, out, title="<script>alert(1)</script>")
+    body = (out / "index.html").read_text(encoding="utf-8")
+    assert "<script>alert(1)</script>" not in body
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in body
+
+
+def test_build_dashboard_empty_dir_raises(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    with pytest.raises(ValueError):
+        build_dashboard(tmp_path, out)
+
+
+def test_build_dashboard_creates_missing_out_dir(tmp_path: Path) -> None:
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    _write_run(runs, _grid_report(), run_name="run-a")
+    out = tmp_path / "deep" / "nested" / "out"
+    assert not out.exists()
+    build_dashboard(runs, out)
+    assert (out / "index.html").is_file()
