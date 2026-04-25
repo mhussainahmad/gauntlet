@@ -193,6 +193,27 @@ The publisher / recorder API is documented in
 see [`examples/publish_episodes_to_ros2.py`](./examples/publish_episodes_to_ros2.py)
 for the equivalent invocation via the public Python API.
 
+### Diffing two runs
+
+`gauntlet compare a.json b.json` answers a binary question (did `b`
+regress against `a` beyond a threshold?). When you're iterating on a
+checkpoint and want a structured, `git diff`-style breakdown of *what*
+moved — per-axis-value rate deltas, per-cell success-rate flips, and the
+failure-cluster set difference — reach for `gauntlet diff`:
+
+```bash
+uv run gauntlet diff out_a/report.json out_b/report.json
+# Or feed episodes.json directly (auto-detected, parity with `compare`):
+uv run gauntlet diff out_a/episodes.json out_b/episodes.json --json | jq
+```
+
+Threshold flags `--cell-flip-threshold` (default `0.10`) and
+`--cluster-intensify-threshold` (default `0.5`) gate the per-cell and
+per-cluster surfacings. Default output is human-readable text on stdout;
+`--json` emits the full `ReportDiff` payload for downstream consumption.
+See [`examples/diff_two_runs.py`](./examples/diff_two_runs.py) for the
+equivalent invocation via the public Python API.
+
 ### Debugging failures with replay
 
 Once a run has flagged an episode as failing, `gauntlet replay` re-
@@ -258,7 +279,8 @@ src/gauntlet/
   monitor/   # Runtime drift detection + action-entropy ([monitor] extra)
   replay/    # Single-episode replay with axis overrides
   ros2/      # ROS 2 publisher + recorder ([ros2] extra; rclpy via apt/Docker)
-  cli.py     # gauntlet run / report / compare / monitor / replay / ros2
+  diff/      # Structured per-axis report deltas powering `gauntlet diff`
+  cli.py     # gauntlet run / report / compare / diff / monitor / replay / ros2
 ```
 
 ## License
