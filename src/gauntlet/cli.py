@@ -1750,6 +1750,141 @@ def monitor_score(
 
 
 # ──────────────────────────────────────────────────────────────────────
+# `monitor conformal` subcommand group — B-01 conformal failure detector.
+# ──────────────────────────────────────────────────────────────────────
+#
+# Numpy-only sibling of the AE drift detector above. ``fit`` consumes a
+# successful-rollout calibration set and writes a tiny ``detector.json``
+# with the per-policy threshold; ``score`` consumes a candidate
+# ``episodes.json`` and writes a copy with ``failure_score`` /
+# ``failure_alarm`` populated. Mirrors the ``monitor train`` / ``score``
+# flow exactly (see above) so users learn one CLI shape.
+
+monitor_conformal_app = typer.Typer(
+    name="conformal",
+    help="Conformal-calibrated failure-prediction detector (B-01).",
+    no_args_is_help=True,
+    add_completion=False,
+)
+monitor_app.add_typer(monitor_conformal_app)
+
+
+@monitor_conformal_app.command("fit")
+def monitor_conformal_fit(
+    calibration_path: Annotated[
+        Path,
+        typer.Argument(
+            help="Calibration episodes.json — successful rollouts from a samplable policy.",
+            dir_okay=False,
+            file_okay=True,
+        ),
+    ],
+    out: Annotated[
+        Path,
+        typer.Option("--out", "-o", help="Output detector.json path."),
+    ],
+    alpha: Annotated[
+        float,
+        typer.Option(
+            "--alpha",
+            help="Target false-positive rate; threshold is the (1-alpha) conformal quantile.",
+        ),
+    ] = 0.05,
+    successful_only: Annotated[
+        bool,
+        typer.Option(
+            "--successful-only/--all-episodes",
+            help=(
+                "Restrict calibration to episodes with success=True (default). "
+                "Pass --all-episodes to include every episode regardless of outcome."
+            ),
+        ),
+    ] = True,
+) -> None:
+    """Fit a :class:`ConformalFailureDetector` on a calibration set."""
+    from gauntlet.monitor.conformal import ConformalFailureDetector
+
+    raw = _read_json(calibration_path)
+    if not isinstance(raw, list):
+        raise _fail(
+            f"{calibration_path}: expected an episodes.json (top-level list); "
+            f"got {type(raw).__name__}",
+        )
+    episodes = _episodes_from_dicts(raw, source=calibration_path)
+    if successful_only:
+        episodes = [ep for ep in episodes if ep.success]
+
+    try:
+        detector = ConformalFailureDetector.fit(episodes, alpha=alpha)
+    except ValueError as exc:
+        raise _fail(f"monitor conformal fit failed: {exc}") from exc
+
+    detector.save(out)
+    _echo_err(
+        f"[ok]Wrote[/] detector.json -> {_fmt_path(out)} "
+        f"(n_calibration={detector.n_calibration}, "
+        f"alpha={detector.alpha:g}, threshold={detector.threshold:.4g})"
+    )
+
+
+@monitor_conformal_app.command("score")
+def monitor_conformal_score(
+    episodes_path: Annotated[
+        Path,
+        typer.Argument(
+            help="Candidate episodes.json to score.",
+            dir_okay=False,
+            file_okay=True,
+        ),
+    ],
+    detector_path: Annotated[
+        Path,
+        typer.Option(
+            "--detector",
+            help="Detector JSON written by ``gauntlet monitor conformal fit``.",
+        ),
+    ],
+    out: Annotated[
+        Path,
+        typer.Option("--out", "-o", help="Output episodes.json path with scores populated."),
+    ],
+) -> None:
+    """Score an episodes.json against a fitted detector and emit a copy."""
+    from gauntlet.monitor.conformal import ConformalFailureDetector
+
+    raw = _read_json(episodes_path)
+    if not isinstance(raw, list):
+        raise _fail(
+            f"{episodes_path}: expected an episodes.json (top-level list); "
+            f"got {type(raw).__name__}",
+        )
+    episodes = _episodes_from_dicts(raw, source=episodes_path)
+
+    try:
+        detector = ConformalFailureDetector.load(detector_path)
+    except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
+        raise _fail(f"could not load detector: {exc}") from exc
+
+    n_alarm = 0
+    n_scored = 0
+    for ep in episodes:
+        score, alarm = detector.score(ep)
+        ep.failure_score = score
+        ep.failure_alarm = alarm
+        if score is not None:
+            n_scored += 1
+        if alarm:
+            n_alarm += 1
+
+    _write_json(out, cast("_JsonValue", _episodes_to_dicts(episodes)))
+    _echo_err(
+        f"[ok]Wrote[/] {_fmt_path(out)} "
+        f"(n_episodes={len(episodes)}, n_scored={n_scored}, "
+        f"n_alarms={n_alarm}, threshold={detector.threshold:.4g})"
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────
 # `replay` subcommand — see ``docs/phase2-rfc-004-trajectory-replay.md``.
 # ──────────────────────────────────────────────────────────────────────
 
