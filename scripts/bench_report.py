@@ -13,16 +13,23 @@ flips deterministically off a seeded :class:`numpy.random.Generator`
 to keep the run reproducible across machines.
 
 Usage:
-    uv run python scripts/bench_report.py [--seed S] [--quick]
+    uv run --no-sync python scripts/bench_report.py [--seed S] [--quick]
+                                                    [--out PATH]
 
-The final stdout line is a single JSON object so a CI job can ``tail -n 1``.
+Outputs:
+    * Text table to stdout.
+    * Single-line JSON summary as the *last* line of stdout
+      (CI can ``tail -n 1``).
+    * JSON sidecar file ``bench_report.json`` (override with ``--out``).
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import sys
 import time
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -103,7 +110,20 @@ def _bench_one_size(*, n: int, rng: np.random.Generator) -> dict[str, Any]:
     }
 
 
-def main(*, sizes: tuple[int, ...], seed: int, quick: bool) -> dict[str, Any]:
+def _emit_sidecar(summary: dict[str, Any], out_path: Path) -> None:
+    """Write the summary dict to ``out_path`` as pretty-printed JSON."""
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    print(f"  wrote sidecar: {out_path}")
+
+
+def main(
+    *,
+    sizes: tuple[int, ...],
+    seed: int,
+    quick: bool,
+    out_path: Path,
+) -> dict[str, Any]:
     """Run the sweep and return the summary dict."""
     print(f"bench_report: sizes={list(sizes)} seed={seed} quick={quick}")
 
@@ -128,6 +148,7 @@ def main(*, sizes: tuple[int, ...], seed: int, quick: bool) -> dict[str, Any]:
         "seed": seed,
         "cases": cases,
     }
+    _emit_sidecar(summary, out_path)
     print(json.dumps(summary))
     return summary
 
@@ -142,10 +163,22 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help=(f"Smoke run: drops the N=10000 case (sweep becomes {list(_QUICK_SIZES)})."),
     )
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=Path("bench_report.json"),
+        help="Sidecar JSON output path. Default: bench_report.json in cwd.",
+    )
     return parser.parse_args(argv)
 
 
 if __name__ == "__main__":  # pragma: no cover
     args = _parse_args()
     sizes_to_use = _QUICK_SIZES if args.quick else _DEFAULT_SIZES
-    main(sizes=sizes_to_use, seed=args.seed, quick=args.quick)
+    main(
+        sizes=sizes_to_use,
+        seed=args.seed,
+        quick=args.quick,
+        out_path=args.out,
+    )
+    sys.exit(0)
