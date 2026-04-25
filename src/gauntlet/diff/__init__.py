@@ -20,10 +20,14 @@ Public surface:
 
 from __future__ import annotations
 
+from gauntlet.diff.diff import VERDICT_IMPROVED as VERDICT_IMPROVED
+from gauntlet.diff.diff import VERDICT_REGRESSED as VERDICT_REGRESSED
+from gauntlet.diff.diff import VERDICT_WITHIN_NOISE as VERDICT_WITHIN_NOISE
 from gauntlet.diff.diff import AxisDelta as AxisDelta
 from gauntlet.diff.diff import CellFlip as CellFlip
 from gauntlet.diff.diff import ClusterDelta as ClusterDelta
 from gauntlet.diff.diff import ReportDiff as ReportDiff
+from gauntlet.diff.diff import Verdict as Verdict
 from gauntlet.diff.diff import diff_reports as diff_reports
 from gauntlet.diff.paired import McNemarResult as McNemarResult
 from gauntlet.diff.paired import PairedCellDelta as PairedCellDelta
@@ -36,6 +40,9 @@ from gauntlet.diff.paired import paired_delta_ci as paired_delta_ci
 from gauntlet.diff.render import render_text as render_text
 
 __all__ = [
+    "VERDICT_IMPROVED",
+    "VERDICT_REGRESSED",
+    "VERDICT_WITHIN_NOISE",
     "AxisDelta",
     "CellFlip",
     "ClusterDelta",
@@ -44,6 +51,7 @@ __all__ = [
     "PairedComparison",
     "PairingError",
     "ReportDiff",
+    "Verdict",
     "compute_paired_cells",
     "diff_reports",
     "mcnemar_test",

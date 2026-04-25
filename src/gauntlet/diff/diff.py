@@ -36,12 +36,34 @@ from gauntlet.diff.paired import PairedCellDelta, PairedComparison
 from gauntlet.report import FailureCluster, Report
 
 __all__ = [
+    "VERDICT_IMPROVED",
+    "VERDICT_REGRESSED",
+    "VERDICT_WITHIN_NOISE",
     "AxisDelta",
     "CellFlip",
     "ClusterDelta",
     "ReportDiff",
+    "Verdict",
     "diff_reports",
 ]
+
+
+# B-20: regression-vs-noise attribution. ``Verdict`` reflects whether a
+# cell-flip's delta crossed the threshold *and* the per-cell CI bracket
+# (Wilson on each side from B-03, or the CRN-paired Newcombe/Tango on
+# the difference from B-08) provides any evidence the flip is real
+# rather than sample noise.
+Verdict = Literal["regressed", "improved", "within_noise"]
+VERDICT_REGRESSED: Verdict = "regressed"
+VERDICT_IMPROVED: Verdict = "improved"
+VERDICT_WITHIN_NOISE: Verdict = "within_noise"
+
+# McNemar override threshold: when the paired CI clears zero but the
+# McNemar p-value on the discordant-pair contingency table exceeds
+# this, downgrade the verdict to ``within_noise``. The 0.05 cut-off
+# matches the conventional alpha used elsewhere in the project (see
+# ``gauntlet.diff.paired`` docstring on Agresti / SciPy defaults).
+VERDICT_MCNEMAR_ALPHA = 0.05
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -80,6 +102,25 @@ class CellFlip(BaseModel):
     decide whether a flip is ``regressed`` / ``improved`` in earnest or
     ``within_noise``; without B-08's CRN reduction the bracket on the
     delta is too loose to support that decision.
+
+    ``verdict`` is the B-20 tag — ``regressed`` / ``improved`` /
+    ``within_noise`` — and is computed as follows (see
+    :func:`_compute_verdict`):
+
+    * **Paired path** (``paired=True`` and the delta CI populated): the
+      bracket on the paired delta directly answers whether zero is in
+      scope. ``within_noise`` if it brackets zero or if the McNemar
+      p-value exceeds 0.05; otherwise the sign of the point delta picks
+      ``regressed`` vs ``improved``.
+    * **Unpaired-but-Wilson** path (CIs on both ``CellBreakdown`` sides,
+      no paired delta CI): the conservative independent-Wilson bracket
+      on the delta is ``[b.ci_low - a.ci_high, b.ci_high - a.ci_low]``.
+      ``within_noise`` if it straddles zero; else point-delta sign picks.
+    * **Legacy** path (any CI missing): falls back to the unsafe binary
+      direction tag — ``regressed`` if delta < 0 else ``improved``.
+
+    Defaults to ``None`` so legacy diff JSONs (pre-B-20) round-trip; new
+    diffs always populate it through :func:`diff_reports`.
     """
 
     model_config = ConfigDict(extra="forbid", ser_json_inf_nan="strings")
@@ -93,6 +134,7 @@ class CellFlip(BaseModel):
     delta_ci_low: float | None = None
     delta_ci_high: float | None = None
     mcnemar_p_value: float | None = None
+    verdict: Verdict | None = None
 
 
 class ClusterDelta(BaseModel):
@@ -161,6 +203,71 @@ def _cell_key(perturbation_config: dict[str, float]) -> frozenset[tuple[str, flo
 def _cluster_key(cluster: FailureCluster) -> frozenset[tuple[str, float]]:
     """Stable hashable identity for a failure cluster's axis pair."""
     return frozenset((k, _norm(v)) for k, v in cluster.axes.items())
+
+
+def _compute_verdict(
+    delta: float,
+    *,
+    paired_cell: PairedCellDelta | None,
+    a_ci_low: float | None,
+    a_ci_high: float | None,
+    b_ci_low: float | None,
+    b_ci_high: float | None,
+) -> Verdict:
+    """Tag a cell-flip as ``regressed`` / ``improved`` / ``within_noise`` (B-20).
+
+    Three-tier decision tree (preferred-path-first):
+
+    1. **Paired CRN** (``paired_cell is not None``): the Newcombe / Tango
+       Wald CI on the paired success-rate difference (B-08) brackets zero
+       → ``within_noise``. McNemar's two-sided p-value above
+       :data:`VERDICT_MCNEMAR_ALPHA` also forces ``within_noise`` —
+       discordant-pair imbalance is the only paired evidence we have, and
+       a high p means we cannot reject H0 even when the Wald bracket is
+       narrow. Otherwise the sign of ``delta`` (``b_success_rate -
+       a_success_rate``) picks ``regressed`` (negative) or ``improved``
+       (positive).
+    2. **Independent Wilson** (both sides expose ``ci_low`` / ``ci_high``
+       from B-03): the worst-case CI on the delta is ``[b_low - a_high,
+       b_high - a_low]``. If it straddles zero the flip is within noise;
+       else the point delta sign picks. This bracket is wider than the
+       paired one (Var[X-Y] = Var[X]+Var[Y] under independence) so it
+       under-flags more aggressively — that's the price of skipping CRN.
+    3. **Legacy** (any CI is ``None`` — pre-B-03 report.json): no
+       statistical evidence available. Fall back to the binary point-delta
+       direction so the verdict field is always populated; users can spot
+       the legacy path by the absence of CIs in the JSON output.
+
+    Caller is expected to feed ``delta = b_success_rate - a_success_rate``;
+    this matches :class:`CellFlip` and the paired delta convention.
+    """
+    if (
+        paired_cell is not None
+        and paired_cell.delta_ci_low is not None
+        and paired_cell.delta_ci_high is not None
+    ):
+        if paired_cell.delta_ci_low <= 0.0 <= paired_cell.delta_ci_high:
+            return VERDICT_WITHIN_NOISE
+        if paired_cell.mcnemar.p_value > VERDICT_MCNEMAR_ALPHA:
+            return VERDICT_WITHIN_NOISE
+        return VERDICT_REGRESSED if delta < 0 else VERDICT_IMPROVED
+
+    if (
+        a_ci_low is not None
+        and a_ci_high is not None
+        and b_ci_low is not None
+        and b_ci_high is not None
+    ):
+        delta_low = b_ci_low - a_ci_high
+        delta_high = b_ci_high - a_ci_low
+        if delta_low <= 0.0 <= delta_high:
+            return VERDICT_WITHIN_NOISE
+        return VERDICT_REGRESSED if delta < 0 else VERDICT_IMPROVED
+
+    # Legacy fallback: no CI evidence — keep the unsafe binary tag so the
+    # verdict field is never null in fresh diffs, but do not pretend it
+    # is statistically defensible.
+    return VERDICT_REGRESSED if delta < 0 else VERDICT_IMPROVED
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -265,6 +372,14 @@ def diff_reports(
             paired_cell: PairedCellDelta | None = paired_by_cell_index.get(cb.cell_index)
             if paired_cell is None:
                 paired_cell = paired_by_config.get(key)
+            verdict = _compute_verdict(
+                delta,
+                paired_cell=paired_cell,
+                a_ci_low=ca.ci_low,
+                a_ci_high=ca.ci_high,
+                b_ci_low=cb.ci_low,
+                b_ci_high=cb.ci_high,
+            )
             if paired_cell is not None:
                 flips.append(
                     CellFlip(
@@ -279,6 +394,7 @@ def diff_reports(
                         delta_ci_low=paired_cell.delta_ci_low,
                         delta_ci_high=paired_cell.delta_ci_high,
                         mcnemar_p_value=paired_cell.mcnemar.p_value,
+                        verdict=verdict,
                     )
                 )
             else:
@@ -291,6 +407,7 @@ def diff_reports(
                         a_success_rate=ca.success_rate,
                         b_success_rate=cb.success_rate,
                         direction=direction,
+                        verdict=verdict,
                     )
                 )
     # Stable order: regressions first (most negative), then improvements
