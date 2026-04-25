@@ -554,6 +554,36 @@ def run(
             ),
         ),
     ] = None,
+    prune_after_cells: Annotated[
+        int | None,
+        typer.Option(
+            "--prune-after-cells",
+            help=(
+                "B-26 Optuna-style early-stop: check the running success-rate "
+                "Wilson 95%% CI every N cells; abort the run when the CI clearly "
+                "straddles --prune-min-success from above or below. PRUNING "
+                "DESTROYS FAIR SAMPLING — only use when you want a quick "
+                "pass/fail screen, not a full report. Must be paired with "
+                "--prune-min-success. Force-disabled (warn-and-continue) when "
+                "the suite uses sampling=sobol."
+            ),
+            min=1,
+        ),
+    ] = None,
+    prune_min_success: Annotated[
+        float | None,
+        typer.Option(
+            "--prune-min-success",
+            help=(
+                "B-26 pass/fail threshold for early-stop pruning, in [0, 1]. "
+                "PRUNING DESTROYS FAIR SAMPLING — only use when you want a "
+                "quick pass/fail screen, not a full report. Must be paired "
+                "with --prune-after-cells."
+            ),
+            min=0.0,
+            max=1.0,
+        ),
+    ] = None,
 ) -> None:
     """Execute a suite and write episodes / report artefacts to ``--out``."""
     if not suite_path.is_file():
@@ -603,8 +633,24 @@ def run(
     except ValueError as exc:
         raise _fail(f"runner config invalid: {exc}") from exc
 
+    # B-26: surface "only one of the prune flags was passed" as a
+    # config error before the runner does, so the user sees a clean
+    # CLI message instead of "runner failed: ...".
+    if (prune_after_cells is None) ^ (prune_min_success is None):
+        raise _fail(
+            "--prune-after-cells and --prune-min-success must be supplied "
+            "together; got "
+            f"--prune-after-cells={prune_after_cells!r}, "
+            f"--prune-min-success={prune_min_success!r}.",
+        )
+
     try:
-        episodes = runner.run(policy_factory=policy_factory, suite=suite)
+        episodes = runner.run(
+            policy_factory=policy_factory,
+            suite=suite,
+            prune_after_cells=prune_after_cells,
+            prune_min_success=prune_min_success,
+        )
     except ValueError as exc:
         raise _fail(f"runner failed: {exc}") from exc
 
@@ -612,6 +658,12 @@ def run(
         report = build_report(episodes, suite_env=suite.env, sampling=suite.sampling)
     except ValueError as exc:
         raise _fail(f"could not build report: {exc}") from exc
+
+    # B-26: stamp the prune cell count onto the report after build_report
+    # runs (build_report has no notion of pruning by design — the schema
+    # field is the boundary).
+    if runner.last_pruned_at_cell is not None:
+        report = report.model_copy(update={"pruned_at_cell": runner.last_pruned_at_cell})
 
     episodes_path = out / "episodes.json"
     report_json_path = out / "report.json"
