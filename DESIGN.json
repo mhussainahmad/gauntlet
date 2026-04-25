@@ -1,0 +1,222 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-04-25T00:00:00Z",
+  "title": "Design System: Gauntlet",
+  "extensions": {
+    "colorMeta": {
+      "ink-black": {
+        "role": "neutral",
+        "displayName": "Ink Black",
+        "canonical": "oklch(22% 0 0)",
+        "tonalRamp": ["oklch(15% 0 0)", "oklch(22% 0 0)", "oklch(33% 0 0)", "oklch(46% 0 0)", "oklch(60% 0 0)", "oklch(74% 0 0)", "oklch(86% 0 0)", "oklch(95% 0 0)"]
+      },
+      "gravel": {
+        "role": "neutral",
+        "displayName": "Gravel",
+        "canonical": "oklch(46% 0 0)",
+        "tonalRamp": ["oklch(15% 0 0)", "oklch(22% 0 0)", "oklch(33% 0 0)", "oklch(46% 0 0)", "oklch(60% 0 0)", "oklch(74% 0 0)", "oklch(86% 0 0)", "oklch(95% 0 0)"]
+      },
+      "paper": {
+        "role": "neutral",
+        "displayName": "Paper",
+        "canonical": "oklch(98% 0 0)",
+        "tonalRamp": ["oklch(15% 0 0)", "oklch(22% 0 0)", "oklch(33% 0 0)", "oklch(46% 0 0)", "oklch(60% 0 0)", "oklch(74% 0 0)", "oklch(86% 0 0)", "oklch(98% 0 0)"]
+      },
+      "page-white": {
+        "role": "neutral",
+        "displayName": "Page White",
+        "canonical": "oklch(100% 0 0)",
+        "tonalRamp": ["oklch(15% 0 0)", "oklch(22% 0 0)", "oklch(33% 0 0)", "oklch(46% 0 0)", "oklch(60% 0 0)", "oklch(74% 0 0)", "oklch(86% 0 0)", "oklch(100% 0 0)"]
+      },
+      "hairline": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "oklch(91% 0 0)",
+        "tonalRamp": ["oklch(15% 0 0)", "oklch(22% 0 0)", "oklch(33% 0 0)", "oklch(46% 0 0)", "oklch(60% 0 0)", "oklch(74% 0 0)", "oklch(86% 0 0)", "oklch(91% 0 0)"]
+      },
+      "header-wash": {
+        "role": "neutral",
+        "displayName": "Header Wash",
+        "canonical": "oklch(94% 0 0)",
+        "tonalRamp": ["oklch(15% 0 0)", "oklch(22% 0 0)", "oklch(33% 0 0)", "oklch(46% 0 0)", "oklch(60% 0 0)", "oklch(74% 0 0)", "oklch(86% 0 0)", "oklch(94% 0 0)"]
+      },
+      "pass-green": {
+        "role": "primary",
+        "displayName": "Pass Green",
+        "canonical": "oklch(63% 0.18 142)",
+        "tonalRamp": ["oklch(20% 0.06 142)", "oklch(30% 0.10 142)", "oklch(42% 0.14 142)", "oklch(53% 0.17 142)", "oklch(63% 0.18 142)", "oklch(74% 0.16 142)", "oklch(85% 0.10 142)", "oklch(95% 0.04 142)"]
+      },
+      "fail-red": {
+        "role": "primary",
+        "displayName": "Fail Red",
+        "canonical": "oklch(58% 0.21 28)",
+        "tonalRamp": ["oklch(20% 0.08 28)", "oklch(30% 0.12 28)", "oklch(42% 0.17 28)", "oklch(50% 0.21 28)", "oklch(58% 0.21 28)", "oklch(70% 0.18 28)", "oklch(83% 0.12 28)", "oklch(95% 0.04 28)"]
+      },
+      "caution-amber": {
+        "role": "primary",
+        "displayName": "Caution Amber",
+        "canonical": "oklch(78% 0.14 70)",
+        "tonalRamp": ["oklch(25% 0.06 70)", "oklch(36% 0.09 70)", "oklch(48% 0.12 70)", "oklch(60% 0.14 70)", "oklch(70% 0.15 70)", "oklch(78% 0.14 70)", "oklch(88% 0.09 70)", "oklch(96% 0.04 70)"]
+      },
+      "no-data-gray": {
+        "role": "neutral",
+        "displayName": "No-Data Gray",
+        "canonical": "oklch(84% 0 0)",
+        "tonalRamp": ["oklch(15% 0 0)", "oklch(22% 0 0)", "oklch(33% 0 0)", "oklch(46% 0 0)", "oklch(60% 0 0)", "oklch(74% 0 0)", "oklch(84% 0 0)", "oklch(95% 0 0)"]
+      },
+      "trace-blue": {
+        "role": "secondary",
+        "displayName": "Trace Blue",
+        "canonical": "oklch(52% 0.13 248)",
+        "tonalRamp": ["oklch(20% 0.06 248)", "oklch(30% 0.09 248)", "oklch(42% 0.12 248)", "oklch(52% 0.13 248)", "oklch(62% 0.13 248)", "oklch(73% 0.10 248)", "oklch(85% 0.06 248)", "oklch(96% 0.02 248)"]
+      }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "The single page-level <h1> identifying the report's suite. One per page." },
+      "headline": { "displayName": "Headline", "purpose": "Section headings (\"Where it failed\", \"Per-axis success rate\")." },
+      "title": { "displayName": "Title", "purpose": "Sub-section headings inside chart cards — axis names, heatmap pair names." },
+      "metric-value": { "displayName": "Metric Value", "purpose": "Big numbers on summary cards. Tabular nums for column-perfect alignment." },
+      "body": { "displayName": "Body", "purpose": "Paragraph text and table cell content." },
+      "subtle": { "displayName": "Subtle", "purpose": "Captions, run mtimes, secondary metadata." },
+      "label": { "displayName": "Label", "purpose": "Uppercase tracked labels above metric values (\"FAILURE RATE\", \"EPISODES\")." },
+      "code": { "displayName": "Code", "purpose": "Axis values, run IDs, perturbation configs — anything an engineer might grep for." },
+      "heatmap-cell": { "displayName": "Heatmap Cell", "purpose": "Percentage labels inside diverging-color heatmap cells." }
+    },
+    "shadows": [
+      {
+        "name": "heatmap-text",
+        "value": "0 1px 1px rgba(0, 0, 0, 0.25)",
+        "purpose": "Functional text shadow on Page White heatmap-cell labels so they stay legible across the full diverging-color background range. The ONLY allowed shadow in the system."
+      }
+    ],
+    "motion": [
+      {
+        "name": "chart-default",
+        "value": "Chart.js default easing (cubic-bezier ease-out)",
+        "purpose": "Bar/line chart value transitions. Disabled when prefers-reduced-motion: reduce."
+      },
+      {
+        "name": "focus",
+        "value": "150ms ease-out",
+        "purpose": "Select-filter focus ring transition. Layout properties never animate."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "chart-row-min",
+        "value": "280px",
+        "purpose": "grid auto-fit minmax for chart-row layout — cards reflow below ~3 columns wide on narrower viewports."
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "The system's primary container. Flat, hairline-bordered, on Page White over Paper.",
+      "html": "<div class=\"ds-card\"><h2 class=\"ds-card-heading\">Where it failed</h2><p class=\"ds-card-body\">3 statistically significant failure clusters detected.</p></div>",
+      "css": ".ds-card { background: #ffffff; border: 1px solid #e1e1e1; border-radius: 8px; padding: 16px 20px; color: #1a1a1a; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.4; } .ds-card-heading { font-size: 1.25rem; font-weight: 600; margin: 0 0 8px; } .ds-card-body { margin: 0; font-size: 1rem; color: #1a1a1a; }"
+    },
+    {
+      "name": "Pass / Fail / Warn Dot",
+      "kind": "custom",
+      "refersTo": "fail-dot",
+      "description": "32px circle with a subtle 2px ring. The loudest visual primitive in the system. Always paired with a metric value, never standalone.",
+      "html": "<div class=\"ds-summary-row\"><span class=\"ds-dot ds-dot-fail\" role=\"img\" aria-label=\"failing\"></span><div class=\"ds-metric-tile\"><div class=\"ds-metric-label\">Failure rate</div><div class=\"ds-metric-value ds-metric-value-fail\">42.1%</div></div></div>",
+      "css": ".ds-summary-row { display: flex; align-items: center; gap: 16px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; } .ds-dot { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(0, 0, 0, 0.15); flex-shrink: 0; } .ds-dot-pass { background: #2ca02c; } .ds-dot-fail { background: #d62728; } .ds-dot-warn { background: #f0ad4e; } .ds-metric-tile { display: flex; flex-direction: column; gap: 2px; } .ds-metric-label { font-size: 0.75rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #555555; } .ds-metric-value { font-size: 1.5rem; font-weight: 600; font-variant-numeric: tabular-nums; color: #1a1a1a; line-height: 1.2; } .ds-metric-value-fail { color: #d62728; }"
+    },
+    {
+      "name": "Failure Cluster Table",
+      "kind": "custom",
+      "refersTo": "card",
+      "description": "The most important table in the product. Worst-failing row sits at the top, renders heavier, and uses Fail Red on the failure-rate cell — three reinforcing signals of rank.",
+      "html": "<table class=\"ds-table ds-table-clusters\"><thead><tr><th>Axis combination</th><th class=\"ds-num\">n</th><th class=\"ds-num\">Failure rate</th><th class=\"ds-num\">Lift (×)</th></tr></thead><tbody><tr class=\"ds-row-rank-loud\"><td><code>lighting=0.4 ∧ texture=wood</code></td><td class=\"ds-num\">24</td><td class=\"ds-num ds-num-fail\">100.0%</td><td class=\"ds-num\">2.40×</td></tr><tr><td><code>lighting=0.4 ∧ texture=metal</code></td><td class=\"ds-num\">24</td><td class=\"ds-num\">79.2%</td><td class=\"ds-num\">1.90×</td></tr><tr><td><code>lighting=0.6 ∧ texture=wood</code></td><td class=\"ds-num\">24</td><td class=\"ds-num\">66.7%</td><td class=\"ds-num\">1.60×</td></tr></tbody></table>",
+      "css": ".ds-table { border-collapse: collapse; width: 100%; font-size: 0.9rem; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; color: #1a1a1a; } .ds-table th, .ds-table td { border-bottom: 1px solid #e1e1e1; padding: 6px 10px; text-align: left; vertical-align: top; } .ds-table th { background: #f0f0f0; font-weight: 600; } .ds-table tbody tr:hover { background: #fafafa; } .ds-num { text-align: right; font-variant-numeric: tabular-nums; } .ds-num-fail { color: #d62728; font-weight: 600; } .ds-row-rank-loud td { font-weight: 600; } .ds-table code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.85rem; }"
+    },
+    {
+      "name": "Heatmap Cell",
+      "kind": "custom",
+      "refersTo": "heatmap-cell",
+      "description": "Diverging green→red cell of an axis-pair heatmap. Color follows the Tab10-derived heatColor() interpolation. Empty cells use No-Data Gray and an em-dash. Each cell carries a title attribute so screen readers get the full label even when mid-range cells fall below AA text contrast — see the Heatmap Contrast Exception in DESIGN.md §4.",
+      "html": "<div class=\"ds-heatmap\" role=\"table\" aria-label=\"Success rate by texture × lighting\"><div class=\"ds-heatmap-cell\" style=\"background: rgb(214, 39, 40);\" title=\"texture=wood × lighting=0.4: 0% success, n=24\">0%</div><div class=\"ds-heatmap-cell\" style=\"background: rgb(170, 75, 41);\" title=\"texture=wood × lighting=0.5: 21% success, n=24\">21%</div><div class=\"ds-heatmap-cell\" style=\"background: rgb(108, 124, 42);\" title=\"texture=wood × lighting=0.6: 50% success, n=24\">50%</div><div class=\"ds-heatmap-cell\" style=\"background: rgb(60, 152, 43);\" title=\"texture=metal × lighting=0.6: 79% success, n=24\">79%</div><div class=\"ds-heatmap-cell\" style=\"background: rgb(44, 160, 44);\" title=\"texture=metal × lighting=0.8: 100% success, n=24\">100%</div><div class=\"ds-heatmap-cell ds-heatmap-cell-empty\" title=\"no data\">—</div></div>",
+      "css": ".ds-heatmap { display: inline-grid; grid-template-columns: repeat(6, 56px); gap: 2px; background: #e1e1e1; padding: 2px; border-radius: 4px; } .ds-heatmap-cell { width: 56px; height: 32px; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 600; font-variant-numeric: tabular-nums; color: #ffffff; text-shadow: 0 1px 1px rgba(0, 0, 0, 0.25); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; cursor: help; } .ds-heatmap-cell-empty { background: #d0d0d0 !important; color: #555555; text-shadow: none; }"
+    },
+    {
+      "name": "Section Heading",
+      "kind": "custom",
+      "refersTo": "headline",
+      "description": "Section heading (h2). Generous top margin separates the page into question-shaped chunks.",
+      "html": "<h2 class=\"ds-section-heading\">Per-axis success rate</h2><p class=\"ds-subtle\">Overall pass rate: 57.9% (139/240 episodes)</p>",
+      "css": ".ds-section-heading { font-size: 1.25rem; font-weight: 600; margin: 32px 0 8px; color: #1a1a1a; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.3; } .ds-subtle { font-size: 0.9rem; font-weight: 400; color: #555555; margin: 0; line-height: 1.4; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; }"
+    },
+    {
+      "name": "Select Filter",
+      "kind": "input",
+      "refersTo": "select-filter",
+      "description": "The dashboard's filter primitive. Native <select>, native dropdown, with on-brand chrome. Trace Blue is the focus accent.",
+      "html": "<label class=\"ds-select-filter-wrap\"><span class=\"ds-select-filter-label\">env</span><select class=\"ds-select-filter\"><option>(all)</option><option>tabletop</option><option>tabletop-pybullet</option><option>tabletop-genesis</option></select></label>",
+      "css": ".ds-select-filter-wrap { display: inline-flex; align-items: center; gap: 8px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; color: #1a1a1a; } .ds-select-filter-label { font-size: 0.75rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #555555; } .ds-select-filter { background: #ffffff; color: #1a1a1a; border: 1px solid #e1e1e1; border-radius: 4px; padding: 6px 10px; font-size: 1rem; font-family: inherit; transition: border-color 150ms ease-out, box-shadow 150ms ease-out; } .ds-select-filter:focus-visible { outline: none; border-color: #1f77b4; box-shadow: 0 0 0 2px rgba(31, 119, 180, 0.25); } .ds-select-filter:disabled { opacity: 0.5; cursor: not-allowed; }"
+    },
+    {
+      "name": "Details / Summary Disclosure",
+      "kind": "custom",
+      "refersTo": "card",
+      "description": "Wraps the per-cell wall-of-numbers table. Browser-native disclosure triangle, no chevron decoration.",
+      "html": "<details class=\"ds-details\"><summary class=\"ds-summary\">Per-cell breakdown (144 cells) — expand for the full table</summary><div class=\"ds-card\" style=\"margin-top: 8px;\"><p class=\"ds-card-body\">[Full per-cell table renders here.]</p></div></details>",
+      "css": ".ds-details { margin-top: 12px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; color: #1a1a1a; } .ds-summary { cursor: pointer; font-weight: 600; padding: 4px 0; font-size: 1rem; line-height: 1.4; } .ds-summary:focus-visible { outline: 2px solid #1f77b4; outline-offset: 2px; border-radius: 2px; } .ds-card { background: #ffffff; border: 1px solid #e1e1e1; border-radius: 8px; padding: 16px 20px; } .ds-card-body { margin: 0; font-size: 1rem; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Bug Report",
+    "overview": "Gauntlet's design takes its cues from the rhetorical mode of a senior engineer's bug report, not a SaaS dashboard. A bug report does not decorate. It lists the failure first, names the reproduction conditions exactly, ranks severity by position, and trusts the reader to know the vocabulary. Every visual choice in Gauntlet is derived from that posture: failures lead, numbers are exact, and the page contains nothing that does not contribute to a decision.\n\nThe system is deliberately flat, single-column, and almost monochrome, so the moments when color does appear — the pass / fail / warn dot, a red row at the top of the failure cluster table, a saturated cell in a heatmap — carry the weight they should. Color is not theme; it is signal. The chrome stays out of the way, in low-contrast neutrals on the same near-white paper an engineer would print this report onto. There is no dark mode and no marketing chrome and no celebratory empty-state. The user already knows what success looks like; we are here for the failures.\n\nThis system explicitly rejects: SaaS observability marketing aesthetics (Datadog / New Relic landing pages), the hero-metric template, gradient-clipped text, glassmorphism, decorative motion, and any pass/fail signaling that depends on color alone.",
+    "keyCharacteristics": [
+      "Failure-first hierarchy — the failure rate, not success, is the headline metric.",
+      "Flat, hairline-bordered cards on near-white paper. No shadows.",
+      "System font stack — fast, native, never needs a font-face download.",
+      "Tabular numerals everywhere. Rank order is the loudest signal on the page.",
+      "Two color systems running in parallel: low-chroma chrome and high-chroma semantic state.",
+      "Static HTML, opens from disk, no network round-trip required at view time."
+    ],
+    "rules": [
+      { "name": "The Tab10 Pact", "body": "The pass / fail / warn / trace colors are taken directly from Matplotlib's tab10 qualitative palette, on purpose. Every robotics engineer reading a Gauntlet report has been calibrated by Matplotlib for years; picking different greens or reds would be cosmetic vanity at the cost of legibility. Do not \"improve\" them.", "section": "colors" },
+      { "name": "The Two-System Rule", "body": "Chrome colors and semantic colors are separate vocabularies that never blend. A button is never pass-green. A page background is never caution-amber. If a non-state element wants to be saturated, the design is wrong, not the token.", "section": "colors" },
+      { "name": "The 5% Color Budget", "body": "Across any single screen, the combined surface area of saturated color (pass/fail/warn/trace) should not exceed roughly 5%. Failure clusters are red; everything else is grayscale. The rarity is what makes red mean failure.", "section": "colors" },
+      { "name": "The Tabular Numerals Rule", "body": "Every numeric value uses font-variant-numeric: tabular-nums. Always. This is non-negotiable: numbers in a Gauntlet report exist to be compared by eye in a column, and proportional digits make that impossible.", "section": "typography" },
+      { "name": "The One H1 Rule", "body": "Each report page has exactly one h1, and it identifies the suite. The h1 is never used decoratively or repeated.", "section": "typography" },
+      { "name": "The Don't-Explain Rule", "body": "No paragraph of body copy explains what the page is for. The h1 names the report; the section headings name the question; the data answers it. There is no introduction.", "section": "typography" },
+      { "name": "The Flat-By-Default Rule", "body": "Surfaces are flat at rest. There is no hover-lift, no card shadow, no menu shadow. The only \"lift\" in the system is the 2-step Paper to Page White contrast.", "section": "elevation" },
+      { "name": "The No Drop Shadows Rule", "body": "box-shadow is forbidden on cards, buttons, modals, and tooltips. If a designer reaches for one, the structure is wrong — return to the hairline.", "section": "elevation" },
+      { "name": "The Heatmap Contrast Exception", "body": "The diverging green→red heatmap trades WCAG AA text contrast at mid-range cells (rate ≈ 0.4–0.6 lands on a brownish-olive ~3.4:1 against white text) for the value of an unbroken diverging signal. This is an acknowledged exception, not an oversight. Every heatmap cell must carry a screen-reader text alternative (title or aria-label) with the full label so the information is lossless to SR users even when mid-band visual contrast dips. The exception is scoped strictly to the heatmap surface; everything else stays at AA or above.", "section": "elevation" },
+      { "name": "The Cards-Only-When-Necessary Rule", "body": "A card exists to contain one answer to one question. If a section's answer is a single number, it goes in a metric tile inside an existing card — not in its own card. Nested cards are forbidden.", "section": "elevation" },
+      { "name": "The No Side-Stripe Rule", "body": "Never use a border-left greater than 1px as a colored accent on a card, list item, or alert. If something needs to read as \"important\" or \"failing\", use a metric value color or row weight, never a side stripe.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do lead the page with the failure rate, not the success rate. The summary card's headline metric is failure, every time.",
+      "Do apply font-variant-numeric: tabular-nums to every numeric value — metric values, table cells, heatmap cells, axis ticks. Without exception.",
+      "Do pair every pass/fail color signal with a non-color signal — shape, position, label, or icon. The summary dot has a 2px border ring for monochrome viewers; the failure-cluster row sits at the top and renders heavier and uses Fail Red.",
+      "Do use the system font stack. Reports open from disk; a custom face would FOIT or fail.",
+      "Do keep the chrome low-chroma so saturated color reads as signal. The 5% Color Budget rule is the test.",
+      "Do match the heatColor() interpolation byte-for-byte between report.html.jinja and dashboard.js. Diverging green to red, r: 214 to 44, g: 39 to 160, b: 40 to 44.",
+      "Do add a screen-reader text alternative to every heatmap cell — title or aria-label with the full label (axis pair + rate + n). The visual percentage label loses AA contrast at midpoints; the SR alternative makes the data lossless regardless.",
+      "Do respect prefers-reduced-motion: reduce — disable Chart.js animations when set.",
+      "Do keep cards flat with a 1px Hairline border on Page White over Paper."
+    ],
+    "donts": [
+      "Don't ever lead with one giant success-rate number framed in a gradient card.",
+      "Don't use SaaS observability marketing aesthetics — gradient hero blocks, big-number-with-tiny-label cards, \"All systems operational\" green-bias.",
+      "Don't use background-clip: text with a gradient. Gradient text is decorative, never meaningful, and forbidden by the shared design laws.",
+      "Don't use glassmorphism, backdrop-filter blurs, or \"frosted\" surfaces. Forbidden.",
+      "Don't add box-shadow to cards, buttons, modals, or tooltips. The system is flat.",
+      "Don't use border-left greater than 1px as a colored stripe to mark a \"failing\" or \"important\" element. Use row weight, metric color, or position instead.",
+      "Don't rely on red/green color alone for pass/fail signaling. The 2px dot border, the rank-loud row weight, the metric-value Fail Red — color is always paired with another channel.",
+      "Don't invent new accent colors. The semantic palette is fixed at three (pass/fail/warn) plus one neutral-info chart line (Trace Blue). Do not add a fourth.",
+      "Don't wrap tooltips around terms an engineer already knows (\"lift\", \"axis\", \"cluster\").",
+      "Don't add empty-state hand-holding (\"No reports yet — generate one with `gauntlet run`!\"). The empty state is silent; the user knows what to do.",
+      "Don't use #000 or #fff directly as foreground or background outside the existing --card-bg: #ffffff token — for any new token, prefer slightly tinted neutrals.",
+      "Don't decorate motion. Layout never bounces, slides, or springs. Chart values may transition; structure does not.",
+      "Don't use TensorBoard chrome, default Matplotlib chart frames, or \"wall of metric_v2_FINAL plot cards\" layouts.",
+      "Don't add a \"share this report\" button, a sign-in modal, a telemetry consent banner, or any other cloud-app chrome. Reports are local files; there is nothing to share, no one to sign in as."
+    ]
+  }
+}
