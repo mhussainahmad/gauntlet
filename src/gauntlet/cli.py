@@ -47,7 +47,7 @@ from gauntlet.replay import OverrideError, parse_override, replay_one
 from gauntlet.report import CellBreakdown, Report, build_report, write_html
 from gauntlet.report.html import _nan_to_none
 from gauntlet.runner import Episode, Runner
-from gauntlet.runner.provenance import compute_suite_hash
+from gauntlet.runner.provenance import compute_suite_hash, compute_suite_provenance_hash
 from gauntlet.runner.worker import TrajectoryFormat as _TrajectoryFormatLiteral
 from gauntlet.suite import LintFinding, lint_suite, load_suite
 from gauntlet.suite.schema import Suite
@@ -2963,6 +2963,51 @@ def suite_check(
         _echo_err(f"[err]failed[/] {summary}")
         raise typer.Exit(code=1)
     _echo_err(f"[warn]ok with warnings[/] {summary}")
+
+
+@suite_app.command("hash")
+def suite_hash(
+    suite_path: Annotated[
+        Path,
+        typer.Argument(
+            help="Path to a suite YAML file.",
+            exists=False,  # checked manually for a friendlier message
+            dir_okay=False,
+            file_okay=True,
+        ),
+    ],
+) -> None:
+    """Print the B-40 suite-level provenance hash.
+
+    Loads and validates *suite_path* the same way ``gauntlet suite
+    check`` does, then prints the 16-char blake2b hash from
+    :func:`gauntlet.runner.provenance.compute_suite_provenance_hash`
+    on stdout (one line, no trailing whitespace, no rich markup) so
+    the value pipes cleanly into shell tooling.
+
+    The hash is the on-disk cache key fingerprint: two suites with
+    identical semantics produce the same hash regardless of YAML key
+    ordering, while a gauntlet version bump or env asset edit
+    correctly invalidates. See ``docs/backlog.md`` B-40 and the
+    docstring on :func:`compute_suite_provenance_hash` for the full
+    canonicalisation rules.
+
+    Exits 0 on a successful hash, 1 on load / validation failure.
+    """
+    if not suite_path.is_file():
+        raise _fail(f"suite file not found: {suite_path}")
+
+    try:
+        suite = load_suite(suite_path)
+    except (ValidationError, ValueError) as exc:
+        raise _fail(f"{suite_path}: invalid suite YAML: {exc}") from exc
+    except OSError as exc:
+        raise _fail(f"{suite_path}: could not read file: {exc}") from exc
+
+    digest = compute_suite_provenance_hash(suite)
+    # ``typer.echo`` (not the rich console) — this is the value, not
+    # the UI. Pipes to ``$(gauntlet suite hash foo.yaml)`` cleanly.
+    typer.echo(digest)
 
 
 # ``python -m gauntlet.cli`` parity with the installed entry point.
