@@ -17,10 +17,25 @@ See [`GAUNTLET_SPEC.md`](./GAUNTLET_SPEC.md) for the full design.
 
 ## Status
 
-Phase 1 MVP is feature-complete: tabletop env, perturbation axes, parallel
-runner, breakdown-first HTML report, and the `gauntlet run / report /
-compare` CLI. Phase 2 starts on real-policy adapters and runtime
-observability. The public surface is still unstable.
+Phase 1 (MVP) and Phase 2 (real-policy adapters + runtime
+observability) are shipped. Phase 1 covers the tabletop env, the
+seven perturbation axes, the parallel Runner, the breakdown-first
+HTML report, and the core `gauntlet run / report / compare` CLI.
+Phase 2 adds the PyBullet / Genesis / Isaac Sim backends, OpenVLA
+and SmolVLA adapters, runtime drift detection (`monitor`), ROS 2
+publishing + recording, multi-camera observations, structured
+per-axis report diffs (`gauntlet diff`), incremental rollout caching,
+and the entry-point-based plugin system for third-party policies
+and envs.
+
+Phase 3 (fleet-scale tooling) is **partially shipped**: the
+fleet-wide failure-mode aggregator (`gauntlet aggregate`), the
+self-contained web dashboard, and the real-to-sim scene-ingestion
+input pipeline are all live. The real-to-sim *renderer* itself is
+deferred — `RealSimRenderer` lands as a `typing.Protocol` so a
+gaussian-splatting (or other) renderer plugin can slot in without
+touching the schema. The public surface is stabilising but is not
+yet committed to semver.
 
 ## Backends
 
