@@ -46,6 +46,7 @@ from gauntlet.policy.registry import PolicySpecError, resolve_policy_factory
 from gauntlet.replay import OverrideError, parse_override, replay_one
 from gauntlet.report import CellBreakdown, Report, build_report, write_html
 from gauntlet.report.html import _nan_to_none
+from gauntlet.report.wilson import required_episodes_paired
 from gauntlet.runner import Episode, Runner
 from gauntlet.runner.provenance import compute_suite_hash, compute_suite_provenance_hash
 from gauntlet.runner.worker import TrajectoryFormat as _TrajectoryFormatLiteral
@@ -3008,6 +3009,216 @@ def suite_hash(
     # ``typer.echo`` (not the rich console) — this is the value, not
     # the UI. Pipes to ``$(gauntlet suite hash foo.yaml)`` cleanly.
     typer.echo(digest)
+
+
+@suite_app.command("plan")
+def suite_plan(
+    suite_path: Annotated[
+        Path,
+        typer.Argument(
+            help="Path to a suite YAML file.",
+            exists=False,  # checked manually for a friendlier message
+            dir_okay=False,
+            file_okay=True,
+        ),
+    ],
+    detect_delta: Annotated[
+        float,
+        typer.Option(
+            "--detect-delta",
+            help=(
+                "Success-rate gap to detect, in (0, 1]. The default 0.1 "
+                "(10 percentage points) is the smallest gap a typical "
+                "robot-policy comparison would call meaningful."
+            ),
+        ),
+    ] = 0.1,
+    alpha: Annotated[
+        float,
+        typer.Option(
+            "--alpha",
+            help="Two-sided significance level in (0, 1).",
+        ),
+    ] = 0.05,
+    power: Annotated[
+        float,
+        typer.Option(
+            "--power",
+            help="Statistical power in (0, 1).",
+        ),
+    ] = 0.8,
+    rho: Annotated[
+        float,
+        typer.Option(
+            "--rho",
+            help=(
+                "Outcome correlation between paired CRN episodes in "
+                "[0, 1). 0.5 is the empirical value for shared-seed "
+                "rollouts under the B-08 paired comparison engine."
+            ),
+        ),
+    ] = 0.5,
+    baseline_report: Annotated[
+        Path | None,
+        typer.Option(
+            "--baseline-report",
+            help=(
+                "Optional path to a previous run's report.json. Each "
+                "cell's existing per-cell success rate is used as p1; "
+                "missing cells fall back to p1=0.5 with a stderr note."
+            ),
+            exists=False,
+            dir_okay=False,
+            file_okay=True,
+        ),
+    ] = None,
+) -> None:
+    """Print the per-cell episodes-per-cell sample-size plan (B-41).
+
+    Computes ``required_episodes_paired(p1, p1 - detect_delta, alpha,
+    power, rho)`` for every cell the suite would enumerate and prints
+    a four-column table on stdout: ``cell-id | current-eps |
+    required-eps | gap``. The ``current`` column is the suite's
+    declared ``episodes_per_cell``; ``required`` is the paired-CRN
+    floor needed to detect the requested gap; ``gap`` is the shortfall
+    (``required - current``, negative when the suite already clears the
+    floor).
+
+    Without ``--baseline-report``, every cell uses ``p1 = 0.5`` (the
+    worst-case-variance midpoint that maximises the required sample
+    size — a conservative planning anchor). With ``--baseline-report``,
+    each cell's prior-run success rate replaces the 0.5 default; cells
+    that don't appear in the report fall back to 0.5 with a stderr
+    note.
+
+    Anti-feature warning (B-41 spec): the per-cell number this command
+    prints is the *minimum* sample size for the binary success summary
+    statistic. Running exactly the floor optimises for the binary
+    summary and misses the long failure tail that only surfaces at
+    higher episode counts. GAUNTLET_SPEC.md §1 ("failures over
+    averages") is built around this trap. Treat the table as a floor,
+    never a ceiling — the loud anti-feature footer on stderr says so
+    explicitly.
+
+    Exits 0 on a successful plan, 1 on load / validation failure or a
+    degenerate ``--detect-delta`` (zero or negative).
+    """
+    if not suite_path.is_file():
+        raise _fail(f"suite file not found: {suite_path}")
+
+    if detect_delta <= 0.0:
+        raise _fail(
+            f"--detect-delta must be > 0; got {detect_delta}. A zero or "
+            "negative effect size needs an infinite sample.",
+        )
+
+    try:
+        suite = load_suite(suite_path)
+    except (ValidationError, ValueError) as exc:
+        raise _fail(f"{suite_path}: invalid suite YAML: {exc}") from exc
+    except OSError as exc:
+        raise _fail(f"{suite_path}: could not read file: {exc}") from exc
+
+    # Optional baseline report → ``cell_index -> success_rate`` lookup.
+    # We do not require a full Report here (any dict with a per_cell
+    # list of cell_index/success_rate dicts is enough); using
+    # :func:`Report.model_validate` keeps the contract consistent with
+    # ``gauntlet compare`` / ``gauntlet diff`` which already validate
+    # report.json the same way.
+    baseline_rates: dict[int, float] = {}
+    if baseline_report is not None:
+        if not baseline_report.is_file():
+            raise _fail(f"baseline report not found: {baseline_report}")
+        try:
+            raw = _read_json(baseline_report)
+        except typer.Exit:
+            raise
+        if not isinstance(raw, dict):
+            raise _fail(
+                f"{baseline_report}: top-level JSON must be a report dict; "
+                f"got {type(raw).__name__}",
+            )
+        try:
+            report_obj = Report.model_validate(raw)
+        except ValidationError as exc:
+            raise _fail(
+                f"{baseline_report}: not a valid report.json: {exc}",
+            ) from exc
+        for cell in report_obj.per_cell:
+            baseline_rates[cell.cell_index] = cell.success_rate
+
+    # Build per-cell rows. Use a deterministic ordering: the suite's
+    # own cell-index enumeration, which is the same ordering the runner
+    # writes to episodes.json.
+    rows: list[tuple[int, int, int, int]] = []
+    fallback_cells: list[int] = []
+    for suite_cell in suite.cells():
+        idx = suite_cell.index
+        if idx in baseline_rates:
+            p1 = baseline_rates[idx]
+        else:
+            p1 = 0.5
+            if baseline_report is not None:
+                fallback_cells.append(idx)
+        # Clamp ``p2`` into [0, 1]; a baseline at 0.05 with delta=0.1
+        # would otherwise yield p2=-0.05 and a confusing ValueError.
+        p2 = max(0.0, min(1.0, p1 - detect_delta))
+        if p1 == p2:
+            # Degenerate: baseline rate is at a unit boundary and
+            # delta cannot be subtracted without leaving the [0, 1]
+            # interval. Fall back to the symmetric reflected value
+            # (p1 + delta) so the planner still produces a number.
+            p2 = max(0.0, min(1.0, p1 + detect_delta))
+        try:
+            required = required_episodes_paired(
+                p1,
+                p2,
+                alpha=alpha,
+                power=power,
+                rho=rho,
+            )
+        except ValueError as exc:
+            raise _fail(f"cell {idx}: {exc}") from exc
+        current = suite.episodes_per_cell
+        gap = required - current
+        rows.append((idx, current, required, gap))
+
+    # Stdout: machine-readable per-cell table. Header + rows.
+    typer.echo(f"# suite plan for {suite.name} ({suite.env})")
+    typer.echo(
+        f"# detect-delta={detect_delta}  alpha={alpha}  power={power}  rho={rho}",
+    )
+    typer.echo("cell\tcurrent\trequired\tgap")
+    for idx, current, required, gap in rows:
+        typer.echo(f"{idx}\t{current}\t{required}\t{gap:+d}")
+
+    # Stderr: friendly summary + the loud anti-feature footer the
+    # spec explicitly demands. Three placement points (formula
+    # docstring, linter rule, here) so reviewers cannot argue we
+    # under-documented.
+    if fallback_cells:
+        _echo_err(
+            f"[warn]note:[/] {len(fallback_cells)} cell(s) missing from "
+            f"--baseline-report; used p1=0.5 fallback for cell index(es) "
+            f"{fallback_cells[:8]}{'...' if len(fallback_cells) > 8 else ''}",
+        )
+    n_undersized = sum(1 for _, _, _, gap in rows if gap > 0)
+    if n_undersized > 0:
+        _echo_err(
+            f"[warn]warning:[/] {n_undersized}/{len(rows)} cell(s) below "
+            f"the paired-CRN floor; consider raising episodes_per_cell.",
+        )
+    else:
+        _echo_err(
+            f"[ok]ok[/] every cell clears the paired-CRN floor at delta={detect_delta}.",
+        )
+    _echo_err(
+        "[warn]anti-feature:[/] this table is the *minimum* sample size "
+        "for the binary success summary. Running exactly the floor "
+        "misses the long failure tail that only shows up at higher "
+        "episode counts (GAUNTLET_SPEC.md §1, 'failures over averages'). "
+        "Treat each cell's number as a floor, never a ceiling.",
+    )
 
 
 # ``python -m gauntlet.cli`` parity with the installed entry point.

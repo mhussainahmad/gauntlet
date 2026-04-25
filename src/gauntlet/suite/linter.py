@@ -35,6 +35,14 @@ Lint rules (see ``docs/backlog.md`` B-25 for the design):
   defence-in-depth (and to surface a friendly message if a future
   caller hands :func:`lint_suite` a hand-constructed :class:`Suite`).
   Warning.
+* :data:`RULE_LOW_STATISTICAL_POWER` — B-41 power-calc floor.
+  ``episodes_per_cell`` below the paired-CRN sample size needed to
+  detect a :data:`LOW_POWER_DEFAULT_DELTA` (=0.1) success-rate gap at
+  alpha :data:`LOW_POWER_DEFAULT_ALPHA` / power
+  :data:`LOW_POWER_DEFAULT_POWER` / rho :data:`LOW_POWER_DEFAULT_RHO`.
+  Warning. The message body carries the loud anti-feature note so the
+  rule cannot be used as cover for thin sweeps — running exactly the
+  floor misses the long failure tail (GAUNTLET_SPEC.md §1).
 
 The public surface (:class:`LintFinding`, :func:`lint_suite`) is
 re-exported from :mod:`gauntlet.suite` so downstream callers can
@@ -48,6 +56,7 @@ from dataclasses import dataclass
 from typing import Final, Literal
 
 from gauntlet.env.registry import get_env_factory
+from gauntlet.report.wilson import required_episodes_paired
 from gauntlet.suite.loader import _visual_only_axes_of
 from gauntlet.suite.schema import AxisSpec, Suite
 
@@ -56,9 +65,14 @@ __all__ = [
     "EPISODES_FOR_HALF_WIDTH_15",
     "EPISODES_FOR_HALF_WIDTH_20",
     "EPISODES_PER_CELL_WARN_BELOW",
+    "LOW_POWER_DEFAULT_ALPHA",
+    "LOW_POWER_DEFAULT_DELTA",
+    "LOW_POWER_DEFAULT_POWER",
+    "LOW_POWER_DEFAULT_RHO",
     "RULE_CARTESIAN_EXPLOSION",
     "RULE_EMPTY_SUITE",
     "RULE_INSUFFICIENT_EPISODES",
+    "RULE_LOW_STATISTICAL_POWER",
     "RULE_UNUSED_AXIS",
     "RULE_VISUAL_ONLY_ON_ISAAC",
     "LintFinding",
@@ -77,6 +91,7 @@ RULE_CARTESIAN_EXPLOSION: Final[str] = "cartesian-explosion"
 RULE_VISUAL_ONLY_ON_ISAAC: Final[str] = "visual-only-axis-on-state-only-backend"
 RULE_INSUFFICIENT_EPISODES: Final[str] = "insufficient-episodes-per-cell"
 RULE_EMPTY_SUITE: Final[str] = "empty-suite"
+RULE_LOW_STATISTICAL_POWER: Final[str] = "low-statistical-power"
 
 # Cartesian-explosion threshold — runs above this almost always indicate
 # the author intended an LHS / Sobol sweep and forgot to switch
@@ -102,6 +117,33 @@ EPISODES_FOR_HALF_WIDTH_15: Final[int] = 40
 # closed-form approximation in :func:`_wilson_worst_case_half_width`
 # stays self-documenting.
 _Z_95: Final[float] = 1.96
+
+# B-41 LOW_STATISTICAL_POWER rule defaults. The rule fires when
+# ``episodes_per_cell`` is below the paired-CRN sample-size floor
+# computed at these conservative inputs:
+#
+# * ``LOW_POWER_DEFAULT_DELTA = 0.1`` — the rule asks "could this suite
+#   detect a 10-percentage-point drop in success rate?", which is the
+#   smallest gap a typical robot-policy comparison would call
+#   meaningful. Smaller deltas demand astronomical samples; larger
+#   deltas trivially clear the threshold.
+# * ``LOW_POWER_DEFAULT_RHO = 0.5`` — empirical outcome correlation
+#   for paired CRN rollouts (B-08). Halves the independent-sample
+#   answer; the linter uses the *paired* floor because gauntlet's diff
+#   path is paired by construction. A user running the unpaired path
+#   should bump ``episodes_per_cell`` to roughly 2x the linter's
+#   recommendation.
+# * ``LOW_POWER_DEFAULT_ALPHA = 0.05`` / ``LOW_POWER_DEFAULT_POWER =
+#   0.8`` — the textbook defaults from Cohen (1988) and the same alpha
+#   B-03's Wilson interval defaults to.
+#
+# At these inputs the floor is ``required_episodes_paired(0.5, 0.4) ==
+# 195`` — a single Suite YAML with ``episodes_per_cell: 195`` clears
+# the rule; smaller values trip it.
+LOW_POWER_DEFAULT_DELTA: Final[float] = 0.1
+LOW_POWER_DEFAULT_RHO: Final[float] = 0.5
+LOW_POWER_DEFAULT_ALPHA: Final[float] = 0.05
+LOW_POWER_DEFAULT_POWER: Final[float] = 0.8
 
 
 @dataclass(frozen=True)
@@ -223,6 +265,43 @@ def lint_suite(suite: Suite) -> list[LintFinding]:
                     f"Wilson 95% CIs on per-cell success — consider "
                     f"N>={EPISODES_FOR_HALF_WIDTH_20} for +/-0.20 or "
                     f"N>={EPISODES_FOR_HALF_WIDTH_15} for +/-0.15."
+                ),
+            )
+        )
+
+    # Rule 6 (B-41 low-statistical-power) — suite-wide. Computed off
+    # the paired-CRN sample-size floor at the conservative defaults
+    # above; gauntlet's diff path is paired by construction so the
+    # paired threshold is the right anchor. The message echoes the
+    # threshold and carries the loud anti-feature note that the spec
+    # demands (so the rule cannot be used as cover for thin sweeps —
+    # the failure-tail framing belongs in the warning body, not just
+    # in a docstring nobody reads).
+    floor = required_episodes_paired(
+        0.5,
+        0.5 - LOW_POWER_DEFAULT_DELTA,
+        alpha=LOW_POWER_DEFAULT_ALPHA,
+        power=LOW_POWER_DEFAULT_POWER,
+        rho=LOW_POWER_DEFAULT_RHO,
+    )
+    if n < floor:
+        findings.append(
+            LintFinding(
+                severity="warning",
+                rule=RULE_LOW_STATISTICAL_POWER,
+                message=(
+                    f"episodes_per_cell={n} is below the {floor}-episode "
+                    f"paired-CRN floor needed to detect a "
+                    f"{LOW_POWER_DEFAULT_DELTA:.2f} success-rate gap at "
+                    f"alpha={LOW_POWER_DEFAULT_ALPHA:.2f} / "
+                    f"power={LOW_POWER_DEFAULT_POWER:.2f} "
+                    f"(rho={LOW_POWER_DEFAULT_RHO:.1f}). Run "
+                    f"`gauntlet suite plan` for per-cell numbers. "
+                    f"Anti-feature: this is the *minimum* sample size "
+                    f"for the binary success summary — running exactly "
+                    f"the floor misses the long failure tail that only "
+                    f"shows up at higher episode counts. Treat it as a "
+                    f"floor, never a ceiling."
                 ),
             )
         )
