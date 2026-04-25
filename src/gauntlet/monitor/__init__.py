@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from gauntlet.monitor.conformal import ConformalFailureDetector as ConformalFailureDetector
 from gauntlet.monitor.entropy import ActionEntropyStats as ActionEntropyStats
 from gauntlet.monitor.entropy import action_entropy as action_entropy
 from gauntlet.monitor.schema import DriftReport as DriftReport
@@ -37,6 +38,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ActionEntropyStats",
+    "ConformalFailureDetector",
     "DriftReport",
     "PerEpisodeDrift",
     "StateAutoencoder",
