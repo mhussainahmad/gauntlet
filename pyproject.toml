@@ -28,11 +28,11 @@ dependencies = [
     "pandas>=2.2,<4",
     "jinja2>=3.1,<4",
     "pyyaml>=6.0,<7",
-    # Ceiling bumped <15 -> <16 for RFC-007 (genesis-world transitively
-    # resolves rich 15.0.0 and declares no upper bound of its own). The
-    # CLI's Rich surface — Console, Text, rich.traceback — is stable
-    # across 13.x/14.x/15.x.
-    "rich>=13.7,<16",
+    # Ceiling progressively bumped <15 -> <16 -> <17 as upstream releases
+    # land (genesis-world transitively resolves rich 15.0.0 and declares no
+    # upper bound of its own). The CLI's Rich surface — Console, Text,
+    # rich.traceback — is small and stable across 13.x/14.x/15.x/16.x.
+    "rich>=13.7,<17",
 ]
 
 # Optional extras — end-user-facing. Keeps core torch-free per spec §6.
