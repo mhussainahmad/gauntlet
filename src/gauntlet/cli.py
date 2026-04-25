@@ -442,6 +442,18 @@ def run(
             help="Print cache hit / miss / put counts to stderr after the run.",
         ),
     ] = False,
+    junit: Annotated[
+        Path | None,
+        typer.Option(
+            "--junit",
+            help=(
+                "Also emit a JUnit-style XML at PATH (one <testcase> per "
+                "episode). Drop into any CI (GitHub Actions, Jenkins, "
+                "GitLab) without custom glue. Parent directory is created "
+                "if missing. See backlog B-24."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Execute a suite and write episodes / report artefacts to ``--out``."""
     if not suite_path.is_file():
@@ -510,6 +522,16 @@ def run(
 
     if not no_html:
         write_html(report, report_html_path)
+
+    if junit is not None:
+        # Lazy import — keeps `gauntlet --help` snappy for the common
+        # no-JUnit run path (mirrors aggregate / dashboard / realsim).
+        from gauntlet.report.junit import to_junit_xml
+
+        if junit.parent and not junit.parent.exists():
+            junit.parent.mkdir(parents=True, exist_ok=True)
+        junit.write_bytes(to_junit_xml(episodes, suite.name))
+        _echo_err(f"[ok]Wrote[/] JUnit XML -> {_fmt_path(junit)}")
 
     summary = (
         f"[ok]Wrote[/] {len(episodes)} episodes / {len(report.per_cell)} cells "
@@ -742,6 +764,18 @@ def compare(
             ),
         ),
     ] = None,
+    github_summary: Annotated[
+        Path | None,
+        typer.Option(
+            "--github-summary",
+            help=(
+                "Also emit a GitHub Actions step-summary markdown blob at "
+                "PATH (failure-first table of regressions / improvements). "
+                "Pipe into $GITHUB_STEP_SUMMARY in your workflow. Parent "
+                "directory is created if missing. See backlog B-24."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Diff two runs and emit compare.json (HTML companion deferred to Phase 2)."""
     report_a, episodes_a = _load_report_with_episodes(results_a)
@@ -794,6 +828,16 @@ def compare(
     if out_path.parent and not out_path.parent.exists():
         out_path.parent.mkdir(parents=True, exist_ok=True)
     _write_json(out_path, payload)
+
+    if github_summary is not None:
+        # Lazy import — keeps `gauntlet --help` snappy for the common
+        # no-summary path (mirrors aggregate / dashboard / realsim).
+        from gauntlet.compare import to_github_summary
+
+        if github_summary.parent and not github_summary.parent.exists():
+            github_summary.parent.mkdir(parents=True, exist_ok=True)
+        github_summary.write_text(to_github_summary(payload), encoding="utf-8")
+        _echo_err(f"[ok]Wrote[/] GitHub summary -> {_fmt_path(github_summary)}")
 
     _echo_err(f"[ok]Wrote[/] {_fmt_path(out_path)}")
     _echo_err(f"  a: {report_a.suite_name} ({_fmt_success_rate(report_a.overall_success_rate)})")
