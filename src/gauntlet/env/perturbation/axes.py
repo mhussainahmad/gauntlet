@@ -1,15 +1,20 @@
 """Concrete perturbation axes for the tabletop env.
 
 See ``GAUNTLET_SPEC.md`` §5 task 4. Five logical perturbation categories
-expand into seven scalar axes:
+expand into seven base scalar axes plus one OOD-shift axis:
 
 * :func:`lighting_intensity` — single scalar (one-channel grayscale level).
 * :func:`camera_offset_x` / :func:`camera_offset_y` — two scalars covering
   the ``CameraOffset`` category.
 * :func:`object_texture` — categorical 0/1 swap of cube colour.
 * :func:`object_initial_pose_x` / :func:`object_initial_pose_y` — two
-  scalars covering the ``ObjectInitialPose`` category.
+  scalars covering the in-distribution ``ObjectInitialPose`` category.
 * :func:`distractor_count` — non-negative integer in [0, 10].
+* :func:`initial_state_ood` — OOD sigma multiplier (B-32). The axis value
+  is a unitless multiplier ``V``; the env interprets it as a displacement
+  of ``V * prior_std * sign_per_dim`` from ``prior_mean`` (LIBERO-PRO /
+  LIBERO-Plus framing — see backlog B-32). The prior is configured on the
+  env via :meth:`gauntlet.env.tabletop.TabletopEnv.set_initial_state_ood_prior`.
 
 Each constructor returns a :class:`PerturbationAxis` with sensible
 default bounds. Callers that load axes from YAML (Task 5) override the
@@ -41,6 +46,7 @@ __all__ = [
     "camera_offset_x",
     "camera_offset_y",
     "distractor_count",
+    "initial_state_ood",
     "lighting_intensity",
     "object_initial_pose_x",
     "object_initial_pose_y",
@@ -51,6 +57,10 @@ __all__ = [
 # Default sampling bounds per axis. Phase 1 chooses ranges that exercise
 # the perturbation surface without leaving the env in a physically
 # unrealistic state (cube on the table, camera roughly facing the scene).
+# ``initial_state_ood`` bounds are unitless sigma multipliers — 0 means
+# "at the prior mean" and larger magnitudes push further into the OOD
+# tail. A ``5`` ceiling is generous; in practice users supply their own
+# values via the YAML categorical shape.
 DEFAULT_BOUNDS: Final[dict[str, tuple[float, float]]] = {
     "lighting_intensity": (0.3, 1.5),
     "camera_offset_x": (-0.1, 0.1),
@@ -59,6 +69,7 @@ DEFAULT_BOUNDS: Final[dict[str, tuple[float, float]]] = {
     "object_initial_pose_x": (-0.15, 0.15),
     "object_initial_pose_y": (-0.15, 0.15),
     "distractor_count": (0.0, 10.0),  # int
+    "initial_state_ood": (0.0, 5.0),  # unitless sigma multiplier
 }
 
 
@@ -141,6 +152,33 @@ def object_initial_pose_y(
     )
 
 
+def initial_state_ood(*, low: float | None = None, high: float | None = None) -> PerturbationAxis:
+    """Initial-state OOD shift axis (B-32).
+
+    The axis value ``V`` is a *unitless sigma multiplier*. Per the
+    LIBERO-PRO (arXiv 2510.03827) and LIBERO-Plus (arXiv 2510.13626)
+    framing, the env interprets ``V`` as a per-dim displacement of
+    ``V * prior_std * sign`` from ``prior_mean``, where ``sign`` is
+    drawn deterministically per-dim from the env's seed (see
+    :meth:`gauntlet.env.tabletop.TabletopEnv._apply_one_perturbation`).
+
+    Convention: ``V == 0`` collapses to the prior mean (in-distribution
+    centre); ``V == 1`` lands at the 1-sigma boundary; ``V >= 2``
+    probes the OOD tail. The prior itself (``prior_mean`` and
+    ``prior_std``) is configured on the env via
+    :meth:`gauntlet.env.tabletop.TabletopEnv.set_initial_state_ood_prior`
+    or via the YAML ``prior_mean`` / ``prior_std`` axis fields.
+    """
+    lo, hi = _resolve_bounds("initial_state_ood", low, high)
+    return PerturbationAxis(
+        name="initial_state_ood",
+        kind=AXIS_KIND_CONTINUOUS,
+        sampler=make_continuous_sampler(lo, hi),
+        low=lo,
+        high=hi,
+    )
+
+
 def distractor_count(*, low: int | None = None, high: int | None = None) -> PerturbationAxis:
     """Number of visible distractor objects (integer, [0, 10])."""
     lo_f, hi_f = _resolve_bounds("distractor_count", low, high)
@@ -167,6 +205,7 @@ _DEFAULT_CONSTRUCTORS: Final[dict[str, AxisCtor]] = {
     "object_initial_pose_x": object_initial_pose_x,
     "object_initial_pose_y": object_initial_pose_y,
     "distractor_count": distractor_count,
+    "initial_state_ood": initial_state_ood,
 }
 
 

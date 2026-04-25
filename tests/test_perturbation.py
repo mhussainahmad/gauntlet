@@ -32,6 +32,7 @@ from gauntlet.env.perturbation import (
     camera_offset_x,
     camera_offset_y,
     distractor_count,
+    initial_state_ood,
     lighting_intensity,
     object_initial_pose_x,
     object_initial_pose_y,
@@ -48,6 +49,7 @@ _APPLY_VALUE: dict[str, float] = {
     "object_initial_pose_x": 0.123,
     "object_initial_pose_y": -0.087,
     "distractor_count": 3.0,
+    "initial_state_ood": 1.0,  # 1-sigma OOD displacement (B-32)
 }
 
 
@@ -69,7 +71,7 @@ def env() -> Iterator[TabletopEnv]:
 
 
 class TestAxisNamesRegistry:
-    def test_axis_names_are_canonical_seven(self) -> None:
+    def test_axis_names_are_canonical_eight(self) -> None:
         assert AXIS_NAMES == (
             "lighting_intensity",
             "camera_offset_x",
@@ -78,6 +80,7 @@ class TestAxisNamesRegistry:
             "object_initial_pose_x",
             "object_initial_pose_y",
             "distractor_count",
+            "initial_state_ood",
         )
 
     def test_axis_names_is_tuple(self) -> None:
@@ -103,7 +106,7 @@ class TestAxisFactories:
             axis_for("not_a_real_axis")
 
     def test_individual_constructors_match_axis_for(self) -> None:
-        # axis_for is a registry over the seven public constructors.
+        # axis_for is a registry over the public constructors.
         ctors = {
             "lighting_intensity": lighting_intensity,
             "camera_offset_x": camera_offset_x,
@@ -112,6 +115,7 @@ class TestAxisFactories:
             "object_initial_pose_x": object_initial_pose_x,
             "object_initial_pose_y": object_initial_pose_y,
             "distractor_count": distractor_count,
+            "initial_state_ood": initial_state_ood,
         }
         for name, ctor in ctors.items():
             assert ctor().name == name
@@ -125,6 +129,7 @@ class TestAxisFactories:
         assert object_initial_pose_y().kind == AXIS_KIND_CONTINUOUS
         assert object_texture().kind == AXIS_KIND_CATEGORICAL
         assert distractor_count().kind == AXIS_KIND_INT
+        assert initial_state_ood().kind == AXIS_KIND_CONTINUOUS
 
     def test_continuous_factory_rejects_inverted_bounds(self) -> None:
         with pytest.raises(ValueError, match="low must be <= high"):
@@ -367,6 +372,10 @@ class TestDeterminism:
             "camera_offset_x": 0.04,
             "camera_offset_y": -0.03,
             "object_texture": 1.0,
+            # Note: ``initial_state_ood`` is mutually exclusive with the
+            # explicit ``object_initial_pose_*`` axes since both write
+            # the cube qpos. The OOD axis is exercised in detail in
+            # ``tests/test_perturbation_initial_state_ood.py``.
             "object_initial_pose_x": 0.08,
             "object_initial_pose_y": -0.06,
             "distractor_count": 4,
