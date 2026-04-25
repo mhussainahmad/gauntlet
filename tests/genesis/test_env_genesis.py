@@ -122,7 +122,10 @@ def test_spaces_parity_with_other_backends(env: GenesisTabletopEnv) -> None:
 
 
 def test_axis_names_are_canonical_seven(env: GenesisTabletopEnv) -> None:
-    """:attr:`AXIS_NAMES` matches the canonical 7 (RFC-007 §6.7)."""
+    """:attr:`AXIS_NAMES` covers the 7 base axes plus the
+    visual-only-on-Genesis extensions ``object_swap`` (B-06) and
+    ``camera_extrinsics`` (B-42).
+    """
     e = env
     expected = frozenset(
         {
@@ -133,21 +136,21 @@ def test_axis_names_are_canonical_seven(env: GenesisTabletopEnv) -> None:
             "object_initial_pose_x",
             "object_initial_pose_y",
             "distractor_count",
+            "object_swap",
+            "camera_extrinsics",
         }
     )
     assert expected == type(e).AXIS_NAMES
 
 
 def test_visual_only_axes_is_empty_post_rfc_008(env: GenesisTabletopEnv) -> None:
-    """Post-RFC-008 — cosmetic axes are observable via
-    ``obs["image"]`` when ``render_in_obs=True``, so
-    ``VISUAL_ONLY_AXES`` drops to the empty frozenset. Parity with
-    ``TabletopEnv`` and (post-RFC-006) ``PyBulletTabletopEnv``.
-
-    Was ``test_visual_only_axes_are_four_cosmetic`` before RFC-008;
-    the assertion flipped when the rendering path landed.
+    """Post-RFC-008 — the four cosmetic axes are observable via
+    ``obs["image"]`` when ``render_in_obs=True``. The remaining
+    visual-only entries are ``object_swap`` (B-06; no alternate
+    asset library) and ``camera_extrinsics`` (B-42; no render-camera
+    mutation surface).
     """
-    assert frozenset() == type(env).VISUAL_ONLY_AXES
+    assert frozenset({"object_swap", "camera_extrinsics"}) == type(env).VISUAL_ONLY_AXES
     assert isinstance(type(env).VISUAL_ONLY_AXES, frozenset)
 
 
