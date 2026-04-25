@@ -120,17 +120,29 @@ drives the same smoke suite against `tabletop-genesis`.
 The Suite YAML's `sampling:` key picks the perturbation grid strategy:
 the default `cartesian` enumerates the full Cartesian product of the
 declared axes (the historical behaviour, byte-identical to every
-existing suite), while `latin_hypercube` draws `n_samples` points using
-McKay 1979 Latin Hypercube Sampling — every axis covers `n_samples`
-distinct strata regardless of dimensionality. For five axes at five
-steps, cartesian = 3,125 cells; LHS at `n_samples: 32` covers the same
-hypercube with strictly higher marginal coverage at ~98x fewer
-rollouts. See
+existing suite), while `latin_hypercube` and `sobol` each draw
+`n_samples` points without enumerating the full grid. For five axes at
+five steps, cartesian = 3,125 cells; LHS or Sobol at `n_samples: 32`
+covers the same hypercube at ~98x fewer rollouts. The two quasi-random
+samplers trade off differently:
+
+- `latin_hypercube` (McKay 1979) gives **perfect per-axis marginal
+  stratification** — every axis covers exactly `n_samples` distinct
+  strata. Joint coverage across axis pairs is essentially random.
+- `sobol` (Joe-Kuo 6.21201 direction numbers, `skip=1`) gives
+  **low-discrepancy joint coverage** — Sobol projections onto any
+  axis pair are also quasi-uniform, at the cost of slightly worse
+  per-axis marginal histograms than LHS.
+
+Use Sobol when the failure mode you suspect is a 2-axis (or higher)
+interaction; use LHS when single-axis sweeps are what you need to
+cover. See
 [`examples/suites/tabletop-lhs-smoke.yaml`](./examples/suites/tabletop-lhs-smoke.yaml)
 and [`examples/evaluate_random_policy_lhs.py`](./examples/evaluate_random_policy_lhs.py)
-for an end-to-end demo. Sobol (`sampling: sobol`) is reserved in the
-schema for a follow-up; LHS is the supported quasi-random alternative
-today.
+for an LHS end-to-end demo, and
+[`docs/polish-exploration-sobol-sampler.md`](./docs/polish-exploration-sobol-sampler.md)
+for the Sobol design note (discrepancy targets, direction-number
+table, skip rationale).
 
 Once you have multiple runs (different seeds, policy revisions, or
 backends), `gauntlet aggregate <runs-dir> --out fleet/` rolls every
