@@ -123,6 +123,11 @@ class AxisSpec(BaseModel):
     high: float | None = Field(default=None)
     steps: int | None = Field(default=None)
     values: list[float] | None = Field(default=None)
+    # B-32 — OOD prior for the ``initial_state_ood`` axis. Both fields
+    # are length-3 ``(x, y, z)`` lists. They are forbidden on every
+    # other axis (cross-axis check lives on the parent ``Suite``).
+    prior_mean: list[float] | None = Field(default=None)
+    prior_std: list[float] | None = Field(default=None)
 
     # ------------------------------------------------------------------
     # Field-level checks. Bounds compatibility (low <= high) is checked
@@ -144,10 +149,38 @@ class AxisSpec(BaseModel):
             raise ValueError("values must be a non-empty list when provided")
         return v
 
+    @field_validator("prior_mean", "prior_std")
+    @classmethod
+    def _ood_prior_length_three(cls, v: list[float] | None, info: object) -> list[float] | None:
+        # B-32. ``prior_mean`` / ``prior_std`` describe the (x, y, z)
+        # training-pose distribution for the OOD axis. The
+        # axis-name-specific "only on initial_state_ood" check lives on
+        # ``Suite`` (the AxisSpec is name-agnostic). Here we just shape-
+        # check the lists themselves.
+        if v is None:
+            return v
+        if len(v) != 3:
+            raise ValueError(
+                f"axis spec: prior_mean / prior_std must be length 3 (x, y, z); got length {len(v)}"
+            )
+        return v
+
     @model_validator(mode="after")
     def _check_shape_exclusive(self) -> AxisSpec:
         has_continuous = any(x is not None for x in (self.low, self.high, self.steps))
         has_categorical = self.values is not None
+        # B-32 — ``prior_mean`` / ``prior_std`` are aux fields on the
+        # categorical shape (the OOD axis declares its sigma multipliers
+        # under ``values``). They are forbidden on the continuous shape;
+        # the parent Suite further restricts them to the
+        # ``initial_state_ood`` axis name.
+        has_ood_prior = self.prior_mean is not None or self.prior_std is not None
+        if has_ood_prior and has_continuous:
+            raise ValueError(
+                "axis spec: prior_mean / prior_std are only valid alongside the "
+                "categorical {values} shape; drop {low, high, steps} or drop the "
+                "prior fields",
+            )
         if has_continuous and has_categorical:
             raise ValueError(
                 "axis spec: cannot mix {low, high, steps} with {values}; "
@@ -301,6 +334,18 @@ class Suite(BaseModel):
             raise ValueError(
                 f"axes: unknown axis name(s) {unknown}; legal names are: {legal}",
             )
+        # B-32 — ``prior_mean`` / ``prior_std`` are only meaningful for
+        # the ``initial_state_ood`` axis. Reject them on every other
+        # axis so a confused YAML fails loudly instead of silently
+        # ignoring the fields.
+        for axis_name, spec in v.items():
+            if axis_name == "initial_state_ood":
+                continue
+            if spec.prior_mean is not None or spec.prior_std is not None:
+                raise ValueError(
+                    f"axes[{axis_name!r}]: prior_mean / prior_std are only "
+                    "valid on the 'initial_state_ood' axis",
+                )
         return v
 
     @field_validator("n_samples")

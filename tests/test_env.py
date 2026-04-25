@@ -365,11 +365,12 @@ class TestProtocolConformance:
     and register at package-import time under the name ``tabletop``.
     """
 
-    def test_axis_names_is_classvar_frozenset_of_seven(self) -> None:
+    def test_axis_names_is_classvar_frozenset_of_eight(self) -> None:
         from gauntlet.env.tabletop import TabletopEnv as _T
 
         assert isinstance(_T.AXIS_NAMES, frozenset)
-        assert len(_T.AXIS_NAMES) == 7
+        # 7 base axes + ``initial_state_ood`` (B-32).
+        assert len(_T.AXIS_NAMES) == 8
         assert {
             "lighting_intensity",
             "camera_offset_x",
@@ -378,6 +379,7 @@ class TestProtocolConformance:
             "object_initial_pose_x",
             "object_initial_pose_y",
             "distractor_count",
+            "initial_state_ood",
         } == set(_T.AXIS_NAMES)
 
     def test_visual_only_axes_is_empty_on_mujoco_backend(self) -> None:
