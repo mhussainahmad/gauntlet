@@ -67,6 +67,11 @@ from gauntlet.env.registry import get_env_factory, registered_envs
 from gauntlet.policy.base import Policy
 from gauntlet.runner.cache import EpisodeCache
 from gauntlet.runner.episode import Episode
+from gauntlet.runner.provenance import (
+    capture_gauntlet_version,
+    capture_git_commit,
+    compute_suite_hash,
+)
 from gauntlet.runner.worker import (
     VideoConfig,
     WorkerInitArgs,
@@ -333,6 +338,26 @@ class Runner:
                 )
         else:
             fresh = []
+
+        # Stamp B-22 provenance onto every freshly-rolled Episode BEFORE
+        # the cache write so a future cache hit returns an Episode that
+        # carries the original commit's provenance (the bit that lets a
+        # repro from a different checkout detect "this cache entry is
+        # from commit X, you are on commit Y"). Cached episodes already
+        # carry their original provenance and are NOT mutated here.
+        gauntlet_version = capture_gauntlet_version()
+        suite_hash = compute_suite_hash(suite)
+        git_commit = capture_git_commit()
+        fresh = [
+            ep.model_copy(
+                update={
+                    "gauntlet_version": gauntlet_version,
+                    "suite_hash": suite_hash,
+                    "git_commit": git_commit,
+                }
+            )
+            for ep in fresh
+        ]
 
         # Persist newly-rolled Episodes to the cache (a no-op when the
         # cache is disabled; cache_keys is empty in that case).
