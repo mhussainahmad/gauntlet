@@ -188,8 +188,8 @@ def test_determinism_single_worker_runs_match() -> None:
 # ----------------------------------------------------------------------------
 
 
-def test_determinism_n_workers_one_vs_four() -> None:
-    """n_workers=1 and n_workers=4 must produce identical Episode lists.
+def test_determinism_n_workers_one_vs_two() -> None:
+    """n_workers=1 and n_workers=2 must produce identical Episode lists.
 
     This catches seed-leak bugs that single-process tests miss: stale
     env state between episodes a worker handles, accidental dependence
@@ -199,6 +199,15 @@ def test_determinism_n_workers_one_vs_four() -> None:
     Kept small (4 cells x 2 eps, max_steps=20) so spawn overhead +
     MJCF load stays under the 30s suite budget. Spawn is the only
     safe start method with MuJoCo (fork leaks GL contexts).
+
+    ``n_workers=2`` (not 4) because the GitHub ``ubuntu-latest``
+    runner exposes 4 logical CPUs but only ~2 usable cores under
+    cgroup limits, and spawning 4 fresh interpreters that each import
+    MuJoCo + compile MJCF deadlocks the pool startup on resource
+    contention. n=1 vs n=2 already exercises the multi-process path
+    end-to-end and catches every worker-state-leak / completion-
+    order / seed-leak bug; bumping to N=4 only adds CI flakiness
+    without strengthening the contract. See PR hotfix/ci-pytest-hang.
     """
     suite = _make_suite(seed=2024, episodes_per_cell=2)
 
@@ -206,7 +215,7 @@ def test_determinism_n_workers_one_vs_four() -> None:
         policy_factory=make_random_policy,
         suite=suite,
     )
-    parallel = Runner(n_workers=4, env_factory=make_fast_env).run(
+    parallel = Runner(n_workers=2, env_factory=make_fast_env).run(
         policy_factory=make_random_policy,
         suite=suite,
     )
