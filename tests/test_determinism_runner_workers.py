@@ -28,24 +28,27 @@ called out:
 All factories are module-level so they pickle under the ``spawn``
 start method (lambdas defined inside test functions do not).
 
-Worker count is capped at 2: the GitHub ``ubuntu-latest`` runner
-exposes 4 logical CPUs but only ~2 usable cores under cgroup limits,
-and spawning 4 fresh interpreters that each compile MuJoCo's MJCF
-(numpy + mujoco import + scene compile) deadlocks the pool startup
-on resource contention. ``processes=1`` vs ``processes=2`` is enough
-to catch every worker-state-leak / sort-order / seed-leak bug the
-``processes=1`` vs ``processes=N`` contract is designed to surface;
-N=2 is the smallest N that exercises the multi-process path. See PR
+Worker count is capped at 2 and the env factory is the in-module
+:class:`_FakeProtocolEnv` (no MuJoCo, no MJCF compile, no GL). On
+the GitHub ``ubuntu-latest`` runner (4 logical CPUs, ~2 usable
+under cgroup limits), real MuJoCo construction inside two
+simultaneously-spawned workers deadlocks the pool startup on
+resource contention. The determinism contract under test here
+(seed derivation, output sort order, master_seed propagation) is
+env-agnostic — it does not depend on MuJoCo behaviour at all —
+so a fake env is the right tool. The MuJoCo+Runner integration
+is exercised in :file:`tests/test_runner.py` via the n=1 path
+and end-to-end in :file:`tests/test_e2e_example.py`. See PR
 hotfix/ci-pytest-hang for the diagnosis.
 
-Default torch-free job; uses MuJoCo ``TabletopEnv`` with a small
-``max_steps`` so the spawn overhead + per-cell rollout fits well
-under the 30-s suite budget.
+Default torch-free job.
 """
 
 from __future__ import annotations
 
 from typing import Any
+
+import numpy as np
 
 from gauntlet.policy.random import RandomPolicy
 from gauntlet.runner import Runner
@@ -60,11 +63,89 @@ def _make_random_policy() -> RandomPolicy:
     return RandomPolicy(action_dim=_ACTION_DIM, seed=None)
 
 
-def _make_fast_env() -> Any:
-    """Tiny-budget env factory so the multi-cell test fits the time budget."""
-    from gauntlet.env.tabletop import TabletopEnv
+class _FakeProtocolEnv:
+    """Minimal stand-in for a MuJoCo backend, mirroring the shape used in
+    ``tests/test_runner.py::_FakeProtocolEnv``.
 
-    return TabletopEnv(max_steps=10)
+    Satisfies :class:`gauntlet.env.base.GauntletEnv` structurally without
+    inheriting from ``gymnasium.Env`` or importing MuJoCo. Used by every
+    multi-worker test in this module so the spawn-pool startup costs
+    nothing — no MJCF compile, no GL, no model-loader contention. See
+    PR hotfix/ci-pytest-hang for the diagnosis: real MuJoCo construction
+    inside two simultaneously-spawned workers deadlocks on the GitHub
+    ``ubuntu-latest`` runner before any work item completes.
+
+    Module-level so spawn can pickle it.
+    """
+
+    AXIS_NAMES = frozenset(
+        {
+            "lighting_intensity",
+            "camera_offset_x",
+            "camera_offset_y",
+            "distractor_count",
+            "object_initial_pose_x",
+            "object_initial_pose_y",
+            "object_texture",
+        }
+    )
+    VISUAL_ONLY_AXES: frozenset[str] = frozenset()
+
+    def __init__(self) -> None:
+        from gymnasium import spaces
+
+        self.observation_space = spaces.Dict(
+            {"cube_pos": spaces.Box(low=-1.0, high=1.0, shape=(3,), dtype=np.float64)}
+        )
+        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(_ACTION_DIM,), dtype=np.float64)
+        self._pending: dict[str, float] = {}
+
+    def reset(
+        self,
+        *,
+        seed: int | None = None,
+        options: dict[str, Any] | None = None,
+    ) -> tuple[dict[str, np.ndarray[Any, Any]], dict[str, Any]]:
+        self._pending.clear()
+        return ({"cube_pos": np.zeros(3, dtype=np.float64)}, {"seed_echo": seed})
+
+    def step(
+        self,
+        action: np.ndarray[Any, Any],
+    ) -> tuple[dict[str, np.ndarray[Any, Any]], float, bool, bool, dict[str, Any]]:
+        # Terminate on step 1 so each rollout is a single-step constant
+        # — keeps total wall time minimal while still exercising the
+        # full Runner pipeline (reset -> policy.act -> step -> Episode).
+        return (
+            {"cube_pos": np.zeros(3, dtype=np.float64)},
+            1.0,
+            True,
+            False,
+            {"success": True, "step_count": 1},
+        )
+
+    def set_perturbation(self, name: str, value: float) -> None:
+        if name not in type(self).AXIS_NAMES:
+            raise ValueError(f"unknown perturbation axis: {name!r}")
+        self._pending[name] = value
+
+    def restore_baseline(self) -> None:
+        self._pending.clear()
+
+    def close(self) -> None:
+        return None
+
+
+def _make_fast_env() -> Any:
+    """Module-level fake-env factory.
+
+    Picklable under spawn (the class is module-level too).
+    Replaces the prior ``TabletopEnv(max_steps=10)`` factory because
+    real MuJoCo construction in two simultaneously-spawned workers
+    deadlocks on the GitHub ``ubuntu-latest`` runner — see the module
+    docstring and PR hotfix/ci-pytest-hang.
+    """
+    return _FakeProtocolEnv()
 
 
 def _make_multi_axis_suite() -> Suite:

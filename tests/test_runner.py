@@ -196,26 +196,35 @@ def test_determinism_n_workers_one_vs_two() -> None:
     on wall-clock or PID, or non-deterministic completion ordering
     leaking into Episode payloads.
 
-    Kept small (4 cells x 2 eps, max_steps=20) so spawn overhead +
-    MJCF load stays under the 30s suite budget. Spawn is the only
-    safe start method with MuJoCo (fork leaks GL contexts).
+    Uses :class:`_FakeProtocolEnv` (not MuJoCo ``TabletopEnv``) for
+    the env factory: the determinism contract under test is
+    Runner-pool-internal (seed derivation, WorkItem dispatch, output
+    sort) and is env-agnostic. The fake env constructs in microseconds
+    and avoids the MuJoCo+spawn pool-startup deadlock on the GitHub
+    ``ubuntu-latest`` runner (4 logical CPUs, ~2 usable under cgroup
+    limits; two spawned interpreters each compiling MJCF wedge before
+    any work item completes). The MuJoCo+Runner integration is
+    exercised via the n=1 path in
+    :func:`test_default_factory_dispatches_tabletop_via_registry` and
+    by every other test in this file. See PR hotfix/ci-pytest-hang.
 
-    ``n_workers=2`` (not 4) because the GitHub ``ubuntu-latest``
-    runner exposes 4 logical CPUs but only ~2 usable cores under
-    cgroup limits, and spawning 4 fresh interpreters that each import
-    MuJoCo + compile MJCF deadlocks the pool startup on resource
-    contention. n=1 vs n=2 already exercises the multi-process path
-    end-to-end and catches every worker-state-leak / completion-
-    order / seed-leak bug; bumping to N=4 only adds CI flakiness
-    without strengthening the contract. See PR hotfix/ci-pytest-hang.
+    ``n_workers=2`` (not 4) for the same reason: even with the fake
+    env, 4 spawned interpreters each importing numpy + reimporting
+    the test module is wasteful and adds CI-runner stress without
+    strengthening the contract.
     """
     suite = _make_suite(seed=2024, episodes_per_cell=2)
 
-    serial = Runner(n_workers=1, env_factory=make_fast_env).run(
+    # Fake env (no MuJoCo). The Random policy still drives stochastic
+    # actions, so the per-episode RNG-stream determinism contract is
+    # exercised in full; the fake env just terminates on step 1 with
+    # a constant observation, which is fine because the asserts target
+    # Episode metadata (seed, master_seed, ordering), not env state.
+    serial = Runner(n_workers=1, env_factory=_fake_env_factory).run(
         policy_factory=make_random_policy,
         suite=suite,
     )
-    parallel = Runner(n_workers=2, env_factory=make_fast_env).run(
+    parallel = Runner(n_workers=2, env_factory=_fake_env_factory).run(
         policy_factory=make_random_policy,
         suite=suite,
     )
@@ -486,9 +495,26 @@ class _FakeProtocolEnv:
     inheriting from ``gymnasium.Env``. Deterministic outputs (constant
     observation, constant reward, success-on-first-step) keep the test
     short and assertion-shaped.
+
+    ``AXIS_NAMES`` enumerates every axis any test suite in this file or
+    in ``test_determinism_runner_workers.py`` may declare. The fake
+    accepts (and ignores) the value — it never affects rollout behaviour
+    — so the multi-worker determinism tests can exercise the Runner's
+    pool path without spinning up MuJoCo (whose MJCF compile under
+    spawn deadlocks on the GitHub runner; see hotfix/ci-pytest-hang).
     """
 
-    AXIS_NAMES = frozenset({"distractor_count"})
+    AXIS_NAMES = frozenset(
+        {
+            "distractor_count",
+            "lighting_intensity",
+            "camera_offset_x",
+            "camera_offset_y",
+            "object_initial_pose_x",
+            "object_initial_pose_y",
+            "object_texture",
+        }
+    )
     VISUAL_ONLY_AXES: frozenset[str] = frozenset()
 
     def __init__(self) -> None:
