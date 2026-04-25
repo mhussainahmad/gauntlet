@@ -246,6 +246,12 @@ class GenesisTabletopEnv:
         render_in_obs: bool = False,
         render_size: tuple[int, int] = _DEFAULT_RENDER_SIZE,
     ) -> None:
+        """Bootstrap Genesis (idempotent per process) and assemble the scene.
+
+        ``render_in_obs`` is accepted for API parity but the state-only
+        first cut emits no image; the rendering follow-up RFC wires the
+        Genesis camera into ``obs["image"]``.
+        """
         if max_steps <= 0:
             raise ValueError(f"max_steps must be positive; got {max_steps}")
         if n_substeps <= 0:

@@ -72,6 +72,10 @@ class CartesianSampler:
     """
 
     def sample(self, suite: Suite, rng: np.random.Generator) -> list[SuiteCell]:
+        """Enumerate every axis-value combination as a flat cell list.
+
+        ``rng`` is accepted for protocol conformance and ignored.
+        """
         # Imported lazily to avoid a circular import: schema imports
         # this module to dispatch ``Suite.cells``, and this method is
         # only called from inside that dispatch path.
