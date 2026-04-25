@@ -1430,6 +1430,88 @@ def ros2_record(
 
 
 # ──────────────────────────────────────────────────────────────────────
+# `dashboard` subcommand group — Phase 3 Task 20 (RFC 020 §3.2).
+# ──────────────────────────────────────────────────────────────────────
+#
+# ``build`` — recursively scan a directory of ``report.json`` files
+#             and materialise a self-contained static SPA
+#             (``index.html`` + ``dashboard.js`` + ``dashboard.css``)
+#             into the output directory. The Python API
+#             (:func:`gauntlet.dashboard.build_dashboard`) is the
+#             pipeline; this subcommand is the thin wrapper RFC 020
+#             §3.2 specified.
+
+
+dashboard_app = typer.Typer(
+    name="dashboard",
+    help="Self-contained static SPA indexing every report.json under a directory.",
+    no_args_is_help=True,
+    add_completion=False,
+)
+app.add_typer(dashboard_app)
+
+
+@dashboard_app.command("build")
+def dashboard_build(
+    runs_dir: Annotated[
+        Path,
+        typer.Argument(
+            help="Directory to recursively scan for report.json files.",
+            exists=False,  # checked manually for a friendlier message
+            file_okay=False,
+            dir_okay=True,
+        ),
+    ],
+    out: Annotated[
+        Path,
+        typer.Option(
+            "--out",
+            "-o",
+            help=(
+                "Output directory; created if missing. Receives "
+                "index.html + dashboard.js + dashboard.css."
+            ),
+        ),
+    ],
+    title: Annotated[
+        str,
+        typer.Option(
+            "--title",
+            help=(
+                "Dashboard title rendered into <title> and the page header. "
+                "Autoescaped so user-supplied values are safe."
+            ),
+        ),
+    ] = "Gauntlet Dashboard",
+) -> None:
+    """Build a self-contained dashboard SPA from a directory of run artefacts."""
+    if not runs_dir.is_dir():
+        raise _fail(f"runs-dir not found: {runs_dir}")
+
+    # Lazy import — keeps `gauntlet --help` snappy and avoids pulling
+    # the jinja2 template loader into unrelated subcommand startup.
+    from gauntlet.dashboard import build_dashboard
+
+    try:
+        build_dashboard(runs_dir, out, title=title)
+    except FileNotFoundError as exc:
+        raise _fail(str(exc)) from exc
+    except ValueError as exc:
+        raise _fail(str(exc)) from exc
+
+    index_html = out / "index.html"
+    _echo_err(f"[ok]Wrote[/] {_fmt_path(index_html)}")
+    # Count what we just embedded so the user sees a one-line summary
+    # without having to open the HTML. ``discover_reports`` is cheap
+    # (single rglob) and the path-list is the source of truth for
+    # ``n_runs`` in the embedded index.
+    from gauntlet.dashboard import discover_reports
+
+    paths = discover_reports(runs_dir)
+    _echo_err(f"  dashboard: {len(paths)} runs -> {_fmt_path(out)}")
+
+
+# ──────────────────────────────────────────────────────────────────────
 # `realsim` subcommand group — Phase 3 Task 18 (RFC 021).
 # ──────────────────────────────────────────────────────────────────────
 #
