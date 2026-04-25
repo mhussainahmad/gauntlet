@@ -13,6 +13,7 @@ from collections.abc import Callable
 from typing import cast
 
 from gauntlet.env.base import CameraSpec, GauntletEnv
+from gauntlet.env.mobile import MobileTabletopEnv
 from gauntlet.env.perturbation import AXIS_NAMES, PerturbationAxis, axis_for
 from gauntlet.env.registry import register_env
 from gauntlet.env.tabletop import N_DISTRACTOR_SLOTS, TabletopEnv
@@ -26,12 +27,19 @@ register_env(
     "tabletop",
     cast(Callable[..., GauntletEnv], TabletopEnv),
 )
+# B-13 — kinematic mobile-base wrapper. Same widening cast as the
+# tabletop registration; structural conformance is checked at runtime.
+register_env(
+    "tabletop-mobile",
+    cast(Callable[..., GauntletEnv], MobileTabletopEnv),
+)
 
 __all__ = [
     "AXIS_NAMES",
     "N_DISTRACTOR_SLOTS",
     "CameraSpec",
     "GauntletEnv",
+    "MobileTabletopEnv",
     "PerturbationAxis",
     "TabletopEnv",
     "axis_for",
