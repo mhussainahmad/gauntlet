@@ -60,7 +60,7 @@ __all__ = [
 # Public type alias so the loader / Sampler dispatch / docs all key off
 # the same string set. Adding a new mode requires touching this literal
 # and ``gauntlet.suite.sampling.build_sampler`` together — by design.
-SamplingMode = Literal["cartesian", "latin_hypercube", "sobol"]
+SamplingMode = Literal["cartesian", "latin_hypercube", "sobol", "adversarial"]
 
 # Tuple form of the same set, used by validators that need a runtime
 # ``in`` check (Pydantic narrows ``Literal`` in the model but the
@@ -69,6 +69,7 @@ SAMPLING_MODES: Final[tuple[SamplingMode, ...]] = (
     "cartesian",
     "latin_hypercube",
     "sobol",
+    "adversarial",
 )
 
 
@@ -324,10 +325,17 @@ class Suite(BaseModel):
     sampling: SamplingMode = "cartesian"
     # Required for ``sampling != "cartesian"`` and forbidden for
     # ``sampling == "cartesian"`` — enforced by ``_check_sampling_inputs``
-    # below. Sample budget for LHS / Sobol; ignored (must be unset) for
-    # the Cartesian path because the cell count is the product of
-    # per-axis ``steps`` there.
+    # below. Sample budget for LHS / Sobol / adversarial; ignored
+    # (must be unset) for the Cartesian path because the cell count is
+    # the product of per-axis ``steps`` there.
     n_samples: int | None = None
+    # B-07 — adversarial sampler only. Path to a pilot run's
+    # ``report.json``; required when ``sampling == "adversarial"`` and
+    # forbidden for every other mode (a stale pilot reference is the
+    # exact footgun the anti-feature warning calls out). Resolved
+    # relative to the suite YAML's parent directory by ``load_suite``;
+    # absolute paths and string-loaded suites pass through unchanged.
+    pilot_report: str | None = None
 
     # ------------------------------------------------------------------
     # Field-level checks.
@@ -419,6 +427,15 @@ class Suite(BaseModel):
 
     @model_validator(mode="after")
     def _check_sampling_inputs(self) -> Suite:
+        # B-07 — pilot_report is exclusive to adversarial. Surface the
+        # mismatch first so a typo'd ``sampling: sobol`` paired with
+        # ``pilot_report:`` fails with the right message.
+        if self.sampling != "adversarial" and self.pilot_report is not None:
+            raise ValueError(
+                f"sampling={self.sampling}: pilot_report is only valid "
+                "for sampling=adversarial; drop the pilot_report field "
+                "or switch to sampling=adversarial.",
+            )
         if self.sampling == "cartesian":
             # n_samples is meaningless for Cartesian (cell count is the
             # axis-step product). Reject explicitly so a user who ports
@@ -445,14 +462,16 @@ class Suite(BaseModel):
                         "(required for sampling=cartesian)",
                     )
         else:
-            # LHS / Sobol: n_samples is required and steps is forbidden
-            # (an LHS YAML that names ``steps`` is confused — the LHS
-            # budget is ``n_samples``, not the per-axis grid count).
+            # LHS / Sobol / adversarial: n_samples is required and
+            # steps is forbidden (an LHS YAML that names ``steps`` is
+            # confused — the budget is ``n_samples``, not the per-axis
+            # grid count).
             if self.n_samples is None:
                 raise ValueError(
                     f"sampling={self.sampling}: n_samples is required "
                     "(it sets the sample budget; the cell count of an "
-                    "LHS / Sobol suite is independent of per-axis steps)",
+                    "LHS / Sobol / adversarial suite is independent of "
+                    "per-axis steps)",
                 )
             for axis_name, spec in self.axes.items():
                 if spec.steps is not None:
@@ -460,8 +479,20 @@ class Suite(BaseModel):
                         f"axis spec: sampling={self.sampling} forbids "
                         f"per-axis steps; got steps={spec.steps} on axis "
                         f"{axis_name!r}. Drop the steps key — LHS / Sobol "
-                        "sample size is set by the suite-level n_samples.",
+                        "/ adversarial sample size is set by the suite-"
+                        "level n_samples.",
                     )
+            # B-07 — adversarial needs a pilot report to bias against.
+            # Without one the bandit has no posterior to sample from
+            # and the mode degenerates to a confused uniform sampler.
+            if self.sampling == "adversarial" and self.pilot_report is None:
+                raise ValueError(
+                    "sampling=adversarial: pilot_report is required "
+                    "(adversarial sampling concentrates new draws in "
+                    "the pilot's high-failure regions). Run a Sobol or "
+                    "LHS pilot first and point this field at its "
+                    "report.json.",
+                )
         return self
 
     # ------------------------------------------------------------------
@@ -477,6 +508,12 @@ class Suite(BaseModel):
     #   :attr:`seed`-independent (Sobol is fully deterministic; the
     #   sampler ignores the RNG it receives). See
     #   ``docs/polish-exploration-sobol-sampler.md``.
+    # * ``"adversarial"`` — :class:`AdversarialSampler`, Thompson-
+    #   sampling bandit over per-bin Beta posteriors fitted from
+    #   :attr:`pilot_report`. ANTI-FEATURE: biases coverage toward
+    #   known-failure regions; resulting report is NOT a fair sample.
+    #   The :class:`Suite` loader prints a loud :class:`UserWarning`
+    #   whenever a YAML opts in. See ``docs/backlog.md`` B-07.
     # ------------------------------------------------------------------
 
     def cells(self) -> Iterator[SuiteCell]:
@@ -505,7 +542,7 @@ class Suite(BaseModel):
         # CartesianSampler imports it lazily inside ``sample``.
         from gauntlet.suite.sampling import build_sampler
 
-        sampler = build_sampler(self.sampling)
+        sampler = build_sampler(self.sampling, suite=self)
         rng = np.random.default_rng(np.random.SeedSequence(self.seed))
         yield from sampler.sample(self, rng)
 
