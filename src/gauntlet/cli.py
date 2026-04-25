@@ -27,7 +27,7 @@ import math
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
-from typing import Annotated, TypeAlias, cast
+from typing import TYPE_CHECKING, Annotated, TypeAlias, cast
 
 import typer
 from pydantic import ValidationError
@@ -51,6 +51,9 @@ from gauntlet.runner.provenance import compute_suite_hash
 from gauntlet.runner.worker import TrajectoryFormat as _TrajectoryFormatLiteral
 from gauntlet.suite import LintFinding, lint_suite, load_suite
 from gauntlet.suite.schema import Suite
+
+if TYPE_CHECKING:
+    from gauntlet.runner.sinks import EpisodeSink
 
 __all__ = ["app"]
 
@@ -339,6 +342,69 @@ def _make_env_factory(
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Optional W&B / MLflow per-Episode mirror sinks (B-27).
+# ──────────────────────────────────────────────────────────────────────
+
+
+def _build_episode_sinks(
+    *,
+    wandb: bool,
+    mlflow: bool,
+    suite_name: str,
+    policy_spec: str,
+    seed_override: int | None,
+) -> list[EpisodeSink]:
+    """Instantiate the user-requested mirror sinks (B-27).
+
+    Both flags default ``False`` upstream — when neither is set this
+    returns ``[]`` and the function never imports
+    :mod:`gauntlet.runner.sinks` (so no chance of a stray wandb /
+    mlflow import on the default code path).
+
+    PRODUCT.md anti-feature warning: opting in to ``--wandb`` (or
+    ``--mlflow`` with a remote ``MLFLOW_TRACKING_URI``) exfiltrates
+    per-Episode results to the chosen backend. The CLI helptext on
+    each flag spells this out; this function logs a stderr breadcrumb
+    on instantiation so the user sees the destination before any
+    rollouts complete.
+    """
+    if not wandb and not mlflow:
+        return []
+
+    # Lazy import — keeps the default code path free of any sinks
+    # symbol so a typo in the sinks module cannot regress the
+    # extras-free `gauntlet run` path.
+    from gauntlet.runner.sinks import MlflowSink, WandbSink
+
+    config = {
+        "policy_spec": policy_spec,
+        "seed_override": seed_override,
+    }
+    run_name = f"{suite_name}-{policy_spec}"
+    sinks: list[EpisodeSink] = []
+    if wandb:
+        try:
+            sinks.append(WandbSink(run_name=run_name, suite_name=suite_name, config=config))
+        except ImportError as exc:
+            raise _fail(str(exc)) from exc
+        _echo_err(
+            "[warn]warning:[/] --wandb mirrors episodes to wandb.ai "
+            "(set WANDB_BASE_URL or WANDB_MODE=offline to redirect)"
+        )
+    if mlflow:
+        try:
+            sinks.append(MlflowSink(run_name=run_name, suite_name=suite_name, config=config))
+        except ImportError as exc:
+            raise _fail(str(exc)) from exc
+        _echo_err(
+            "[warn]warning:[/] --mlflow mirrors episodes to MLflow "
+            "(local ./mlruns by default; remote when "
+            "MLFLOW_TRACKING_URI is set to an HTTP(S) endpoint)"
+        )
+    return sinks
+
+
+# ──────────────────────────────────────────────────────────────────────
 # `repro.json` writer (B-22 — episode-level seed manifest).
 # ──────────────────────────────────────────────────────────────────────
 
@@ -621,6 +687,35 @@ def run(
             ),
         ),
     ] = False,
+    wandb: Annotated[
+        bool,
+        typer.Option(
+            "--wandb",
+            help=(
+                "Mirror per-episode results to Weights & Biases. WARNING: "
+                "this exfiltrates data to wandb.ai unless WANDB_BASE_URL is "
+                "set. Off by default; opting in directly contradicts "
+                "PRODUCT.md's local-first / no-telemetry contract — only "
+                "use when you already live in W&B. Requires the optional "
+                '[wandb] extra (`pip install "gauntlet[wandb]"`). See '
+                "backlog B-27."
+            ),
+        ),
+    ] = False,
+    mlflow: Annotated[
+        bool,
+        typer.Option(
+            "--mlflow",
+            help=(
+                "Mirror per-episode results to MLflow. Local-by-default: "
+                "writes to ./mlruns/ unless MLFLOW_TRACKING_URI is set to "
+                "a remote endpoint, in which case per-episode results "
+                "leave the machine. Off by default. Requires the "
+                "optional [mlflow] extra (`pip install "
+                '"gauntlet[mlflow]"`). See backlog B-27.'
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Execute a suite and write episodes / report artefacts to ``--out``."""
     if not suite_path.is_file():
@@ -702,6 +797,23 @@ def run(
         )
     except ValueError as exc:
         raise _fail(f"runner failed: {exc}") from exc
+
+    # B-27: optional W&B / MLflow mirror sinks. Lazy-instantiated AFTER
+    # the runner returns so the durable artefacts (episodes.json,
+    # report.html) ship even if the sink errors. Off by default;
+    # opting in directly contradicts PRODUCT.md's local-first contract
+    # and the CLI helptext loudly says so.
+    sinks = _build_episode_sinks(
+        wandb=wandb,
+        mlflow=mlflow,
+        suite_name=suite.name,
+        policy_spec=policy,
+        seed_override=seed_override,
+    )
+    for sink in sinks:
+        for ep in episodes:
+            sink.log_episode(ep)
+        sink.close()
 
     try:
         report = build_report(episodes, suite_env=suite.env, sampling=suite.sampling)
