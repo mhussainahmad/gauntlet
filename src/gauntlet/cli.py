@@ -763,6 +763,68 @@ def _cell_key(perturbation_config: dict[str, float]) -> frozenset[tuple[str, flo
     return frozenset(perturbation_config.items())
 
 
+def _resolve_drift_suite_hash(
+    episodes_a: list[Episode] | None,
+    episodes_b: list[Episode] | None,
+) -> str:
+    """Derive the shared ``suite_hash`` for the B-29 drift map.
+
+    Both sides MUST be loaded as ``episodes.json`` (so the per-episode
+    ``suite_hash`` provenance field is available) AND every episode
+    on both sides MUST agree on the same hash. Cross-backend reports
+    that disagree on the suite payload would silently emit a
+    half-attributed drift map otherwise — fail loudly here instead.
+    """
+    if not episodes_a or not episodes_b:
+        raise _fail(
+            "--drift-map requires episodes.json (not report.json) on "
+            "both sides — drift_map.json's suite_hash is derived from "
+            "the per-episode provenance trio (B-22)"
+        )
+    hashes_a = {ep.suite_hash for ep in episodes_a if ep.suite_hash is not None}
+    hashes_b = {ep.suite_hash for ep in episodes_b if ep.suite_hash is not None}
+    if not hashes_a or not hashes_b:
+        raise _fail(
+            "--drift-map requires every episode to carry suite_hash "
+            "(B-22 provenance); pre-B-22 episodes.json files cannot "
+            "establish a shared suite identity"
+        )
+    if len(hashes_a) > 1 or len(hashes_b) > 1:
+        raise _fail(
+            "--drift-map requires a single suite_hash per side; "
+            f"a={sorted(hashes_a)!r} b={sorted(hashes_b)!r}"
+        )
+    (hash_a,) = hashes_a
+    (hash_b,) = hashes_b
+    if hash_a != hash_b:
+        raise _fail(
+            "--drift-map requires identical suite_hash across "
+            f"backends; a={hash_a!r} vs b={hash_b!r}"
+        )
+    return hash_a
+
+
+def _episodes_suite_env(episodes: list[Episode]) -> str | None:
+    """Pull the ``suite_env`` slug off an episode list's metadata.
+
+    ``Runner`` stamps ``suite_env`` onto every Episode's metadata
+    dict (RFC-005 §12 Q2); when episodes.json is loaded back
+    :func:`build_report` is called without the env hint so the rebuilt
+    Report carries ``suite_env=None``. The drift map needs the slug,
+    so look it up here without touching the rest of the CLI's
+    report-rebuilding path.
+    """
+    envs: set[str] = set()
+    for ep in episodes:
+        env = ep.metadata.get("suite_env")
+        if isinstance(env, str):
+            envs.add(env)
+    if len(envs) == 1:
+        (only,) = envs
+        return only
+    return None
+
+
 def _build_compare(
     report_a: Report,
     report_b: Report,
@@ -944,6 +1006,30 @@ def compare(
             ),
         ),
     ] = None,
+    drift_map: Annotated[
+        Path | None,
+        typer.Option(
+            "--drift-map",
+            help=(
+                "Also emit a cross-backend embodiment-transfer drift map "
+                "at PATH (per-axis-value rate-delta table; SIMPLER-style "
+                "control / visual disparity). Requires --allow-cross-backend. "
+                "When set, also prints the top-5 most-divergent axis values "
+                "to stderr. See backlog B-29."
+            ),
+        ),
+    ] = None,
+    drift_map_policy_label: Annotated[
+        str | None,
+        typer.Option(
+            "--drift-map-policy-label",
+            help=(
+                "Required with --drift-map. Free-form policy identifier "
+                "stamped onto the emitted drift_map.json (no canonical "
+                "policy_label exists on Report — the user supplies it)."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Diff two runs and emit compare.json (HTML companion deferred to Phase 2)."""
     report_a, episodes_a = _load_report_with_episodes(results_a)
@@ -1006,6 +1092,68 @@ def compare(
             github_summary.parent.mkdir(parents=True, exist_ok=True)
         github_summary.write_text(to_github_summary(payload), encoding="utf-8")
         _echo_err(f"[ok]Wrote[/] GitHub summary -> {_fmt_path(github_summary)}")
+
+    if drift_map is not None:
+        # B-29: cross-backend embodiment-transfer drift map. Gated
+        # behind --allow-cross-backend (a same-backend "drift map" is
+        # a category error: the metric measures simulator drift, not
+        # policy regression). policy_label is required because no
+        # canonical field carries it on Report; suite_hash is derived
+        # from the underlying Episode.suite_hash so a mismatched suite
+        # is rejected at the same gate as the cross-backend check.
+        if not allow_cross_backend:
+            raise _fail(
+                "--drift-map requires --allow-cross-backend "
+                "(drift map measures sim-vs-sim disparity, not "
+                "policy regression — see backlog B-29)"
+            )
+        if drift_map_policy_label is None:
+            raise _fail(
+                "--drift-map requires --drift-map-policy-label "
+                "(no canonical policy_label exists on Report; the "
+                "user supplies the identifier stamped onto drift_map.json)"
+            )
+        suite_hash = _resolve_drift_suite_hash(episodes_a, episodes_b)
+        # ``_load_report_with_episodes`` rebuilds the Report from
+        # episodes.json without threading suite_env (build_report's env
+        # parameter is set on the live ``run`` path only). For the
+        # drift map we need the slug — pull it off the per-episode
+        # metadata stamped by the Runner so the cross-backend gate
+        # inside :func:`compute_drift_map` has the data it needs.
+        # ``cast`` here narrows ``episodes_a`` / ``_b`` from
+        # ``list[Episode] | None`` to ``list[Episode]``: the
+        # ``_resolve_drift_suite_hash`` call above already errored out
+        # if either side was None (or empty), so by this point both
+        # sides are guaranteed to be a populated list.
+        episodes_a_list = cast("list[Episode]", episodes_a)
+        episodes_b_list = cast("list[Episode]", episodes_b)
+        if report_a.suite_env is None:
+            env_a = _episodes_suite_env(episodes_a_list)
+            if env_a is not None:
+                report_a = report_a.model_copy(update={"suite_env": env_a})
+        if report_b.suite_env is None:
+            env_b = _episodes_suite_env(episodes_b_list)
+            if env_b is not None:
+                report_b = report_b.model_copy(update={"suite_env": env_b})
+
+        # Lazy import — same rationale as github_summary above.
+        from gauntlet.compare import compute_drift_map, render_drift_map_table
+
+        try:
+            dmap = compute_drift_map(
+                report_a,
+                report_b,
+                policy_label=drift_map_policy_label,
+                suite_hash=suite_hash,
+            )
+        except ValueError as exc:
+            raise _fail(str(exc)) from exc
+
+        if drift_map.parent and not drift_map.parent.exists():
+            drift_map.parent.mkdir(parents=True, exist_ok=True)
+        _write_json(drift_map, cast("_JsonValue", dmap.model_dump(mode="json")))
+        _echo_err(f"[ok]Wrote[/] drift map -> {_fmt_path(drift_map)}")
+        render_drift_map_table(dmap, _console, limit=5)
 
     _echo_err(f"[ok]Wrote[/] {_fmt_path(out_path)}")
     _echo_err(f"  a: {report_a.suite_name} ({_fmt_success_rate(report_a.overall_success_rate)})")
