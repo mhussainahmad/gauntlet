@@ -174,6 +174,13 @@ class PyBulletTabletopEnv:
         render_size: tuple[int, int] = _DEFAULT_RENDER_SIZE,
         cameras: list[CameraSpec] | None = None,
     ) -> None:
+        """Construct a headless PyBullet client and build the scene once.
+
+        ``render_in_obs`` enables the cached TINY-renderer path with a
+        constant projection matrix. ``cameras`` overrides it with one
+        per-spec view matrix and projection; the first spec is aliased
+        to ``obs["image"]`` for parity with the MuJoCo backend.
+        """
         if max_steps <= 0:
             raise ValueError(f"max_steps must be positive; got {max_steps}")
         if n_substeps <= 0:

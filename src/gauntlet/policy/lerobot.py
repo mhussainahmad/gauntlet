@@ -169,6 +169,20 @@ class LeRobotPolicy:
         preprocessor_overrides: Mapping[str, object] | None = None,
         postprocessor_overrides: Mapping[str, object] | None = None,
     ) -> None:
+        """Load SmolVLA from *repo_id* and build pre/post processors.
+
+        ``device`` defaults to ``"cuda"`` when available else ``"cpu"``.
+        ``camera_keys`` and ``state_obs_keys`` map TabletopEnv obs into
+        the lerobot frame layout. ``action_remap=None`` selects the
+        default SO-100 → TabletopEnv padding remap (warns once, RFC §4).
+
+        Does NOT forward ``trust_remote_code=True``: lerobot first-party
+        policies live in the installed package, not on the HF Hub.
+
+        Raises:
+            ImportError: when the ``[lerobot]`` extra is not installed.
+            ValueError: on an unsupported ``dtype``.
+        """
         try:
             import torch
             from lerobot.policies.factory import make_pre_post_processors

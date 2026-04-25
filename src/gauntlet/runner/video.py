@@ -118,6 +118,7 @@ class VideoWriter:
     _CODEC = "libx264"
 
     def __init__(self, *, fps: int = 30) -> None:
+        """Stash the framerate for later :meth:`write` calls. No I/O here."""
         if not isinstance(fps, int) or fps <= 0:
             raise ValueError(f"fps must be a positive int; got {fps!r}")
         self._fps = fps

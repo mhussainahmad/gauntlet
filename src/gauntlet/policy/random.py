@@ -25,6 +25,13 @@ class RandomPolicy:
         action_high: float = 1.0,
         seed: int | None = None,
     ) -> None:
+        """Bind a uniform sampler over ``[action_low, action_high]^action_dim``.
+
+        ``seed`` initialises an internal :class:`numpy.random.Generator`.
+        The Runner's per-episode RNG replaces it via :meth:`reset`, so
+        ``seed`` only affects callers that drive the policy outside the
+        Runner.
+        """
         if action_dim <= 0:
             raise ValueError(f"action_dim must be positive, got {action_dim}")
         if action_low >= action_high:

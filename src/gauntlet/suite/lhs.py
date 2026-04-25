@@ -131,6 +131,13 @@ class LatinHypercubeSampler:
     """
 
     def sample(self, suite: Suite, rng: np.random.Generator) -> list[SuiteCell]:
+        """Draw ``suite.n_samples`` LHS cells across every declared axis.
+
+        Raises:
+            ValueError: when ``suite.n_samples is None`` (the schema
+                validator should have rejected this; the check guards
+                direct ``Suite(...)`` constructions).
+        """
         # Schema-level validators guarantee n_samples is a positive int
         # whenever ``sampling != "cartesian"`` reaches this method, but
         # we still narrow defensively — direct ``Suite(...)`` calls

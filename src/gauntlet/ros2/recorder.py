@@ -99,6 +99,17 @@ class Ros2RolloutRecorder:
         duration_s: float = _DEFAULT_DURATION_S,
         qos_depth: int = _DEFAULT_QOS_DEPTH,
     ) -> None:
+        """Validate inputs; defer rclpy / file-handle setup to ``__enter__``.
+
+        Construction never touches rclpy or the filesystem so a
+        ``Ros2RolloutRecorder(...)`` followed by an exception path costs
+        nothing. The actual subscription and JSONL handle land in
+        :meth:`__enter__`.
+
+        Raises:
+            ValueError: on empty ``topic`` / ``node_name``,
+                ``duration_s < 0``, or ``qos_depth < 1``.
+        """
         if not topic:
             raise ValueError("topic must be a non-empty string")
         if not node_name:

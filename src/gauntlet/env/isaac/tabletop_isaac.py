@@ -197,6 +197,13 @@ class IsaacSimTabletopEnv:
         *,
         max_steps: int = 200,
     ) -> None:
+        """Boot Isaac Sim's ``SimulationApp`` (headless) and build the scene.
+
+        Construction pays the ~5-s Kit boot cost once per worker; the
+        World, FixedCuboid table, DynamicCuboid cube, and VisualCuboid
+        target marker are added before any reset / step lands. State-only
+        obs — no camera spec is wired here (RFC-009).
+        """
         if max_steps <= 0:
             raise ValueError(f"max_steps must be positive; got {max_steps}")
 

@@ -163,6 +163,14 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         render_size: tuple[int, int] = (224, 224),
         cameras: list[CameraSpec] | None = None,
     ) -> None:
+        """Construct the env, optionally injecting multi-camera scene elements.
+
+        ``render_in_obs`` adds the legacy single ``main`` camera frame to
+        ``obs["image"]``. ``cameras`` overrides that path: each spec is
+        injected into the MJCF as an extra ``<camera>`` and exposed under
+        ``obs["images"][name]`` with the first spec aliased to ``obs["image"]``
+        for downstream parity. ``cameras=[]`` is treated as ``None``.
+        """
         super().__init__()
         if max_steps <= 0:
             raise ValueError(f"max_steps must be positive; got {max_steps}")

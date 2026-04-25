@@ -114,6 +114,19 @@ class HuggingFacePolicy:
         processor_kwargs: Mapping[str, object] | None = None,
         model_kwargs: Mapping[str, object] | None = None,
     ) -> None:
+        """Load the HF processor + Vision2Seq model for *repo_id*.
+
+        ``device`` defaults to ``"cuda"`` when available else ``"cpu"``.
+        ``dtype`` is one of ``"float32"`` / ``"float16"`` / ``"bfloat16"``;
+        the dtype is also forwarded as ``torch_dtype`` to the model loader.
+        Both ``processor_kwargs`` and ``model_kwargs`` set
+        ``trust_remote_code=True`` because OpenVLA's modeling code lives
+        outside the ``transformers`` tree.
+
+        Raises:
+            ImportError: when the ``[hf]`` extra is not installed.
+            ValueError: on an unsupported ``dtype``.
+        """
         try:
             import torch
             from PIL import Image
