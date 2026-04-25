@@ -75,6 +75,7 @@ from gauntlet.runner.provenance import (
     compute_suite_hash,
 )
 from gauntlet.runner.worker import (
+    TrajectoryFormat,
     VideoConfig,
     WorkerInitArgs,
     WorkItem,
@@ -260,6 +261,7 @@ class Runner:
         suite: Suite,
         prune_after_cells: int | None = None,
         prune_min_success: float | None = None,
+        trajectory_format: TrajectoryFormat = "npz",
     ) -> list[Episode]:
         """Execute every (cell x episode) rollout.
 
@@ -289,6 +291,17 @@ class Runner:
             prune_min_success: Pass/fail threshold for the prune
                 decision (a value in ``[0, 1]``). See
                 ``prune_after_cells``.
+            trajectory_format: B-23 trajectory output format. ``"npz"``
+                (the default) keeps the pre-B-23 byte-identical
+                behaviour: one ``np.savez_compressed`` per episode,
+                no ``pyarrow`` import. ``"parquet"`` writes one
+                Parquet file per episode instead of NPZ; ``"both"``
+                writes both side-by-side. Both non-default modes
+                require the ``[parquet]`` extra (``pip install
+                "gauntlet[parquet]"``); a missing extra raises a
+                clean :class:`ImportError` from the worker on the
+                first write. Ignored when ``trajectory_dir is
+                None`` (no trajectory writes happen at all).
 
         Returns:
             List of :class:`Episode` records sorted by
@@ -389,6 +402,7 @@ class Runner:
                     policy_factory,
                     items_to_run,
                     video_config=video_config,
+                    trajectory_format=trajectory_format,
                     cached_episodes=cached_episodes,
                     suite=suite,
                     prune_after_cells=prune_after_cells,
@@ -396,11 +410,19 @@ class Runner:
                 )
             elif self._n_workers == 1:
                 fresh = self._run_in_process(
-                    env_factory, policy_factory, items_to_run, video_config=video_config
+                    env_factory,
+                    policy_factory,
+                    items_to_run,
+                    video_config=video_config,
+                    trajectory_format=trajectory_format,
                 )
             else:
                 fresh = self._run_pool(
-                    env_factory, policy_factory, items_to_run, video_config=video_config
+                    env_factory,
+                    policy_factory,
+                    items_to_run,
+                    video_config=video_config,
+                    trajectory_format=trajectory_format,
                 )
         else:
             fresh = []
@@ -661,6 +683,7 @@ class Runner:
         work_items: list[WorkItem],
         *,
         video_config: VideoConfig | None,
+        trajectory_format: TrajectoryFormat,
         cached_episodes: list[Episode],
         suite: Suite,
         prune_after_cells: int,
@@ -712,6 +735,7 @@ class Runner:
                         policy_factory,
                         item,
                         trajectory_dir=self._trajectory_dir,
+                        trajectory_format=trajectory_format,
                         video_config=video_config,
                     )
                     fresh.append(episode)
@@ -785,6 +809,7 @@ class Runner:
         work_items: list[WorkItem],
         *,
         video_config: VideoConfig | None,
+        trajectory_format: TrajectoryFormat,
     ) -> list[Episode]:
         """Single-process fast path. Loads the env once, reuses it.
 
@@ -800,6 +825,7 @@ class Runner:
                     policy_factory,
                     item,
                     trajectory_dir=self._trajectory_dir,
+                    trajectory_format=trajectory_format,
                     video_config=video_config,
                 )
                 for item in work_items
@@ -814,6 +840,7 @@ class Runner:
         work_items: list[WorkItem],
         *,
         video_config: VideoConfig | None,
+        trajectory_format: TrajectoryFormat,
     ) -> list[Episode]:
         """Multiprocessing path. ``spawn`` start method only.
 
@@ -827,6 +854,7 @@ class Runner:
             env_factory=env_factory,
             policy_factory=policy_factory,
             trajectory_dir=self._trajectory_dir,
+            trajectory_format=trajectory_format,
             video_config=video_config,
         )
         with ctx.Pool(

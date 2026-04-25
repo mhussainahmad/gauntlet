@@ -47,6 +47,7 @@ from gauntlet.report import CellBreakdown, Report, build_report, write_html
 from gauntlet.report.html import _nan_to_none
 from gauntlet.runner import Episode, Runner
 from gauntlet.runner.provenance import compute_suite_hash
+from gauntlet.runner.worker import TrajectoryFormat as _TrajectoryFormatLiteral
 from gauntlet.suite import LintFinding, lint_suite, load_suite
 from gauntlet.suite.schema import Suite
 
@@ -494,13 +495,32 @@ def run(
         typer.Option(
             "--record-trajectories",
             help=(
-                "Directory to dump per-episode NPZ trajectories into. "
+                "Directory to dump per-episode trajectories into. "
                 "Defaults to OFF — when unset the Runner is byte-identical "
-                "to Phase 1. Feed the directory into ``gauntlet monitor "
-                "train`` / ``gauntlet monitor score``."
+                "to Phase 1. Format is controlled by --trajectory-format. "
+                "Feed the directory into ``gauntlet monitor train`` / "
+                "``gauntlet monitor score`` (NPZ) or DuckDB / pandas / "
+                "polars (Parquet)."
             ),
         ),
     ] = None,
+    trajectory_format: Annotated[
+        str,
+        typer.Option(
+            "--trajectory-format",
+            help=(
+                "Trajectory output format when --record-trajectories is "
+                "set. 'npz' (default) keeps the byte-identical pre-B-23 "
+                "behaviour: one np.savez_compressed per episode, no "
+                "pyarrow dependency. 'parquet' writes one Parquet file "
+                "per episode (requires the [parquet] extra: "
+                "`pip install \"gauntlet[parquet]\"`). 'both' writes "
+                "both side-by-side. Ignored when --record-trajectories "
+                "is unset."
+            ),
+            case_sensitive=False,
+        ),
+    ] = "npz",
     env_max_steps: Annotated[
         int | None,
         typer.Option(
@@ -644,12 +664,23 @@ def run(
             f"--prune-min-success={prune_min_success!r}.",
         )
 
+    # Validate --trajectory-format up-front so a typo surfaces as a
+    # clean CLI error before the Runner spawns workers (and so the
+    # Literal narrowing below is honest under mypy --strict).
+    fmt_normalised = trajectory_format.lower()
+    if fmt_normalised not in ("npz", "parquet", "both"):
+        raise _fail(
+            f"--trajectory-format must be one of {{npz, parquet, both}}; got {trajectory_format!r}."
+        )
+    fmt_literal = cast(_TrajectoryFormatLiteral, fmt_normalised)
+
     try:
         episodes = runner.run(
             policy_factory=policy_factory,
             suite=suite,
             prune_after_cells=prune_after_cells,
             prune_min_success=prune_min_success,
+            trajectory_format=fmt_literal,
         )
     except ValueError as exc:
         raise _fail(f"runner failed: {exc}") from exc

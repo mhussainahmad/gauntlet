@@ -49,7 +49,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, Literal, TypedDict
 
 import numpy as np
 from numpy.typing import NDArray
@@ -57,9 +57,19 @@ from numpy.typing import NDArray
 from gauntlet.env.base import GauntletEnv
 from gauntlet.policy.base import Policy, ResettablePolicy
 from gauntlet.runner.episode import Episode
+from gauntlet.runner.parquet import TrajectoryDict, parquet_path_for, write_parquet
 from gauntlet.runner.video import VideoWriter, video_path_for
 
+# Public alias for the literal accepted by ``Runner.run`` and
+# ``execute_one``'s ``trajectory_format`` knob (B-23). ``"npz"`` is the
+# pre-B-23 default and is byte-identical to the previous behaviour;
+# ``"parquet"`` and ``"both"`` opt into the [parquet] extra and emit
+# one Parquet sidecar per episode (alongside the NPZ in ``"both"``
+# mode, replacing it in ``"parquet"`` mode).
+TrajectoryFormat = Literal["npz", "parquet", "both"]
+
 __all__ = [
+    "TrajectoryFormat",
     "VideoConfig",
     "WorkItem",
     "WorkerInitArgs",
@@ -191,6 +201,13 @@ class WorkerInitArgs:
     # byte-identical to Phase 1. When a Path is supplied the worker emits
     # one NPZ per episode following the ``cell_NNNN_ep_NNNN.npz`` scheme.
     trajectory_dir: Path | None = None
+    # B-23 trajectory output format. ``"npz"`` (the default) keeps the
+    # pre-B-23 byte-identical behaviour: one ``np.savez_compressed``
+    # per episode, no pyarrow import. ``"parquet"`` writes one Parquet
+    # file per episode instead (requires the [parquet] extra).
+    # ``"both"`` writes both side-by-side. Ignored when
+    # ``trajectory_dir is None``.
+    trajectory_format: TrajectoryFormat = "npz"
     # Optional per-episode MP4 video config. ``None`` means "no video"
     # — the runner stays byte-identical to the pre-PR behaviour. When
     # set, every worker accumulates ``obs["image"]`` per step and
@@ -212,6 +229,7 @@ class _WorkerState(TypedDict, total=False):
     env: GauntletEnv
     policy_factory: Callable[[], Policy]
     trajectory_dir: Path | None
+    trajectory_format: TrajectoryFormat
     video_config: VideoConfig | None
 
 
@@ -239,6 +257,7 @@ def pool_initializer(args: WorkerInitArgs) -> None:
     _WORKER_STATE["env"] = env
     _WORKER_STATE["policy_factory"] = args.policy_factory
     _WORKER_STATE["trajectory_dir"] = args.trajectory_dir
+    _WORKER_STATE["trajectory_format"] = args.trajectory_format
     _WORKER_STATE["video_config"] = args.video_config
 
 
@@ -328,6 +347,7 @@ def execute_one(
     item: WorkItem,
     *,
     trajectory_dir: Path | None = None,
+    trajectory_format: TrajectoryFormat = "npz",
     video_config: VideoConfig | None = None,
 ) -> Episode:
     """Drive one (cell, episode) rollout to completion.
@@ -385,9 +405,16 @@ def execute_one(
 
     # Per-step buffers. We allocate only when asked — a ``None``
     # trajectory_dir keeps rollout memory usage identical to Phase 1.
+    # ``reward_buffer`` / ``terminated_buffer`` / ``truncated_buffer``
+    # are B-23 additions: the Parquet schema declares per-step columns
+    # for those three signals, and the NPZ writer ignores them so
+    # ``trajectory_format="npz"`` (the default) stays byte-identical.
     record_trajectory = trajectory_dir is not None
     obs_buffer: dict[str, list[NDArray[np.float64]]] = {}
     action_buffer: list[NDArray[np.float64]] = []
+    reward_buffer: list[float] = []
+    terminated_buffer: list[bool] = []
+    truncated_buffer: list[bool] = []
     if record_trajectory:
         # Initialise the obs buffer from the first-observation key set so
         # the NPZ schema is stable regardless of order of first append.
@@ -442,6 +469,16 @@ def execute_one(
             # render buffer cannot mutate what we will encode later.
             frame_buffer.append(np.asarray(obs["image"], dtype=np.uint8).copy())
         obs, reward, terminated, truncated, info = env.step(action)
+        if record_trajectory:
+            # Per-step reward / terminated / truncated. Ignored by the
+            # NPZ writer (schema unchanged), surfaced as columns by
+            # the Parquet writer (B-23). The per-step terminal flags
+            # are False until the final step; the Parquet schema
+            # carries that signal verbatim so a DuckDB ``WHERE
+            # terminated`` filter trivially picks the last step.
+            reward_buffer.append(float(reward))
+            terminated_buffer.append(bool(terminated))
+            truncated_buffer.append(bool(truncated))
         total_reward += float(reward)
         step_count += 1
         energy_delta = info.get("actuator_energy_delta")
@@ -524,8 +561,9 @@ def execute_one(
     if record_trajectory:
         assert trajectory_dir is not None  # type-narrowing for mypy.
         # An early-terminated rollout can have zero steps; write an
-        # empty-but-well-formed NPZ so ``monitor score`` can still match
-        # the file to the Episode row and decide how to handle T=0.
+        # empty-but-well-formed NPZ / Parquet so ``monitor score`` and
+        # downstream DuckDB / pandas globs can still match the file to
+        # the Episode row and decide how to handle T=0.
         obs_arrays: dict[str, NDArray[np.float64]] = {
             k: (
                 np.stack(v, axis=0)
@@ -537,14 +575,33 @@ def execute_one(
         actions_arr = (
             np.stack(action_buffer, axis=0) if action_buffer else np.zeros((0, 7), dtype=np.float64)
         )
-        write_trajectory_npz(
-            trajectory_path_for(trajectory_dir, item.cell_index, item.episode_index),
-            obs_arrays=obs_arrays,
-            actions=actions_arr,
-            seed=env_seed,
-            cell_index=item.cell_index,
-            episode_index=item.episode_index,
-        )
+        # B-23: gate each format independently so ``"both"`` writes
+        # both sidecars and ``"parquet"`` skips the NPZ entirely. The
+        # NPZ schema is unchanged from Phase 1; the Parquet schema is
+        # documented in :mod:`gauntlet.runner.parquet`.
+        if trajectory_format in ("npz", "both"):
+            write_trajectory_npz(
+                trajectory_path_for(trajectory_dir, item.cell_index, item.episode_index),
+                obs_arrays=obs_arrays,
+                actions=actions_arr,
+                seed=env_seed,
+                cell_index=item.cell_index,
+                episode_index=item.episode_index,
+            )
+        if trajectory_format in ("parquet", "both"):
+            rewards_arr = np.asarray(reward_buffer, dtype=np.float64)
+            terminated_arr = np.asarray(terminated_buffer, dtype=np.bool_)
+            truncated_arr = np.asarray(truncated_buffer, dtype=np.bool_)
+            write_parquet(
+                parquet_path_for(trajectory_dir, item.cell_index, item.episode_index),
+                TrajectoryDict(
+                    observations=obs_arrays,
+                    actions=actions_arr,
+                    rewards=rewards_arr,
+                    terminated=terminated_arr,
+                    truncated=truncated_arr,
+                ),
+            )
 
     if video_config is not None and will_write_video:
         # Re-derive the absolute path here so this branch does not have
@@ -585,6 +642,10 @@ def run_work_item(item: WorkItem) -> Episode:
     # pre-Phase-2 form; default to None so the key-missing path is the
     # byte-identical one.
     trajectory_dir: Path | None = _WORKER_STATE.get("trajectory_dir")
+    # B-23 trajectory_format. Defaults to ``"npz"`` so a worker
+    # initialised by a pre-B-23 code path keeps the byte-identical
+    # behaviour.
+    trajectory_format: TrajectoryFormat = _WORKER_STATE.get("trajectory_format", "npz")
     # ``video_config`` is the Polish-task addition. Same key-missing
     # safety net as ``trajectory_dir``: a worker initialised by an
     # older code path runs without video recording.
@@ -594,5 +655,6 @@ def run_work_item(item: WorkItem) -> Episode:
         policy_factory,
         item,
         trajectory_dir=trajectory_dir,
+        trajectory_format=trajectory_format,
         video_config=video_config,
     )
