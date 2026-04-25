@@ -316,8 +316,14 @@ Data-embed conventions:
             {# Cell content + colour are filled by JS at load time —
                see the renderHeatmaps() block below. The placeholder
                em-dash keeps the rendered HTML readable even with JS
-               disabled. #}
-            <td class="heatmap-js-cell num">—</td>
+               disabled. The ``title`` carries the axis combination
+               for screen readers — the visual percentage label loses
+               WCAG AA text contrast at mid-band cells (DESIGN.md §4
+               Heatmap Contrast Exception); the ``title`` makes the
+               data lossless regardless. JS overwrites with the rate
+               + percent at load time. #}
+            <td class="heatmap-js-cell num"
+                title="{{ heat.axis_y }}={{ yv }} × {{ heat.axis_x }}={{ xv }}">—</td>
             {% endfor %}
           </tr>
           {% endfor %}
@@ -463,14 +469,25 @@ Data-embed conventions:
         const cells = tr.querySelectorAll('td.heatmap-js-cell');
         cells.forEach(function (td, xIdx) {
           const rate = (h.success_rate[yIdx] || [])[xIdx];
+          // Build the SR-alt prefix from the axis pair for this cell.
+          // The visual percentage label loses WCAG AA text contrast at
+          // mid-band cells (DESIGN.md §4 Heatmap Contrast Exception);
+          // the title makes the data lossless regardless. Overwrites
+          // the Jinja-side placeholder title that only carries the
+          // axis combination.
+          const xv = h.x_values[xIdx];
+          const yv = h.y_values[yIdx];
+          const prefix = h.axis_y + '=' + yv + ' × ' + h.axis_x + '=' + xv;
           if (rate === null || rate === undefined) {
             td.textContent = '—';
             td.style.background = '#d0d0d0';
             td.style.color = '#555';
+            td.title = prefix + ': no data';
           } else {
             td.textContent = (rate * 100).toFixed(0) + '%';
             td.style.background = heatColor(rate);
             td.style.color = '#fff';
+            td.title = prefix + ': ' + (rate * 100).toFixed(1) + '% success';
           }
         });
       });
