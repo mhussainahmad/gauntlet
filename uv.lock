@@ -2,7 +2,9 @@ version = 1
 revision = 3
 requires-python = ">=3.11"
 resolution-markers = [
-    "python_full_version >= '3.15' and extra != 'extra-8-gauntlet-genesis' and extra != 'extra-8-gauntlet-hf' and extra == 'extra-8-gauntlet-isaac' and extra != 'extra-8-gauntlet-lerobot' and extra != 'extra-8-gauntlet-monitor'",
+    "python_full_version >= '3.15' and sys_platform == 'win32' and extra != 'extra-8-gauntlet-genesis' and extra != 'extra-8-gauntlet-hf' and extra == 'extra-8-gauntlet-isaac' and extra != 'extra-8-gauntlet-lerobot' and extra != 'extra-8-gauntlet-monitor'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten' and extra != 'extra-8-gauntlet-genesis' and extra != 'extra-8-gauntlet-hf' and extra == 'extra-8-gauntlet-isaac' and extra != 'extra-8-gauntlet-lerobot' and extra != 'extra-8-gauntlet-monitor'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-8-gauntlet-genesis' and extra != 'extra-8-gauntlet-hf' and extra == 'extra-8-gauntlet-isaac' and extra != 'extra-8-gauntlet-lerobot' and extra != 'extra-8-gauntlet-monitor'",
     "python_full_version >= '3.12' and python_full_version < '3.15' and extra != 'extra-8-gauntlet-genesis' and extra != 'extra-8-gauntlet-hf' and extra == 'extra-8-gauntlet-isaac' and extra != 'extra-8-gauntlet-lerobot' and extra != 'extra-8-gauntlet-monitor'",
     "python_full_version < '3.12' and extra != 'extra-8-gauntlet-genesis' and extra != 'extra-8-gauntlet-hf' and extra == 'extra-8-gauntlet-isaac' and extra != 'extra-8-gauntlet-lerobot' and extra != 'extra-8-gauntlet-monitor'",
     "python_full_version >= '3.15' and sys_platform == 'darwin' and extra == 'extra-8-gauntlet-genesis' and extra == 'extra-8-gauntlet-hf' and extra != 'extra-8-gauntlet-isaac' and extra == 'extra-8-gauntlet-lerobot' and extra == 'extra-8-gauntlet-monitor'",
@@ -193,7 +195,9 @@ name = "aiohappyeyeballs"
 version = "2.4.4"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.15'",
+    "python_full_version >= '3.15' and sys_platform == 'win32'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version >= '3.12' and python_full_version < '3.15'",
     "python_full_version < '3.12'",
 ]
@@ -230,7 +234,9 @@ name = "aiohttp"
 version = "3.11.11"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.15'",
+    "python_full_version >= '3.15' and sys_platform == 'win32'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version >= '3.12' and python_full_version < '3.15'",
     "python_full_version < '3.12'",
 ]
@@ -422,7 +428,9 @@ name = "aiosignal"
 version = "1.3.2"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.15'",
+    "python_full_version >= '3.15' and sys_platform == 'win32'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version >= '3.12' and python_full_version < '3.15'",
     "python_full_version < '3.12'",
 ]
@@ -517,7 +525,9 @@ name = "attrs"
 version = "25.1.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.15'",
+    "python_full_version >= '3.15' and sys_platform == 'win32'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version >= '3.12' and python_full_version < '3.15'",
     "python_full_version < '3.12'",
 ]
@@ -704,7 +714,9 @@ name = "charset-normalizer"
 version = "3.3.2"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.15'",
+    "python_full_version >= '3.15' and sys_platform == 'win32'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version >= '3.12' and python_full_version < '3.15'",
     "python_full_version < '3.12'",
 ]
@@ -959,7 +971,9 @@ name = "click"
 version = "8.1.7"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.15'",
+    "python_full_version >= '3.15' and sys_platform == 'win32'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version >= '3.12' and python_full_version < '3.15'",
     "python_full_version < '3.12'",
 ]
@@ -1250,7 +1264,9 @@ name = "coverage"
 version = "7.4.4"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.15'",
+    "python_full_version >= '3.15' and sys_platform == 'win32'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version >= '3.12' and python_full_version < '3.15'",
     "python_full_version < '3.12'",
 ]
@@ -1908,7 +1924,9 @@ name = "frozenlist"
 version = "1.5.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.15'",
+    "python_full_version >= '3.15' and sys_platform == 'win32'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version >= '3.12' and python_full_version < '3.15'",
     "python_full_version < '3.12'",
 ]
@@ -2268,7 +2286,7 @@ requires-dist = [
     { name = "lerobot", extras = ["smolvla"], marker = "extra == 'lerobot'", specifier = ">=0.4,<1" },
     { name = "mujoco", specifier = ">=3.2,<4" },
     { name = "numpy", specifier = ">=1.26,<3" },
-    { name = "pandas", specifier = ">=2.2,<3" },
+    { name = "pandas", specifier = ">=2.2,<4" },
     { name = "pillow", marker = "extra == 'hf'", specifier = ">=10.0,<12" },
     { name = "pillow", marker = "extra == 'lerobot'", specifier = ">=10.0,<12" },
     { name = "pillow", marker = "extra == 'monitor'", specifier = ">=10.0,<12" },
@@ -2291,7 +2309,7 @@ provides-extras = ["hf", "lerobot", "monitor", "pybullet", "genesis", "ros2", "i
 dev = [
     { name = "hypothesis", specifier = ">=6,<7" },
     { name = "mypy", specifier = ">=1.11,<2" },
-    { name = "pandas-stubs", specifier = ">=2.2,<3" },
+    { name = "pandas-stubs", specifier = ">=2.2,<4" },
     { name = "pytest", specifier = ">=8.2,<9" },
     { name = "pytest-cov", specifier = ">=5.0,<7" },
     { name = "ruff", specifier = ">=0.6,<1" },
@@ -2300,7 +2318,7 @@ dev = [
 genesis-dev = [
     { name = "hypothesis", specifier = ">=6,<7" },
     { name = "mypy", specifier = ">=1.11,<2" },
-    { name = "pandas-stubs", specifier = ">=2.2,<3" },
+    { name = "pandas-stubs", specifier = ">=2.2,<4" },
     { name = "pytest", specifier = ">=8.2,<9" },
     { name = "pytest-cov", specifier = ">=5.0,<7" },
     { name = "pytest-mock", specifier = ">=3.12,<4" },
@@ -2310,7 +2328,7 @@ genesis-dev = [
 hf-dev = [
     { name = "hypothesis", specifier = ">=6,<7" },
     { name = "mypy", specifier = ">=1.11,<2" },
-    { name = "pandas-stubs", specifier = ">=2.2,<3" },
+    { name = "pandas-stubs", specifier = ">=2.2,<4" },
     { name = "pytest", specifier = ">=8.2,<9" },
     { name = "pytest-cov", specifier = ">=5.0,<7" },
     { name = "pytest-mock", specifier = ">=3.12,<4" },
@@ -2320,7 +2338,7 @@ hf-dev = [
 isaac-dev = [
     { name = "hypothesis", specifier = ">=6,<7" },
     { name = "mypy", specifier = ">=1.11,<2" },
-    { name = "pandas-stubs", specifier = ">=2.2,<3" },
+    { name = "pandas-stubs", specifier = ">=2.2,<4" },
     { name = "pytest", specifier = ">=8.2,<9" },
     { name = "pytest-cov", specifier = ">=5.0,<7" },
     { name = "pytest-mock", specifier = ">=3.12,<4" },
@@ -2330,7 +2348,7 @@ isaac-dev = [
 lerobot-dev = [
     { name = "hypothesis", specifier = ">=6,<7" },
     { name = "mypy", specifier = ">=1.11,<2" },
-    { name = "pandas-stubs", specifier = ">=2.2,<3" },
+    { name = "pandas-stubs", specifier = ">=2.2,<4" },
     { name = "pytest", specifier = ">=8.2,<9" },
     { name = "pytest-cov", specifier = ">=5.0,<7" },
     { name = "pytest-mock", specifier = ">=3.12,<4" },
@@ -2340,7 +2358,7 @@ lerobot-dev = [
 monitor-dev = [
     { name = "hypothesis", specifier = ">=6,<7" },
     { name = "mypy", specifier = ">=1.11,<2" },
-    { name = "pandas-stubs", specifier = ">=2.2,<3" },
+    { name = "pandas-stubs", specifier = ">=2.2,<4" },
     { name = "pytest", specifier = ">=8.2,<9" },
     { name = "pytest-cov", specifier = ">=5.0,<7" },
     { name = "pytest-mock", specifier = ">=3.12,<4" },
@@ -2350,7 +2368,7 @@ monitor-dev = [
 pybullet-dev = [
     { name = "hypothesis", specifier = ">=6,<7" },
     { name = "mypy", specifier = ">=1.11,<2" },
-    { name = "pandas-stubs", specifier = ">=2.2,<3" },
+    { name = "pandas-stubs", specifier = ">=2.2,<4" },
     { name = "pytest", specifier = ">=8.2,<9" },
     { name = "pytest-cov", specifier = ">=5.0,<7" },
     { name = "pytest-mock", specifier = ">=3.12,<4" },
@@ -2360,7 +2378,7 @@ pybullet-dev = [
 ros2-dev = [
     { name = "hypothesis", specifier = ">=6,<7" },
     { name = "mypy", specifier = ">=1.11,<2" },
-    { name = "pandas-stubs", specifier = ">=2.2,<3" },
+    { name = "pandas-stubs", specifier = ">=2.2,<4" },
     { name = "pytest", specifier = ">=8.2,<9" },
     { name = "pytest-cov", specifier = ">=5.0,<7" },
     { name = "pytest-mock", specifier = ">=3.12,<4" },
@@ -2374,7 +2392,7 @@ security = [
 video-dev = [
     { name = "hypothesis", specifier = ">=6,<7" },
     { name = "mypy", specifier = ">=1.11,<2" },
-    { name = "pandas-stubs", specifier = ">=2.2,<3" },
+    { name = "pandas-stubs", specifier = ">=2.2,<4" },
     { name = "pytest", specifier = ">=8.2,<9" },
     { name = "pytest-cov", specifier = ">=5.0,<7" },
     { name = "pytest-mock", specifier = ">=3.12,<4" },
@@ -2673,7 +2691,9 @@ name = "idna"
 version = "3.10"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.15'",
+    "python_full_version >= '3.15' and sys_platform == 'win32'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version >= '3.12' and python_full_version < '3.15'",
     "python_full_version < '3.12'",
 ]
@@ -3563,7 +3583,9 @@ name = "multidict"
 version = "6.1.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.15'",
+    "python_full_version >= '3.15' and sys_platform == 'win32'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version >= '3.12' and python_full_version < '3.15'",
     "python_full_version < '3.12'",
 ]
@@ -3773,7 +3795,9 @@ name = "mypy"
 version = "1.20.1"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.15'",
+    "python_full_version >= '3.15' and sys_platform == 'win32'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 dependencies = [
     { name = "librt", marker = "(python_full_version >= '3.15' and platform_python_implementation != 'PyPy' and extra == 'extra-8-gauntlet-isaac') or (python_full_version < '3.15' and extra == 'extra-8-gauntlet-genesis' and extra == 'extra-8-gauntlet-isaac') or (python_full_version < '3.15' and extra == 'extra-8-gauntlet-hf' and extra == 'extra-8-gauntlet-isaac') or (python_full_version < '3.15' and extra == 'extra-8-gauntlet-isaac' and extra == 'extra-8-gauntlet-lerobot') or (python_full_version < '3.15' and extra == 'extra-8-gauntlet-isaac' and extra == 'extra-8-gauntlet-monitor') or (platform_python_implementation == 'PyPy' and extra == 'extra-8-gauntlet-genesis' and extra == 'extra-8-gauntlet-isaac') or (platform_python_implementation == 'PyPy' and extra == 'extra-8-gauntlet-hf' and extra == 'extra-8-gauntlet-isaac') or (platform_python_implementation == 'PyPy' and extra == 'extra-8-gauntlet-isaac' and extra == 'extra-8-gauntlet-lerobot') or (platform_python_implementation == 'PyPy' and extra == 'extra-8-gauntlet-isaac' and extra == 'extra-8-gauntlet-monitor')" },
@@ -4063,7 +4087,9 @@ name = "numpy"
 version = "1.26.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.15'",
+    "python_full_version >= '3.15' and sys_platform == 'win32'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version >= '3.12' and python_full_version < '3.15'",
     "python_full_version < '3.12'",
 ]
@@ -4602,16 +4628,15 @@ wheels = [
 
 [[package]]
 name = "pandas-stubs"
-version = "2.3.3.260113"
+version = "3.0.0.260204"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy", version = "1.26.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-8-gauntlet-isaac'" },
     { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-8-gauntlet-genesis' or extra == 'extra-8-gauntlet-hf' or extra != 'extra-8-gauntlet-isaac' or (extra == 'extra-8-gauntlet-isaac' and extra == 'extra-8-gauntlet-lerobot') or (extra == 'extra-8-gauntlet-isaac' and extra == 'extra-8-gauntlet-monitor')" },
-    { name = "types-pytz" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/92/5d/be23854a73fda69f1dbdda7bc10fbd6f930bd1fa87aaec389f00c901c1e8/pandas_stubs-2.3.3.260113.tar.gz", hash = "sha256:076e3724bcaa73de78932b012ec64b3010463d377fa63116f4e6850643d93800", size = 116131, upload-time = "2026-01-13T22:30:16.704Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/27/1d/297ff2c7ea50a768a2247621d6451abb2a07c0e9be7ca6d36ebe371658e5/pandas_stubs-3.0.0.260204.tar.gz", hash = "sha256:bf9294b76352effcffa9cb85edf0bed1339a7ec0c30b8e1ac3d66b4228f1fbc3", size = 109383, upload-time = "2026-02-04T15:17:17.247Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d1/c6/df1fe324248424f77b89371116dab5243db7f052c32cc9fe7442ad9c5f75/pandas_stubs-2.3.3.260113-py3-none-any.whl", hash = "sha256:ec070b5c576e1badf12544ae50385872f0631fc35d99d00dc598c2954ec564d3", size = 168246, upload-time = "2026-01-13T22:30:15.244Z" },
+    { url = "https://files.pythonhosted.org/packages/7c/2f/f91e4eee21585ff548e83358332d5632ee49f6b2dcd96cb5dca4e0468951/pandas_stubs-3.0.0.260204-py3-none-any.whl", hash = "sha256:5ab9e4d55a6e2752e9720828564af40d48c4f709e6a2c69b743014a6fcb6c241", size = 168540, upload-time = "2026-02-04T15:17:15.615Z" },
 ]
 
 [[package]]
@@ -4832,7 +4857,9 @@ name = "propcache"
 version = "0.2.1"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.15'",
+    "python_full_version >= '3.15' and sys_platform == 'win32'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version >= '3.12' and python_full_version < '3.15'",
     "python_full_version < '3.12'",
 ]
@@ -5022,7 +5049,9 @@ name = "psutil"
 version = "5.9.8"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.15'",
+    "python_full_version >= '3.15' and sys_platform == 'win32'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version >= '3.12' and python_full_version < '3.15'",
     "python_full_version < '3.12'",
 ]
@@ -5346,7 +5375,9 @@ name = "pydantic"
 version = "2.11.10"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.15'",
+    "python_full_version >= '3.15' and sys_platform == 'win32'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version >= '3.12' and python_full_version < '3.15'",
     "python_full_version < '3.12'",
 ]
@@ -5503,7 +5534,9 @@ name = "pydantic-core"
 version = "2.33.2"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.15'",
+    "python_full_version >= '3.15' and sys_platform == 'win32'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version >= '3.12' and python_full_version < '3.15'",
     "python_full_version < '3.12'",
 ]
@@ -6047,7 +6080,9 @@ name = "pytest-cov"
 version = "5.0.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.15'",
+    "python_full_version >= '3.15' and sys_platform == 'win32'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version >= '3.12' and python_full_version < '3.15'",
     "python_full_version < '3.12'",
 ]
@@ -6255,7 +6290,9 @@ name = "pytz"
 version = "2024.1"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.15'",
+    "python_full_version >= '3.15' and sys_platform == 'win32'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version >= '3.12' and python_full_version < '3.15'",
     "python_full_version < '3.12'",
 ]
@@ -6613,7 +6650,9 @@ name = "requests"
 version = "2.32.3"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.15'",
+    "python_full_version >= '3.15' and sys_platform == 'win32'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version >= '3.12' and python_full_version < '3.15'",
     "python_full_version < '3.12'",
 ]
@@ -7003,7 +7042,9 @@ name = "sentry-sdk"
 version = "2.29.1"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.15'",
+    "python_full_version >= '3.15' and sys_platform == 'win32'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version >= '3.12' and python_full_version < '3.15'",
     "python_full_version < '3.12'",
 ]
@@ -7543,7 +7584,9 @@ name = "typer"
 version = "0.23.1"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.15'",
+    "python_full_version >= '3.15' and sys_platform == 'win32'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version >= '3.12' and python_full_version < '3.15'",
     "python_full_version < '3.12'",
 ]
@@ -7696,15 +7739,6 @@ wheels = [
 ]
 
 [[package]]
-name = "types-pytz"
-version = "2026.1.1.20260408"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/f7/b7/33f5a4f29b1f285b99ff79a607751a7996194cbb98705e331dab7a2daa28/types_pytz-2026.1.1.20260408.tar.gz", hash = "sha256:89b6a34b9198ea2a4b98a9d15cbca987053f52a105fd44f7ce3789cae4349408", size = 10788, upload-time = "2026-04-08T04:28:14.54Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/ae/90/12c059e6bb330a22d9cc97daf027ac7fb7f50fbf518e4d88185b4d39120e/types_pytz-2026.1.1.20260408-py3-none-any.whl", hash = "sha256:c7e4dec76221fb7d0c97b91ad8561d689bebe39b6bcb7b728387e7ffd8cde788", size = 10124, upload-time = "2026-04-08T04:28:13.353Z" },
-]
-
-[[package]]
 name = "types-pyyaml"
 version = "6.0.12.20260408"
 source = { registry = "https://pypi.org/simple" }
@@ -7718,7 +7752,9 @@ name = "typing-extensions"
 version = "4.12.2"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.15'",
+    "python_full_version >= '3.15' and sys_platform == 'win32'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version >= '3.12' and python_full_version < '3.15'",
     "python_full_version < '3.12'",
 ]
@@ -8045,7 +8081,9 @@ name = "wrapt"
 version = "1.16.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.15'",
+    "python_full_version >= '3.15' and sys_platform == 'win32'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version >= '3.12' and python_full_version < '3.15'",
     "python_full_version < '3.12'",
 ]
@@ -8331,7 +8369,9 @@ name = "yarl"
 version = "1.18.3"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.15'",
+    "python_full_version >= '3.15' and sys_platform == 'win32'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version >= '3.12' and python_full_version < '3.15'",
     "python_full_version < '3.12'",
 ]

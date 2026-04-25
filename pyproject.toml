@@ -25,7 +25,7 @@ dependencies = [
     "pydantic>=2.7,<3",
     "typer>=0.12,<1",
     "numpy>=1.26,<3",
-    "pandas>=2.2,<3",
+    "pandas>=2.2,<4",
     "jinja2>=3.1,<4",
     "pyyaml>=6.0,<7",
     # Ceiling bumped <15 -> <16 for RFC-007 (genesis-world transitively
@@ -173,7 +173,7 @@ dev = [
     "ruff>=0.6,<1",
     "mypy>=1.11,<2",
     "types-pyyaml>=6.0,<7",
-    "pandas-stubs>=2.2,<3",
+    "pandas-stubs>=2.2,<4",
     # Property-based / fuzz testing (Phase 2.5 Task 13). Pinned to the
     # 6.x major: hypothesis 7 is not yet released; the floor is well
     # above the latest API-stable line. Used only by tests/test_property_*
