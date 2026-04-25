@@ -40,6 +40,9 @@ from gauntlet.env.perturbation.axes import (
     camera_offset_y as camera_offset_y,
 )
 from gauntlet.env.perturbation.axes import (
+    color_shift_synthetic as color_shift_synthetic,
+)
+from gauntlet.env.perturbation.axes import (
     distractor_count as distractor_count,
 )
 from gauntlet.env.perturbation.axes import (
@@ -109,6 +112,7 @@ AXIS_NAMES: Final[tuple[str, ...]] = (
     "instruction_paraphrase",
     "object_swap",
     "camera_extrinsics",
+    "color_shift_synthetic",
 )
 
 
@@ -126,6 +130,7 @@ __all__ = [
     "camera_extrinsics",
     "camera_offset_x",
     "camera_offset_y",
+    "color_shift_synthetic",
     "distractor_count",
     "image_attack",
     "initial_state_ood",

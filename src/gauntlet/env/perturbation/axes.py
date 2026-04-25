@@ -40,6 +40,11 @@ one semantic-distractor object-swap axis:
   showed VLAs persist in grasping when the target is replaced with an
   irrelevant item. **MuJoCo only** (anti-feature: cross-backend asset
   parity is yak-shave); other backends list it in ``VISUAL_ONLY_AXES``.
+* :func:`color_shift_synthetic` — categorical, integer-coded HSV
+  color-shift id (B-43). Operates **post-render** via
+  :class:`gauntlet.env.color_attack.ColorShiftWrapper`; backends do not
+  consume this axis directly. See that module for the legal id set and
+  the honest "synthetic proxy, NOT real-world illumination" framing.
 * :func:`camera_extrinsics` — categorical, integer-coded extrinsics
   index (B-42). Each index resolves to a structured 6-D pose delta
   ``{translation: [dx, dy, dz], rotation: [drx, dry, drz]}`` (rotation
@@ -93,6 +98,7 @@ __all__ = [
     "camera_extrinsics",
     "camera_offset_x",
     "camera_offset_y",
+    "color_shift_synthetic",
     "distractor_count",
     "image_attack",
     "initial_state_ood",
@@ -164,6 +170,11 @@ DEFAULT_BOUNDS: Final[dict[str, tuple[float, float]]] = {
     # suites override via the YAML side-channel and the env's
     # :meth:`set_camera_extrinsics_list` setter.
     "camera_extrinsics": (0.0, 32.0),
+    # B-43 — categorical HSV color-shift id; legal ids enumerated by
+    # ``gauntlet.env.color_attack.SHIFT_IDS``. Range is informational
+    # for the categorical sampler; the wrapper rounds to the nearest
+    # legal id at apply time and rejects anything else.
+    "color_shift_synthetic": (0.0, 5.0),
 }
 
 
@@ -300,6 +311,54 @@ def image_attack() -> PerturbationAxis:
         name="image_attack",
         kind=AXIS_KIND_CATEGORICAL,
         sampler=make_categorical_sampler(tuple(float(i) for i in ATTACK_IDS)),
+        low=lo,
+        high=hi,
+    )
+
+
+def color_shift_synthetic() -> PerturbationAxis:
+    """Categorical post-render HSV color-shift axis (B-43).
+
+    Values are integer-coded shift ids — see
+    :data:`gauntlet.env.color_attack.SHIFT_IDS` for the legal set
+    (``0`` = none / baseline, ``1`` = hue_+30, ``2`` = hue_-30,
+    ``3`` = saturation_0.5, ``4`` = saturation_1.5, ``5`` = achromatic).
+    The float form survives the suite YAML ``values:`` shape and is
+    rounded back to int by the wrapper.
+
+    The axis is *backend-agnostic*: the inner :class:`GauntletEnv`
+    backends do not consume it. Apply only via
+    :class:`gauntlet.env.color_attack.ColorShiftWrapper` which
+    intercepts ``set_perturbation("color_shift_synthetic", ...)`` and
+    operates on the rendered ``obs["image"]`` /
+    ``obs["images"][name]`` arrays. Routing into a raw backend env
+    will raise ``ValueError`` from the backend's ``set_perturbation``
+    since ``"color_shift_synthetic"`` is not in its ``AXIS_NAMES``
+    ClassVar.
+
+    Anti-feature note: HSV-shift on the rendered RGB does NOT
+    faithfully simulate real-world illumination changes. Real
+    illumination alters materials' specular response, shadow geometry,
+    and inter-reflection; post-render HSV cannot model any of those.
+    The ``_synthetic`` suffix on the axis name is the honest signal —
+    treat results on this axis as a *post-render proxy* for the
+    color-bias asymmetry RoboView-Bias documented, not a calibrated
+    estimate of real-world robustness. References: RoboView-Bias
+    (arXiv 2509.22356) shows VLAs are biased toward high-saturation
+    hues over achromatic scenes; LIBERO-Plus (arXiv 2510.13626) lists
+    image-noise as one of seven canonical robustness dimensions but
+    does not isolate the hue/saturation asymmetry that this axis
+    surfaces.
+    """
+    # Lazy import: color_attack is dep-free numpy-only, but the lazy
+    # form keeps the registry import path uniform with image_attack.
+    from gauntlet.env.color_attack import SHIFT_IDS
+
+    lo, hi = DEFAULT_BOUNDS["color_shift_synthetic"]
+    return PerturbationAxis(
+        name="color_shift_synthetic",
+        kind=AXIS_KIND_CATEGORICAL,
+        sampler=make_categorical_sampler(tuple(float(i) for i in SHIFT_IDS)),
         low=lo,
         high=hi,
     )
@@ -475,6 +534,7 @@ _DEFAULT_CONSTRUCTORS: Final[dict[str, AxisCtor]] = {
     "instruction_paraphrase": instruction_paraphrase,
     "object_swap": object_swap,
     "camera_extrinsics": camera_extrinsics,
+    "color_shift_synthetic": color_shift_synthetic,
 }
 
 
