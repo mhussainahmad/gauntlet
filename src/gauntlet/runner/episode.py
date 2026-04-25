@@ -39,6 +39,8 @@ Extensibility:
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = ["Episode"]
@@ -245,3 +247,23 @@ class Episode(BaseModel):
     # advertised workspace bounds. Same cumulative count semantics as
     # ``n_joint_limit_excursions``.
     n_workspace_excursions: int | None = None
+
+    # ------------------------------------------------------------------
+    # Sim-vs-real provenance tag (B-28) — explicit "this episode came
+    # from a sim rollout" / "real-robot rollout" marker. Default
+    # ``None`` keeps the field semantically inert for the legacy
+    # sim-only flow (a None reader on a new JSON would still reject
+    # under ``extra="forbid"`` per the ``video_path`` note above; the
+    # reverse direction loads cleanly under the field default).
+    #
+    # Real-robot consumers (B-28: ``gauntlet aggregate-sim-real``) tag
+    # the real-side episodes explicitly; the sim-side flow leaves the
+    # field ``None`` rather than retroactively backfilling ``"sim"``
+    # because pre-B-28 episodes.json files would otherwise need a
+    # migration. Downstream pairing keys off
+    # ``(suite_hash, cell_index, episode_index)`` — the directory
+    # layout is the real signal — and uses ``source`` only as a
+    # post-hoc sanity check.
+    # ------------------------------------------------------------------
+
+    source: Literal["sim", "real"] | None = None
