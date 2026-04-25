@@ -138,6 +138,11 @@ class PyBulletTabletopEnv:
             "object_initial_pose_x",
             "object_initial_pose_y",
             "distractor_count",
+            # B-06 — declared so the suite linter / loader can route the
+            # axis through ``VISUAL_ONLY_AXES`` and reject runs that try
+            # to combine ``object_swap`` with this backend (anti-feature:
+            # cross-backend asset parity is yak-shave; see backlog B-06).
+            "object_swap",
         }
     )
     # Empty once image rendering exists (RFC-006 §3.5): every cosmetic axis
@@ -146,7 +151,12 @@ class PyBulletTabletopEnv:
     # ``frozenset()`` for the same reason. A user running a cosmetic-only
     # sweep with ``render_in_obs=False`` will still see pairwise-identical
     # state-only cells — documented, not a bug, and matches MuJoCo.
-    VISUAL_ONLY_AXES: ClassVar[frozenset[str]] = frozenset()
+    #
+    # B-06 — ``object_swap`` is the lone non-empty entry: the backend
+    # has no asset library for the alternate semantic objects (anti-
+    # feature note in the backlog), so the loader / linter rejects any
+    # suite naming this axis on PyBullet.
+    VISUAL_ONLY_AXES: ClassVar[frozenset[str]] = frozenset({"object_swap"})
 
     MAX_LINEAR_STEP: float = 0.05
     MAX_ANGULAR_STEP: float = 0.1

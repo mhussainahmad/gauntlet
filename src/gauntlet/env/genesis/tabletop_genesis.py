@@ -212,6 +212,11 @@ class GenesisTabletopEnv:
             "object_initial_pose_x",
             "object_initial_pose_y",
             "distractor_count",
+            # B-06 — declared so the loader / linter route this axis
+            # through ``VISUAL_ONLY_AXES``. Genesis ships no alternate
+            # asset library (anti-feature in the backlog), so a suite
+            # naming ``object_swap`` on this backend is rejected.
+            "object_swap",
         }
     )
     # Post-RFC-008: all four cosmetic axes are observable via
@@ -226,7 +231,11 @@ class GenesisTabletopEnv:
     # observations across cells — not a bug, same property MuJoCo and
     # PyBullet share. The axes still store on their shadow attributes
     # and reach the render path only when rendering is on.
-    VISUAL_ONLY_AXES: ClassVar[frozenset[str]] = frozenset()
+    #
+    # B-06 — ``object_swap`` is the lone non-empty entry: Genesis has
+    # no MJCF object library for the alternate semantic classes; the
+    # loader / linter rejects any suite naming this axis here.
+    VISUAL_ONLY_AXES: ClassVar[frozenset[str]] = frozenset({"object_swap"})
 
     MAX_LINEAR_STEP: float = 0.05
     MAX_ANGULAR_STEP: float = 0.1

@@ -1,0 +1,8 @@
+<!-- B-06 object-swap banana. Single primitive capsule (yellow) inside
+     the cube body. Capsule axis is the local x; half-length 0.04 m,
+     radius 0.018 m — fits inside the cube grasp tolerance. Hidden by
+     default (alpha=0, contype=0) until ``set_perturbation('object_swap',
+     ...)`` selects this class. -->
+<geom name="swap_banana_geom" type="capsule" size="0.018 0.04"
+      rgba="0.95 0.85 0.15 0" mass="0.1"
+      contype="0" conaffinity="0"/>

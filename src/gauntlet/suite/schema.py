@@ -394,18 +394,21 @@ class Suite(BaseModel):
                     f"axes[{axis_name!r}]: prior_mean / prior_std are only "
                     "valid on the 'initial_state_ood' axis",
                 )
-        # B-05 — string-valued ``values`` (paraphrase strings) are only
-        # legal on the ``instruction_paraphrase`` axis. Every other axis
-        # uses the float-coded value channel; a string list there would
-        # silently misroute through the runner since the cell value is
-        # consumed as a float.
+        # B-05 / B-06 — string-valued ``values`` (paraphrase strings or
+        # object-swap class names) are only legal on the
+        # ``instruction_paraphrase`` and ``object_swap`` axes. Every
+        # other axis uses the float-coded value channel; a string list
+        # there would silently misroute through the runner since the
+        # cell value is consumed as a float.
+        _string_value_axes = {"instruction_paraphrase", "object_swap"}
         for axis_name, spec in v.items():
-            if axis_name == "instruction_paraphrase":
+            if axis_name in _string_value_axes:
                 continue
             if spec.values is not None and len(spec.values) > 0 and isinstance(spec.values[0], str):
                 raise ValueError(
                     f"axes[{axis_name!r}]: string-valued 'values' lists are "
-                    "only valid on the 'instruction_paraphrase' axis (B-05)",
+                    "only valid on the 'instruction_paraphrase' (B-05) and "
+                    "'object_swap' (B-06) axes",
                 )
         return v
 

@@ -1,0 +1,7 @@
+<!-- B-06 object-swap screwdriver. Slim primitive cylinder (steel-grey)
+     standing in for the shaft; a true two-tone tool would need a
+     compound body which the spec calls out as yak-shave. Hidden by
+     default until the swap axis selects this class. -->
+<geom name="swap_screwdriver_geom" type="cylinder" size="0.012 0.05"
+      rgba="0.55 0.55 0.6 0" mass="0.1"
+      contype="0" conaffinity="0"/>

@@ -2,7 +2,8 @@
 
 See ``GAUNTLET_SPEC.md`` §5 task 4. Five logical perturbation categories
 expand into seven base scalar axes plus one OOD-shift axis plus one
-post-render image-attack axis plus one instruction-paraphrase axis:
+post-render image-attack axis plus one instruction-paraphrase axis plus
+one semantic-distractor object-swap axis:
 
 * :func:`lighting_intensity` — single scalar (one-channel grayscale level).
 * :func:`camera_offset_x` / :func:`camera_offset_y` — two scalars covering
@@ -27,6 +28,18 @@ post-render image-attack axis plus one instruction-paraphrase axis:
   consume this axis directly. The paper references are LIBERO-PRO
   (arXiv 2510.03827) and LIBERO-Plus (arXiv 2510.13626) — both show VLAs
   collapse from ~90% canonical accuracy to ~0% on simple paraphrases.
+* :func:`object_swap` — categorical, integer-coded semantic-class index
+  (B-06). Replaces the target cube with a categorically-different object
+  (``mug``, ``banana``, ``screwdriver``, ``bottle``) drawn from the
+  built-in object library shipped with the MuJoCo tabletop env. The
+  YAML carries a string list of class names; the schema layer enumerates
+  them to indices and the env resolves index → class via
+  :meth:`gauntlet.env.tabletop.TabletopEnv.set_object_swap_classes`
+  (defaults to the canonical 5-class registry). Combined with
+  ``instruction_paraphrase`` this measures grounding — LIBERO-PRO
+  showed VLAs persist in grasping when the target is replaced with an
+  irrelevant item. **MuJoCo only** (anti-feature: cross-backend asset
+  parity is yak-shave); other backends list it in ``VISUAL_ONLY_AXES``.
 
 Each constructor returns a :class:`PerturbationAxis` with sensible
 default bounds. Callers that load axes from YAML (Task 5) override the
@@ -54,6 +67,7 @@ AxisCtor: TypeAlias = Callable[[], PerturbationAxis]
 
 __all__ = [
     "DEFAULT_BOUNDS",
+    "OBJECT_SWAP_CLASSES",
     "axis_for",
     "camera_offset_x",
     "camera_offset_y",
@@ -64,8 +78,26 @@ __all__ = [
     "lighting_intensity",
     "object_initial_pose_x",
     "object_initial_pose_y",
+    "object_swap",
     "object_texture",
 ]
+
+
+# B-06 — canonical object-swap class registry. Index 0 is the baseline
+# (the original cube — preserves current behaviour for any caller that
+# does not opt into the swap). Indices 1..4 are the categorically-
+# different alternatives shipped with the MuJoCo tabletop env's MJCF
+# (``src/gauntlet/env/assets/objects/{mug,banana,screwdriver,bottle}.xml``).
+# YAMLs that override the set via the suite ``values:`` shape (e.g.
+# ``["cube", "mug", "banana"]``) reference these names. Order is the
+# stable registry contract; keep it in sync with the asset directory.
+OBJECT_SWAP_CLASSES: Final[tuple[str, ...]] = (
+    "cube",
+    "mug",
+    "banana",
+    "screwdriver",
+    "bottle",
+)
 
 
 # Default sampling bounds per axis. Phase 1 chooses ranges that exercise
@@ -97,6 +129,11 @@ DEFAULT_BOUNDS: Final[dict[str, tuple[float, float]]] = {
     # suites override via ``axis_for("instruction_paraphrase")`` plus a
     # YAML-supplied paraphrase list.
     "instruction_paraphrase": (0.0, 32.0),
+    # B-06 — categorical semantic-class index. The default sampler covers
+    # the canonical 5-class registry (``OBJECT_SWAP_CLASSES``); YAMLs that
+    # subset the registry override via the suite ``values:`` shape and the
+    # env's :meth:`set_object_swap_classes` setter.
+    "object_swap": (0.0, float(len(OBJECT_SWAP_CLASSES) - 1)),
 }
 
 
@@ -279,6 +316,46 @@ def instruction_paraphrase() -> PerturbationAxis:
     )
 
 
+def object_swap() -> PerturbationAxis:
+    """Categorical semantic object-swap axis (B-06).
+
+    Values are integer-coded **indices** into a class-name registry. The
+    canonical registry is :data:`OBJECT_SWAP_CLASSES` (``cube``, ``mug``,
+    ``banana``, ``screwdriver``, ``bottle``); index 0 is the baseline
+    cube — choosing it preserves the env's pre-B-06 behaviour. Higher
+    indices replace the cube body's visible geom with a categorically-
+    different alternative drawn from the MJCF object library shipped
+    under ``src/gauntlet/env/assets/objects/``.
+
+    The YAML-facing surface is a string list (e.g.
+    ``values: ["cube", "mug", "banana"]``); the schema layer enumerates
+    the strings to indices ``(0.0, 1.0, 2.0)`` and
+    :meth:`gauntlet.env.tabletop.TabletopEnv.set_object_swap_classes`
+    rebinds the env's per-instance index → class mapping so the runner
+    can dispatch each cell's float index back to a class name. Mirrors
+    the B-05 ``instruction_paraphrase`` wiring posture: the axis stays
+    name-agnostic and the env owns the registry.
+
+    Anti-feature note (spec): cross-backend asset parity is yak-shave
+    and intentionally not shipped. This axis is MuJoCo-only; the
+    PyBullet / Genesis / Isaac backends list it in ``VISUAL_ONLY_AXES``
+    so the suite loader rejects mixing them with this axis.
+
+    Reference: LIBERO-PRO (arXiv 2510.03827) — VLAs persist in grasping
+    when the target is replaced with an irrelevant item, so the
+    object-swap axis directly probes whether the policy is grounded in
+    the language target or executing a memorised motion plan.
+    """
+    lo, hi = DEFAULT_BOUNDS["object_swap"]
+    return PerturbationAxis(
+        name="object_swap",
+        kind=AXIS_KIND_CATEGORICAL,
+        sampler=make_categorical_sampler(tuple(float(i) for i in range(len(OBJECT_SWAP_CLASSES)))),
+        low=lo,
+        high=hi,
+    )
+
+
 def distractor_count(*, low: int | None = None, high: int | None = None) -> PerturbationAxis:
     """Number of visible distractor objects (integer, [0, 10])."""
     lo_f, hi_f = _resolve_bounds("distractor_count", low, high)
@@ -308,6 +385,7 @@ _DEFAULT_CONSTRUCTORS: Final[dict[str, AxisCtor]] = {
     "initial_state_ood": initial_state_ood,
     "image_attack": image_attack,
     "instruction_paraphrase": instruction_paraphrase,
+    "object_swap": object_swap,
 }
 
 
