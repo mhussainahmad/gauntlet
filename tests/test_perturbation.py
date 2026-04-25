@@ -65,6 +65,11 @@ _APPLY_VALUE: dict[str, float] = {
     # (``mug``) so the apply branch exercises the geom-toggle path
     # rather than collapsing to the cube baseline.
     "object_swap": 1.0,
+    # B-42 — camera_extrinsics is a backend-direct categorical axis
+    # on MuJoCo. The default registry has a single baseline entry
+    # (index 0); the apply value 0.0 hits that no-op slot. Real suites
+    # rebind via :meth:`set_camera_extrinsics_list` before queueing.
+    "camera_extrinsics": 0.0,
 }
 
 # B-31 / B-05 — axes whose dispatch lives outside the inner backend env.
@@ -108,6 +113,7 @@ class TestAxisNamesRegistry:
             "image_attack",
             "instruction_paraphrase",
             "object_swap",
+            "camera_extrinsics",
         )
 
     def test_axis_names_is_tuple(self) -> None:

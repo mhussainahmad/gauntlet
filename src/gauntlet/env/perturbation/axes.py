@@ -40,6 +40,27 @@ one semantic-distractor object-swap axis:
   showed VLAs persist in grasping when the target is replaced with an
   irrelevant item. **MuJoCo only** (anti-feature: cross-backend asset
   parity is yak-shave); other backends list it in ``VISUAL_ONLY_AXES``.
+* :func:`camera_extrinsics` — categorical, integer-coded extrinsics
+  index (B-42). Each index resolves to a structured 6-D pose delta
+  ``{translation: [dx, dy, dz], rotation: [drx, dry, drz]}`` (rotation
+  in radians, XYZ Euler) applied to the env's render camera at episode
+  start. The YAML carries either an enumerated list of dicts or a
+  Sobol-friendly continuous range (per-axis ``[lo, hi]`` bounds for
+  translation and rotation); the schema layer pre-resolves the range
+  form into ``n_samples`` enumerated entries via 6-D Sobol so the
+  cell-value channel stays uniformly float-valued. The env resolves
+  index → 6-tuple via
+  :meth:`gauntlet.env.tabletop.TabletopEnv.set_camera_extrinsics_list`.
+  Anti-feature note: SO(3) rotations don't compose linearly so per-axis
+  Sobol sensitivity indices on this axis are biased — the runner
+  surfaces a warning when the axis is present in a Sobol report. Real
+  impl on MuJoCo + PyBullet; Genesis + Isaac list the axis in
+  ``VISUAL_ONLY_AXES``. References: RoboView-Bias (arXiv 2509.22356)
+  shows viewpoint is the dominant visual factor for every evaluated
+  agent; "Do You Know Where Your Camera Is?" (arXiv 2510.02268) shows
+  ACT/Diffusion/SmolVLA collapse on small camera shifts; LIBERO-Plus
+  (arXiv 2510.13626) lists camera-view-shift as one of seven canonical
+  robustness dimensions.
 
 Each constructor returns a :class:`PerturbationAxis` with sensible
 default bounds. Callers that load axes from YAML (Task 5) override the
@@ -69,6 +90,7 @@ __all__ = [
     "DEFAULT_BOUNDS",
     "OBJECT_SWAP_CLASSES",
     "axis_for",
+    "camera_extrinsics",
     "camera_offset_x",
     "camera_offset_y",
     "distractor_count",
@@ -134,6 +156,14 @@ DEFAULT_BOUNDS: Final[dict[str, tuple[float, float]]] = {
     # subset the registry override via the suite ``values:`` shape and the
     # env's :meth:`set_object_swap_classes` setter.
     "object_swap": (0.0, float(len(OBJECT_SWAP_CLASSES) - 1)),
+    # B-42 — categorical extrinsics index. The high bound is a soft
+    # informational ceiling; the actual cardinality is set by the suite
+    # YAML's ``extrinsics_values:`` enumerated list (or by the
+    # range-form's pre-resolved ``n_samples`` budget). The default
+    # constructor builds a 1-element placeholder sampler (index 0); real
+    # suites override via the YAML side-channel and the env's
+    # :meth:`set_camera_extrinsics_list` setter.
+    "camera_extrinsics": (0.0, 32.0),
 }
 
 
@@ -356,6 +386,64 @@ def object_swap() -> PerturbationAxis:
     )
 
 
+def camera_extrinsics() -> PerturbationAxis:
+    """Categorical render-camera extrinsics axis (B-42).
+
+    Values are integer-coded **indices** into a structured extrinsics
+    registry supplied by the suite YAML (``extrinsics_values: [{...}]``
+    or the pre-resolved expansion of an ``extrinsics_range:`` block).
+    Each registry entry carries a 6-D pose delta
+    ``{translation: [dx, dy, dz], rotation: [drx, dry, drz]}`` (radians,
+    XYZ Euler) applied to the env's *render* camera (NOT the policy
+    observation pipeline) at episode start. The axis itself does NOT
+    carry the per-entry deltas — the schema layer extracts them and the
+    env's :meth:`set_camera_extrinsics_list` setter rebinds the
+    per-instance index → 6-tuple mapping so the runner can dispatch
+    each cell's float index back to a pose. Mirrors the B-05
+    ``instruction_paraphrase`` and B-06 ``object_swap`` wiring posture:
+    the axis stays name-agnostic and the env owns the registry.
+
+    The default constructor returns a 1-element placeholder sampler
+    (index 0) because the *real* extrinsics cardinality comes from the
+    YAML at load time. Tests / direct callers that need richer sampling
+    override by handing the env their own list via
+    :meth:`gauntlet.env.tabletop.TabletopEnv.set_camera_extrinsics_list`.
+
+    Anti-feature (spec): SO(3) rotations don't compose linearly so the
+    closed-form Sobol decomposition over per-axis indices on this axis
+    is *biased* — :func:`gauntlet.report.sobol_indices.compute_sobol_indices`
+    emits a :class:`UserWarning` whenever the axis is present in the
+    episode set. The HTML report still surfaces the index, but the
+    reader should treat the value on this axis as an indicator rather
+    than a calibrated estimate.
+
+    Backend support: real impl on MuJoCo + PyBullet
+    (:class:`gauntlet.env.tabletop.TabletopEnv` and
+    :class:`gauntlet.env.pybullet.PyBulletTabletopEnv`); Genesis + Isaac
+    declare the axis in :attr:`VISUAL_ONLY_AXES` so the loader / linter
+    rejects suites that name it on those backends, mirroring the B-06
+    object-swap pattern.
+
+    References: RoboView-Bias (arXiv 2509.22356) — viewpoint is the
+    dominant visual factor for every evaluated agent; "Do You Know
+    Where Your Camera Is?" (arXiv 2510.02268) — ACT/Diffusion/SmolVLA
+    collapse on small camera shifts; LIBERO-Plus (arXiv 2510.13626) —
+    lists camera-view-shift as one of seven canonical robustness
+    dimensions.
+    """
+    lo, hi = DEFAULT_BOUNDS["camera_extrinsics"]
+    return PerturbationAxis(
+        name="camera_extrinsics",
+        kind=AXIS_KIND_CATEGORICAL,
+        # Placeholder: real cardinality is set by the suite YAML. The
+        # categorical sampler needs at least one value, so we pin index 0
+        # — the common "no extrinsics override" baseline.
+        sampler=make_categorical_sampler((0.0,)),
+        low=lo,
+        high=hi,
+    )
+
+
 def distractor_count(*, low: int | None = None, high: int | None = None) -> PerturbationAxis:
     """Number of visible distractor objects (integer, [0, 10])."""
     lo_f, hi_f = _resolve_bounds("distractor_count", low, high)
@@ -386,6 +474,7 @@ _DEFAULT_CONSTRUCTORS: Final[dict[str, AxisCtor]] = {
     "image_attack": image_attack,
     "instruction_paraphrase": instruction_paraphrase,
     "object_swap": object_swap,
+    "camera_extrinsics": camera_extrinsics,
 }
 
 

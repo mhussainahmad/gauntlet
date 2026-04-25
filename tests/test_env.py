@@ -369,8 +369,9 @@ class TestProtocolConformance:
         from gauntlet.env.tabletop import TabletopEnv as _T
 
         assert isinstance(_T.AXIS_NAMES, frozenset)
-        # 7 base axes + ``initial_state_ood`` (B-32) + ``object_swap`` (B-06).
-        assert len(_T.AXIS_NAMES) == 9
+        # 7 base axes + ``initial_state_ood`` (B-32) + ``object_swap``
+        # (B-06) + ``camera_extrinsics`` (B-42).
+        assert len(_T.AXIS_NAMES) == 10
         assert {
             "lighting_intensity",
             "camera_offset_x",
@@ -381,6 +382,7 @@ class TestProtocolConformance:
             "distractor_count",
             "initial_state_ood",
             "object_swap",
+            "camera_extrinsics",
         } == set(_T.AXIS_NAMES)
 
     def test_visual_only_axes_is_empty_on_mujoco_backend(self) -> None:

@@ -46,6 +46,7 @@ by ``genesis-world<0.5``.
 
 from __future__ import annotations
 
+import warnings
 from typing import Any, ClassVar
 
 import gymnasium as gym
@@ -217,6 +218,14 @@ class GenesisTabletopEnv:
             # asset library (anti-feature in the backlog), so a suite
             # naming ``object_swap`` on this backend is rejected.
             "object_swap",
+            # B-42 — declared so the loader / linter route this axis
+            # through ``VISUAL_ONLY_AXES``. Genesis's render-camera
+            # pose mutation lives behind a different private API than
+            # MuJoCo / PyBullet (anti-feature: cross-backend renderer
+            # parity is yak-shave; see backlog B-42), so a suite naming
+            # ``camera_extrinsics`` on this backend is rejected at
+            # YAML-load time.
+            "camera_extrinsics",
         }
     )
     # Post-RFC-008: all four cosmetic axes are observable via
@@ -235,7 +244,7 @@ class GenesisTabletopEnv:
     # B-06 — ``object_swap`` is the lone non-empty entry: Genesis has
     # no MJCF object library for the alternate semantic classes; the
     # loader / linter rejects any suite naming this axis here.
-    VISUAL_ONLY_AXES: ClassVar[frozenset[str]] = frozenset({"object_swap"})
+    VISUAL_ONLY_AXES: ClassVar[frozenset[str]] = frozenset({"object_swap", "camera_extrinsics"})
 
     MAX_LINEAR_STEP: float = 0.05
     MAX_ANGULAR_STEP: float = 0.1
@@ -647,6 +656,22 @@ class GenesisTabletopEnv:
                 raise ValueError(
                     f"distractor_count must be in [0, {_N_DISTRACTOR_SLOTS}]; got {count}"
                 )
+        if name == "camera_extrinsics":
+            # B-42 — declared in ``VISUAL_ONLY_AXES`` on this backend
+            # (the loader / linter rejects suites naming this axis on
+            # Genesis at YAML-load time). Defence in depth: a direct
+            # caller that bypasses the loader gets a loud warning and
+            # the axis silently no-ops in ``_apply_one_perturbation``.
+            warnings.warn(
+                "camera_extrinsics is not yet supported on the Genesis "
+                "backend (anti-feature: cross-backend renderer parity is "
+                "yak-shave; see backlog B-42). The axis is queued but "
+                "will silently no-op at apply time. Use the MuJoCo or "
+                "PyBullet backend if you need camera-extrinsics "
+                "perturbations, or wait for a follow-up renderer RFC.",
+                UserWarning,
+                stacklevel=2,
+            )
         self._pending_perturbations[name] = float(value)
 
     def restore_baseline(self) -> None:

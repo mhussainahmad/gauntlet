@@ -31,6 +31,9 @@ from gauntlet.env.perturbation.axes import (
     axis_for as axis_for,
 )
 from gauntlet.env.perturbation.axes import (
+    camera_extrinsics as camera_extrinsics,
+)
+from gauntlet.env.perturbation.axes import (
     camera_offset_x as camera_offset_x,
 )
 from gauntlet.env.perturbation.axes import (
@@ -105,6 +108,7 @@ AXIS_NAMES: Final[tuple[str, ...]] = (
     "image_attack",
     "instruction_paraphrase",
     "object_swap",
+    "camera_extrinsics",
 )
 
 
@@ -119,6 +123,7 @@ __all__ = [
     "AxisSampler",
     "PerturbationAxis",
     "axis_for",
+    "camera_extrinsics",
     "camera_offset_x",
     "camera_offset_y",
     "distractor_count",

@@ -116,7 +116,75 @@ def _validate(raw: Any, *, source: str) -> Suite:
     _ensure_backend_registered(suite.env)
     _reject_purely_visual_suites(suite)
     suite = _resolve_and_check_pilot_report(suite, source=source)
+    suite = _resolve_camera_extrinsics_range(suite)
     return suite
+
+
+def _resolve_camera_extrinsics_range(suite: Suite) -> Suite:
+    """B-42 — pre-expand ``extrinsics_range`` into ``extrinsics_values``.
+
+    The range form is a Sobol-friendly six-dimensional continuous
+    shape; the loader resolves it here at suite-load time using the
+    Joe-Kuo 6.21201 sequence so downstream samplers see the
+    ``camera_extrinsics`` axis as a plain categorical with N entries.
+    The Sobol sequence is fully deterministic, so the resolution is
+    bit-identical across runs of the same YAML regardless of
+    ``Suite.seed``.
+
+    The schema validator already enforces:
+    * ``extrinsics_range`` is forbidden on every axis except
+      ``camera_extrinsics``;
+    * ``extrinsics_range`` is forbidden on ``sampling=cartesian``.
+
+    The remaining contract is that ``Suite.n_samples`` must be set
+    (it is, on every non-cartesian sampling mode — that validator
+    already runs).
+
+    No-op when no ``camera_extrinsics`` axis carries a range.
+    """
+    spec = suite.axes.get("camera_extrinsics")
+    if spec is None or spec.extrinsics_range is None:
+        return suite
+
+    # Local imports keep the loader cheap on the common case.
+    import numpy as np
+
+    from gauntlet.suite.schema import AxisSpec, ExtrinsicsValue
+    from gauntlet.suite.sobol import sobol_unit_cube
+
+    n = suite.n_samples
+    # The schema validator pairs ``extrinsics_range`` with non-cartesian
+    # sampling, and the cross-field validator ensures n_samples is set
+    # on every non-cartesian sampling. Defence in depth: assert it.
+    assert n is not None, "extrinsics_range requires Suite.n_samples"
+
+    rng_box = spec.extrinsics_range
+    # Build the per-dim [lo, hi] table in the order:
+    # translation x, y, z, rotation x, y, z. This is the same order
+    # the env's ``set_camera_extrinsics_list`` consumes — keep it
+    # stable across the codebase.
+    bounds: list[list[float]] = list(rng_box.translation) + list(rng_box.rotation)
+    unit = sobol_unit_cube(n, 6, skip=1)
+    entries: list[ExtrinsicsValue] = []
+    for row_idx in range(n):
+        scaled = np.empty(6, dtype=np.float64)
+        for col_idx, (lo, hi) in enumerate(bounds):
+            scaled[col_idx] = lo + float(unit[row_idx, col_idx]) * (hi - lo)
+        entries.append(
+            ExtrinsicsValue(
+                translation=[float(scaled[0]), float(scaled[1]), float(scaled[2])],
+                rotation=[float(scaled[3]), float(scaled[4]), float(scaled[5])],
+            )
+        )
+
+    new_spec = AxisSpec.model_validate(
+        {
+            "extrinsics_values": [e.model_dump() for e in entries],
+        }
+    )
+    new_axes = dict(suite.axes)
+    new_axes["camera_extrinsics"] = new_spec
+    return suite.model_copy(update={"axes": new_axes})
 
 
 def _resolve_and_check_pilot_report(suite: Suite, *, source: str) -> Suite:

@@ -83,9 +83,16 @@ def lhs_unit_cube(
 def _axis_value_from_unit(spec: AxisSpec, u: float) -> float:
     """Map a unit-cube draw onto the axis's value space.
 
-    Three cases driven off the :class:`AxisSpec` shape (the same
+    Four cases driven off the :class:`AxisSpec` shape (the same
     information the cartesian sampler keys off):
 
+    * ``extrinsics_values is not None`` (B-42 camera_extrinsics
+      categorical-with-structured-payload): K = len(extrinsics_values)
+      categories, identical sub-strata mapping to the regular
+      categorical case. Returns the ``[0, K)`` integer index as a
+      float; the env's
+      :meth:`gauntlet.env.tabletop.TabletopEnv.set_camera_extrinsics_list`
+      resolves the index back to the structured 6-tuple.
     * ``values is not None`` (categorical): one of the ``K = len(values)``
       categories, chosen by the unit interval being divided into ``K``
       equal-width sub-strata. Equivalent to ``values[min(int(u * K),
@@ -103,6 +110,13 @@ def _axis_value_from_unit(spec: AxisSpec, u: float) -> float:
     Returning a float keeps the :class:`SuiteCell.values` mapping
     homogeneous in type.
     """
+    if spec.extrinsics_values is not None:
+        # B-42 — cell value is the index into the structured list. The
+        # range form is pre-resolved into ``extrinsics_values`` by the
+        # loader, so this branch handles both YAML shapes.
+        n_entries = len(spec.extrinsics_values)
+        idx = min(int(u * n_entries), n_entries - 1)
+        return float(idx)
     if spec.values is not None:
         choices = spec.values
         idx = min(int(u * len(choices)), len(choices) - 1)

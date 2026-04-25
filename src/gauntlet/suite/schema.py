@@ -51,6 +51,8 @@ __all__ = [
     "BUILTIN_BACKEND_IMPORTS",
     "SAMPLING_MODES",
     "AxisSpec",
+    "ExtrinsicsRange",
+    "ExtrinsicsValue",
     "SamplingMode",
     "Suite",
     "SuiteCell",
@@ -105,6 +107,85 @@ class SuiteCell:
     values: Mapping[str, float]
 
 
+class ExtrinsicsValue(BaseModel):
+    """One enumerated camera-extrinsics entry (B-42).
+
+    Carries a structured 6-D pose delta applied to the env's render
+    camera at episode start: ``translation`` is a length-3 ``[dx, dy,
+    dz]`` in metres, ``rotation`` is a length-3 ``[drx, dry, drz]`` in
+    radians (XYZ Euler, MuJoCo / PyBullet camera convention). Both
+    fields are required — there is no implicit zero default — so a
+    YAML that wants the "no rotation" baseline writes
+    ``rotation: [0, 0, 0]`` explicitly.
+
+    The schema layer enumerates a list of these to indices
+    ``(0.0, 1.0, ..., len-1)`` for the cell-value channel; the env's
+    :meth:`gauntlet.env.tabletop.TabletopEnv.set_camera_extrinsics_list`
+    setter rebinds the index → 6-tuple mapping at suite-load time.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    translation: list[float] = Field(...)
+    rotation: list[float] = Field(...)
+
+    @field_validator("translation", "rotation")
+    @classmethod
+    def _length_three(cls, v: list[float]) -> list[float]:
+        if len(v) != 3:
+            raise ValueError(
+                f"extrinsics entry: translation / rotation must be length 3 "
+                f"(x, y, z); got length {len(v)}",
+            )
+        return [float(x) for x in v]
+
+
+class ExtrinsicsRange(BaseModel):
+    """Continuous-range camera-extrinsics shape (B-42).
+
+    Sobol-friendly six-dimensional bounds: ``translation`` is a length-3
+    list of ``[lo, hi]`` pairs (metres) and ``rotation`` is a length-3
+    list of ``[lo, hi]`` pairs (radians, XYZ Euler). The schema layer
+    pre-resolves the range into ``n_samples`` enumerated entries at
+    suite-load time using the 6-D Joe-Kuo Sobol sequence (deterministic,
+    no entropy consumed) so the cell-value channel stays uniformly
+    float-valued and downstream samplers (Cartesian / LHS / Sobol /
+    adversarial) see the axis as a plain categorical with N entries.
+
+    Anti-feature note: SO(3) rotations don't compose linearly so the
+    closed-form Saltelli decomposition over the resulting per-axis
+    indices is biased — the report module emits a :class:`UserWarning`
+    whenever this axis is present in a Sobol report.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    translation: list[list[float]] = Field(...)
+    rotation: list[list[float]] = Field(...)
+
+    @field_validator("translation", "rotation")
+    @classmethod
+    def _three_pairs(cls, v: list[list[float]]) -> list[list[float]]:
+        if len(v) != 3:
+            raise ValueError(
+                f"extrinsics range: translation / rotation must each be a "
+                f"list of three [lo, hi] pairs; got length {len(v)}",
+            )
+        out: list[list[float]] = []
+        for i, pair in enumerate(v):
+            if len(pair) != 2:
+                raise ValueError(
+                    f"extrinsics range: dim {i} must be a [lo, hi] pair; got {pair!r}",
+                )
+            lo, hi = float(pair[0]), float(pair[1])
+            if lo > hi:
+                raise ValueError(
+                    f"extrinsics range: dim {i} lo must be <= hi; got [{lo}, {hi}]",
+                )
+            out.append([lo, hi])
+        return out
+
+
 class AxisSpec(BaseModel):
     """Grid specification for a single perturbation axis.
 
@@ -114,7 +195,14 @@ class AxisSpec(BaseModel):
     * Continuous / int: ``low``, ``high``, ``steps`` (all required together).
     * Categorical: ``values`` (a non-empty list).
 
-    Mixing the two raises a clear :class:`pydantic.ValidationError`.
+    On the ``camera_extrinsics`` axis (B-42) the categorical shape is
+    additionally satisfied by either ``extrinsics_values`` (an
+    enumerated list of structured 6-D pose deltas) or ``extrinsics_range``
+    (Sobol-friendly per-dim ``[lo, hi]`` bounds, pre-resolved at
+    suite-load time). Both fields are forbidden on every other axis.
+
+    Mixing the two top-level shapes raises a clear
+    :class:`pydantic.ValidationError`.
 
     Attributes:
         low: Inclusive lower bound for the continuous shape.
@@ -123,6 +211,11 @@ class AxisSpec(BaseModel):
             is ``1``, the single value emitted is the midpoint of
             ``[low, high]``.
         values: Explicit list of values for the categorical shape.
+        extrinsics_values: Enumerated list of structured 6-D pose
+            deltas for the ``camera_extrinsics`` axis (B-42).
+        extrinsics_range: Continuous-range shape for the
+            ``camera_extrinsics`` axis (B-42); pre-resolved at suite-
+            load time into N enumerated entries.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -144,6 +237,16 @@ class AxisSpec(BaseModel):
     # other axis (cross-axis check lives on the parent ``Suite``).
     prior_mean: list[float] | None = Field(default=None)
     prior_std: list[float] | None = Field(default=None)
+    # B-42 — structured shapes for the ``camera_extrinsics`` axis. Both
+    # fields are forbidden on every other axis (cross-axis check lives
+    # on the parent ``Suite``). Exactly one of the two is allowed at
+    # the AxisSpec layer; the parent Suite resolves
+    # ``extrinsics_range`` into a concrete ``extrinsics_values`` list
+    # at load time using a 6-D Sobol pre-expansion seeded from
+    # ``Suite.seed`` (deterministic; the Sobol algorithm consumes no
+    # entropy).
+    extrinsics_values: list[ExtrinsicsValue] | None = Field(default=None)
+    extrinsics_range: ExtrinsicsRange | None = Field(default=None)
 
     # ------------------------------------------------------------------
     # Field-level checks. Bounds compatibility (low <= high) is checked
@@ -185,6 +288,24 @@ class AxisSpec(BaseModel):
     def _check_shape_exclusive(self) -> AxisSpec:
         has_continuous = any(x is not None for x in (self.low, self.high, self.steps))
         has_categorical = self.values is not None
+        # B-42 — ``extrinsics_values`` and ``extrinsics_range`` are
+        # alternative satisfiers of the categorical shape on the
+        # ``camera_extrinsics`` axis. The parent Suite restricts them
+        # to that axis name; here we enforce mutual exclusion plus the
+        # "no other shape alongside" rule.
+        has_extrinsics_values = self.extrinsics_values is not None
+        has_extrinsics_range = self.extrinsics_range is not None
+        has_extrinsics = has_extrinsics_values or has_extrinsics_range
+        if has_extrinsics_values and has_extrinsics_range:
+            raise ValueError(
+                "axis spec: cannot mix extrinsics_values with extrinsics_range; "
+                "use one shape or the other",
+            )
+        if has_extrinsics and (has_continuous or has_categorical):
+            raise ValueError(
+                "axis spec: cannot mix extrinsics_values / extrinsics_range with "
+                "{low, high, steps} or {values}; use one shape only",
+            )
         # B-32 — ``prior_mean`` / ``prior_std`` are aux fields on the
         # categorical shape (the OOD axis declares its sigma multipliers
         # under ``values``). They are forbidden on the continuous shape;
@@ -202,9 +323,11 @@ class AxisSpec(BaseModel):
                 "axis spec: cannot mix {low, high, steps} with {values}; "
                 "use one shape or the other",
             )
-        if not has_continuous and not has_categorical:
+        if not has_continuous and not has_categorical and not has_extrinsics:
             raise ValueError(
-                "axis spec: must specify either {low, high, steps} or {values}",
+                "axis spec: must specify either {low, high, steps} or {values} "
+                "(or extrinsics_values / extrinsics_range on the "
+                "'camera_extrinsics' axis)",
             )
         if has_continuous:
             # ``low`` and ``high`` are always required together for the
@@ -247,6 +370,16 @@ class AxisSpec(BaseModel):
         the index → string lookup at apply time so the
         :class:`SuiteCell.values` mapping stays uniformly float-valued.
 
+        For the B-42 ``extrinsics_values`` shape, the enumeration emits
+        indices ``(0.0, 1.0, ..., len-1)``; the env's
+        :meth:`gauntlet.env.tabletop.TabletopEnv.set_camera_extrinsics_list`
+        performs the index → 6-tuple lookup at apply time. The
+        ``extrinsics_range`` shape is pre-resolved into
+        ``extrinsics_values`` at suite-load time before this method
+        runs (the parent :class:`Suite` performs the expansion); a
+        bare ``extrinsics_range`` reaching this method is a programmer
+        error and raises.
+
         For the continuous shape:
 
         * ``steps == 1`` → single midpoint ``(low + high) / 2``.
@@ -254,6 +387,17 @@ class AxisSpec(BaseModel):
           ``low + i * (high - low) / (steps - 1)`` for ``i`` in
           ``range(steps)``.
         """
+        if self.extrinsics_values is not None:
+            # B-42 — enumerated structured pose deltas; the cell value
+            # channel is the integer index into the list.
+            return tuple(float(i) for i in range(len(self.extrinsics_values)))
+        if self.extrinsics_range is not None:
+            raise ValueError(
+                "axis spec: extrinsics_range must be pre-resolved into "
+                "extrinsics_values before enumerate(); the suite loader "
+                "performs the expansion. This call path is unreachable from "
+                "the public loader.",
+            )
         if self.values is not None:
             # B-05 — string-valued ``values`` enumerates as indices; the
             # wrapper resolves each index back to its paraphrase string.
@@ -271,6 +415,25 @@ class AxisSpec(BaseModel):
             return (0.5 * (lo + hi),)
         denom = float(steps - 1)
         return tuple(lo + i * (hi - lo) / denom for i in range(steps))
+
+    def extrinsics_entries(self) -> tuple[ExtrinsicsValue, ...] | None:
+        """Return the structured 6-D extrinsics entries (B-42).
+
+        Helper companion to :meth:`enumerate` for the
+        ``camera_extrinsics`` axis. Returns ``None`` for every other
+        axis shape (so the runner can skip the
+        :meth:`set_camera_extrinsics_list` rebind on cells that don't
+        carry this axis); otherwise returns the validated
+        :class:`ExtrinsicsValue` tuple in declared order.
+
+        Callers MUST ensure the parent :class:`Suite` has resolved any
+        ``extrinsics_range`` into a concrete ``extrinsics_values`` list
+        first — the bare-range path raises from :meth:`enumerate` for
+        the same reason.
+        """
+        if self.extrinsics_values is None:
+            return None
+        return tuple(self.extrinsics_values)
 
     def paraphrases(self) -> tuple[str, ...] | None:
         """Return the natural-language strings on a string-valued axis.
@@ -410,6 +573,19 @@ class Suite(BaseModel):
                     "only valid on the 'instruction_paraphrase' (B-05) and "
                     "'object_swap' (B-06) axes",
                 )
+        # B-42 — ``extrinsics_values`` and ``extrinsics_range`` are
+        # only meaningful for the ``camera_extrinsics`` axis. Reject
+        # them on every other axis so a confused YAML fails loudly
+        # instead of silently ignoring the structured shape.
+        for axis_name, spec in v.items():
+            if axis_name == "camera_extrinsics":
+                continue
+            if spec.extrinsics_values is not None or spec.extrinsics_range is not None:
+                raise ValueError(
+                    f"axes[{axis_name!r}]: extrinsics_values / "
+                    "extrinsics_range are only valid on the "
+                    "'camera_extrinsics' (B-42) axis",
+                )
         return v
 
     @field_validator("n_samples")
@@ -427,6 +603,31 @@ class Suite(BaseModel):
     # n_samples). Runs after the per-field validators so error messages
     # mention only one axis at a time.
     # ------------------------------------------------------------------
+
+    @model_validator(mode="after")
+    def _check_camera_extrinsics_shape(self) -> Suite:
+        """B-42 — reject extrinsics_range on the Cartesian path.
+
+        ``extrinsics_range`` is the Sobol-friendly continuous shape; the
+        loader pre-expands it into N enumerated entries at suite-load
+        time using the suite-level ``n_samples`` budget. The Cartesian
+        sampler has no ``n_samples`` (cell count is the per-axis steps
+        product), so the range form is not meaningful there. A YAML
+        that wants enumerated extrinsics on Cartesian sampling writes
+        ``extrinsics_values`` directly.
+        """
+        spec = self.axes.get("camera_extrinsics")
+        if spec is None or spec.extrinsics_range is None:
+            return self
+        if self.sampling == "cartesian":
+            raise ValueError(
+                "axes['camera_extrinsics']: extrinsics_range is only "
+                "valid on sampling=latin_hypercube / sobol / adversarial "
+                "(the range is pre-expanded into N entries via 6-D Sobol "
+                "using the suite n_samples budget). For sampling=cartesian, "
+                "use extrinsics_values with an explicit list of pose deltas.",
+            )
+        return self
 
     @model_validator(mode="after")
     def _check_sampling_inputs(self) -> Suite:
@@ -457,7 +658,10 @@ class Suite(BaseModel):
             # parent Suite enforces it back here for the cartesian
             # path. Categorical axes (``values``) are unaffected.
             for axis_name, spec in self.axes.items():
-                is_continuous = spec.values is None
+                # B-42 — the ``extrinsics_values`` shape is a categorical
+                # ad an alternative satisfier of "this axis is not
+                # continuous". Treat it like ``values is not None``.
+                is_continuous = spec.values is None and spec.extrinsics_values is None
                 if is_continuous and spec.steps is None:
                     raise ValueError(
                         f"axis spec: continuous shape requires low, high, "

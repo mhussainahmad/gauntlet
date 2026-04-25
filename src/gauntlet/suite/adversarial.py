@@ -104,8 +104,16 @@ def _axis_value_to_bin(spec: AxisSpec, value: float, n_bins: int) -> int:
     each declared value is its own bin (the index in the ``values``
     list). Continuous axes invert :func:`_axis_value_from_unit` —
     affine to ``[0, 1)`` then floor to a bin index, clamped so the
-    inclusive ``high`` endpoint maps to the last bin.
+    inclusive ``high`` endpoint maps to the last bin. The B-42
+    ``extrinsics_values`` shape is treated identically to the regular
+    categorical case (one bin per entry); the cell value IS the index.
     """
+    if spec.extrinsics_values is not None:
+        # B-42 — cell value is the integer index already; round and
+        # clamp to the legal range. Mirrors the categorical-by-index
+        # convention.
+        idx = round(float(value))
+        return max(0, min(idx, len(spec.extrinsics_values) - 1))
     if spec.values is not None:
         # Categorical: snap to the index of the closest declared value.
         # Float equality after a JSON round-trip is fragile; closest-
@@ -132,6 +140,10 @@ def _axis_value_from_unit(spec: AxisSpec, u: float) -> float:
     mappings stay in lock-step so a bin computed under one sampler can
     be inverted by any other.
     """
+    if spec.extrinsics_values is not None:
+        n_entries = len(spec.extrinsics_values)
+        idx = min(int(u * n_entries), n_entries - 1)
+        return float(idx)
     if spec.values is not None:
         choices = spec.values
         idx = min(int(u * len(choices)), len(choices) - 1)
@@ -237,10 +249,16 @@ class AdversarialSampler:
     # ------------------------------------------------------------------
 
     def _bin_counts(self, specs: tuple[AxisSpec, ...]) -> tuple[int, ...]:
-        """Per-axis bin count tuple — categorical = len(values), else K."""
+        """Per-axis bin count tuple — categorical = len(values), else K.
+
+        B-42 ``extrinsics_values`` shape behaves like a regular
+        categorical axis: one bin per enumerated entry.
+        """
         out: list[int] = []
         for spec in specs:
-            if spec.values is not None:
+            if spec.extrinsics_values is not None:
+                out.append(len(spec.extrinsics_values))
+            elif spec.values is not None:
                 out.append(len(spec.values))
             else:
                 out.append(self._bins_per_continuous)

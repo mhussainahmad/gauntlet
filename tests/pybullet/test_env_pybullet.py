@@ -63,16 +63,14 @@ def test_pybullet_backend_satisfies_gauntlet_env_protocol() -> None:
 
 
 def test_pybullet_backend_declares_visual_only_axes() -> None:
-    """Pins the RFC-006-updated contract: VISUAL_ONLY_AXES is empty.
+    """Pins the RFC-006-updated contract plus the B-06 / B-42 axes.
 
-    Before RFC-006 (state-only release) this set carried
-    ``{"lighting_intensity", "object_texture"}`` and the Suite loader
-    rejected cosmetic-only sweeps as pairwise-identical-by-construction.
-    RFC-006 adds an image-observation path that makes every cosmetic
-    axis observable on ``obs["image"]`` — aligning PyBullet with
-    ``TabletopEnv.VISUAL_ONLY_AXES == frozenset()``. The loader's
-    cosmetic-only rejection becomes a no-op on PyBullet; see
-    ``tests/pybullet/test_loader_pybullet.py`` for the relaxed contract.
+    RFC-006 made every cosmetic axis observable on ``obs["image"]`` so
+    the four cosmetic axes are no longer in ``VISUAL_ONLY_AXES``.
+    ``object_swap`` (B-06) is the lone non-empty entry — PyBullet
+    ships no alternate asset library. ``camera_extrinsics`` (B-42) is
+    a real impl on the single-cam render path so it is NOT in
+    ``VISUAL_ONLY_AXES``.
     """
     from gauntlet.env.pybullet.tabletop_pybullet import PyBulletTabletopEnv
 
@@ -85,9 +83,11 @@ def test_pybullet_backend_declares_visual_only_axes() -> None:
             "object_initial_pose_x",
             "object_initial_pose_y",
             "distractor_count",
+            "object_swap",
+            "camera_extrinsics",
         }
     )
-    assert frozenset() == PyBulletTabletopEnv.VISUAL_ONLY_AXES
+    assert frozenset({"object_swap"}) == PyBulletTabletopEnv.VISUAL_ONLY_AXES
     assert expected_all == PyBulletTabletopEnv.AXIS_NAMES
 
 

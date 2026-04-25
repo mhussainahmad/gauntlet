@@ -38,6 +38,7 @@ branches inside ``set_perturbation`` / ``_apply_pending_perturbations``
 
 from __future__ import annotations
 
+import warnings
 from typing import Any, ClassVar
 
 import gymnasium as gym
@@ -168,6 +169,13 @@ class IsaacSimTabletopEnv:
             # asset library (anti-feature in the backlog), so a suite
             # naming ``object_swap`` on this backend is rejected.
             "object_swap",
+            # B-42 — declared so the loader / linter route this axis
+            # through ``VISUAL_ONLY_AXES``. The state-only first cut
+            # has no render-camera mutation surface (RFC-009 §6.6 +
+            # anti-feature: cross-backend renderer parity is yak-shave;
+            # see backlog B-42), so a suite naming ``camera_extrinsics``
+            # on this backend is rejected at YAML-load time.
+            "camera_extrinsics",
         }
     )
     # State-only first cut (RFC-009 §6.6). The four cosmetic axes
@@ -189,6 +197,8 @@ class IsaacSimTabletopEnv:
             "camera_offset_y",
             "object_texture",
             "object_swap",
+            # B-42 — see AXIS_NAMES note above.
+            "camera_extrinsics",
         }
     )
 
@@ -551,6 +561,23 @@ class IsaacSimTabletopEnv:
                 raise ValueError(
                     f"distractor_count must be in [0, {_N_DISTRACTOR_SLOTS}]; got {count}"
                 )
+        if name == "camera_extrinsics":
+            # B-42 — declared in ``VISUAL_ONLY_AXES`` on this backend
+            # (the loader / linter rejects suites naming this axis on
+            # Isaac at YAML-load time). Defence in depth: a direct
+            # caller that bypasses the loader gets a loud warning and
+            # the axis silently no-ops at apply time.
+            warnings.warn(
+                "camera_extrinsics is not yet supported on the Isaac "
+                "backend (anti-feature: the state-only first cut has "
+                "no render-camera mutation surface; see backlog B-42). "
+                "The axis is queued but will silently no-op at apply "
+                "time. Use the MuJoCo or PyBullet backend if you need "
+                "camera-extrinsics perturbations, or wait for the "
+                "rendering follow-up RFC.",
+                UserWarning,
+                stacklevel=2,
+            )
         self._pending_perturbations[name] = float(value)
 
     def restore_baseline(self) -> None:
@@ -647,6 +674,15 @@ class IsaacSimTabletopEnv:
                     position=np.array([float(xy[0]), float(xy[1]), z], dtype=np.float64),
                     orientation=np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64),
                 )
+            return
+
+        if name == "camera_extrinsics":
+            # B-42 — declared in ``VISUAL_ONLY_AXES``; the state-only
+            # first cut has no render-camera mutation surface. Silently
+            # no-op so a direct caller that bypassed the loader sees
+            # the same "queued but unobservable on state-only obs"
+            # behaviour the other cosmetic axes have. ``set_perturbation``
+            # already emitted the loud warning when the axis was queued.
             return
 
         # Unknown axis names are blocked at set_perturbation; the

@@ -225,6 +225,10 @@ def _axis_value_from_unit(spec: AxisSpec, u: float) -> float:
 
     Identical contract to :func:`gauntlet.suite.lhs._axis_value_from_unit`:
 
+    * ``extrinsics_values is not None`` (B-42): cell value is the
+      ``[0, K)`` integer index as a float; the env resolves it to the
+      structured 6-tuple via
+      :meth:`gauntlet.env.tabletop.TabletopEnv.set_camera_extrinsics_list`.
     * ``values is not None`` (categorical): ``values[min(int(u * K), K - 1)]``
       where ``K = len(values)``.
     * ``values is None`` and ``low == high``: degenerate; returns ``low``.
@@ -232,6 +236,10 @@ def _axis_value_from_unit(spec: AxisSpec, u: float) -> float:
       ``u`` is always in ``[0, 1)`` so the upper bound is exclusive,
       matching :func:`numpy.random.Generator.uniform` semantics.
     """
+    if spec.extrinsics_values is not None:
+        n_entries = len(spec.extrinsics_values)
+        idx = min(int(u * n_entries), n_entries - 1)
+        return float(idx)
     if spec.values is not None:
         choices = spec.values
         idx = min(int(u * len(choices)), len(choices) - 1)
