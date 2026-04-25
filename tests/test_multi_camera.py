@@ -126,9 +126,17 @@ class TestCameraSpecValidation:
             TabletopEnv(cameras=[CameraSpec(name="x", pose=(0, 0, 1, 0, 0, 0), size=(32, -1))])
 
 
+@pytest.mark.render
 class TestMultiCameraObs:
     """End-to-end multi-cam rendering — gated on a working offscreen GL
     context (MUJOCO_GL=egl by default; osmesa also works).
+
+    Marked ``render`` so the default (headless) CI job deselects this
+    class. The ``mujoco.Renderer`` constructor segfaults on the GitHub
+    ``ubuntu-latest`` runner (no DISPLAY, no GPU); the abort happens in
+    C code, so the ``try/except`` in ``_build()`` cannot intercept it
+    and the whole pytest worker dies. Run locally with ``MUJOCO_GL=egl``
+    (or ``osmesa``) to exercise these tests.
     """
 
     def _build(self) -> TabletopEnv:
@@ -256,9 +264,14 @@ class TestMultiCameraObs:
             env.close()
 
 
+@pytest.mark.render
 class TestMultiCameraDeterminism:
     """Two envs with identical cameras + identical seed must produce
     byte-identical frames.
+
+    Marked ``render`` for the same reason as :class:`TestMultiCameraObs`
+    — calls ``env.reset`` which drives ``mujoco.Renderer`` and segfaults
+    on a headless runner.
     """
 
     def test_two_resets_same_seed_same_frames(self) -> None:
