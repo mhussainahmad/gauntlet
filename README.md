@@ -17,10 +17,25 @@ See [`GAUNTLET_SPEC.md`](./GAUNTLET_SPEC.md) for the full design.
 
 ## Status
 
-Phase 1 MVP is feature-complete: tabletop env, perturbation axes, parallel
-runner, breakdown-first HTML report, and the `gauntlet run / report /
-compare` CLI. Phase 2 starts on real-policy adapters and runtime
-observability. The public surface is still unstable.
+Phase 1 (MVP) and Phase 2 (real-policy adapters + runtime
+observability) are shipped. Phase 1 covers the tabletop env, the
+seven perturbation axes, the parallel Runner, the breakdown-first
+HTML report, and the core `gauntlet run / report / compare` CLI.
+Phase 2 adds the PyBullet / Genesis / Isaac Sim backends, OpenVLA
+and SmolVLA adapters, runtime drift detection (`monitor`), ROS 2
+publishing + recording, multi-camera observations, structured
+per-axis report diffs (`gauntlet diff`), incremental rollout caching,
+and the entry-point-based plugin system for third-party policies
+and envs.
+
+Phase 3 (fleet-scale tooling) is **partially shipped**: the
+fleet-wide failure-mode aggregator (`gauntlet aggregate`), the
+self-contained web dashboard, and the real-to-sim scene-ingestion
+input pipeline are all live. The real-to-sim *renderer* itself is
+deferred — `RealSimRenderer` lands as a `typing.Protocol` so a
+gaussian-splatting (or other) renderer plugin can slot in without
+touching the schema. The public surface is stabilising but is not
+yet committed to semver.
 
 ## Backends
 
@@ -120,17 +135,29 @@ drives the same smoke suite against `tabletop-genesis`.
 The Suite YAML's `sampling:` key picks the perturbation grid strategy:
 the default `cartesian` enumerates the full Cartesian product of the
 declared axes (the historical behaviour, byte-identical to every
-existing suite), while `latin_hypercube` draws `n_samples` points using
-McKay 1979 Latin Hypercube Sampling — every axis covers `n_samples`
-distinct strata regardless of dimensionality. For five axes at five
-steps, cartesian = 3,125 cells; LHS at `n_samples: 32` covers the same
-hypercube with strictly higher marginal coverage at ~98x fewer
-rollouts. See
+existing suite), while `latin_hypercube` and `sobol` each draw
+`n_samples` points without enumerating the full grid. For five axes at
+five steps, cartesian = 3,125 cells; LHS or Sobol at `n_samples: 32`
+covers the same hypercube at ~98x fewer rollouts. The two quasi-random
+samplers trade off differently:
+
+- `latin_hypercube` (McKay 1979) gives **perfect per-axis marginal
+  stratification** — every axis covers exactly `n_samples` distinct
+  strata. Joint coverage across axis pairs is essentially random.
+- `sobol` (Joe-Kuo 6.21201 direction numbers, `skip=1`) gives
+  **low-discrepancy joint coverage** — Sobol projections onto any
+  axis pair are also quasi-uniform, at the cost of slightly worse
+  per-axis marginal histograms than LHS.
+
+Use Sobol when the failure mode you suspect is a 2-axis (or higher)
+interaction; use LHS when single-axis sweeps are what you need to
+cover. See
 [`examples/suites/tabletop-lhs-smoke.yaml`](./examples/suites/tabletop-lhs-smoke.yaml)
 and [`examples/evaluate_random_policy_lhs.py`](./examples/evaluate_random_policy_lhs.py)
-for an end-to-end demo. Sobol (`sampling: sobol`) is reserved in the
-schema for a follow-up; LHS is the supported quasi-random alternative
-today.
+for an LHS end-to-end demo, and
+[`docs/polish-exploration-sobol-sampler.md`](./docs/polish-exploration-sobol-sampler.md)
+for the Sobol design note (discrepancy targets, direction-number
+table, skip rationale).
 
 Once you have multiple runs (different seeds, policy revisions, or
 backends), `gauntlet aggregate <runs-dir> --out fleet/` rolls every
@@ -255,6 +282,134 @@ ffmpeg binary — no system ffmpeg install required. Pass
 constructed with `render_in_obs=True` when `record_video=True`; the
 example wires that automatically.
 
+### Fleet dashboard
+
+Once you've accumulated more than a few `report.json` files
+(different policies, different seeds, nightly runs), eyeballing each
+HTML report individually stops scaling. `gauntlet.dashboard` builds a
+self-contained static SPA that indexes every `report.json` under a
+directory:
+
+```python
+from pathlib import Path
+from gauntlet.dashboard import build_dashboard
+
+build_dashboard(Path("runs/"), Path("dashboard-out/"))
+# Open dashboard-out/index.html via file:// — no web server needed.
+```
+
+The output directory contains exactly three files (`index.html`,
+`dashboard.js`, `dashboard.css`); all run data is embedded as an
+inline JSON literal so the SPA opens straight off the filesystem
+without tripping CORS. The dashboard surfaces an index card
+(n_runs / n_episodes / mean ± std success rate), a per-run table
+filterable by env / suite / policy, a time-series chart of success
+rate keyed off `report.json` mtime, and per-axis aggregate bars
+pooled across the matching runs. Sibling `report.html` files (from
+the originating `gauntlet run`) are auto-linked from each row.
+
+The CLI surface (`gauntlet dashboard build <runs-dir> --out <out>`)
+is RFC-shaped but the shipped path is the Python API above; see
+[`docs/phase3-rfc-020-web-dashboard.md`](./docs/phase3-rfc-020-web-dashboard.md)
+for the full design.
+
+### Real-to-sim scene ingestion
+
+The endgame for `GAUNTLET_SPEC.md` §7 is gaussian-splatting
+reconstruction of customer scenes from real-robot camera dumps
+straight into a renderable eval backend. Shipping the renderer
+itself needs `torch` + CUDA + a multi-gigabyte training pipeline,
+which violates spec §6 — so this release lands the *input pipeline*
+and the *renderer extension point* only. A plugin (or a future
+in-tree RFC) implements an actual renderer against the
+`RealSimRenderer` Protocol without touching the schema or the CLI:
+
+```bash
+uv run gauntlet realsim ingest <frames-dir> \
+  --calib <calib.json> \
+  --out <scene-dir>
+
+uv run gauntlet realsim info <scene-dir>
+```
+
+`ingest` validates the frames + calibration JSON and writes a
+self-contained scene directory (`manifest.json` + frame copies, or
+symlinks via `--symlink`). The manifest carries `Pose` (4x4
+row-major rigid transforms, NeRFStudio / COLMAP `transforms.json`
+convention), `CameraIntrinsics` (pinhole + optional distortion,
+shared by id), and `CameraFrame` rows. `info` prints a one-screen
+manifest summary. The renderer itself is **deferred** — `RealSimRenderer`
+is a `typing.Protocol`, and `register_renderer` / `get_renderer` are a
+module-local registry for plugin renderers. See
+[`docs/phase3-rfc-021-real-to-sim-stub.md`](./docs/phase3-rfc-021-real-to-sim-stub.md)
+for the full design (pose representation, validation rules, plugin
+seam).
+
+### Multi-camera observations
+
+Multi-view policies (SmolVLA, ACT, Diffusion Policy — anything that
+consumes paired wrist + side + overhead frames) need more than the
+single `obs["image"]` the legacy `render_in_obs=True` path emits.
+Pass `cameras=[CameraSpec(...), ...]` to `TabletopEnv` or
+`PyBulletTabletopEnv` and each spec lands in `obs["images"][name]`:
+
+```python
+from gauntlet.env import CameraSpec, TabletopEnv
+
+env = TabletopEnv(
+    cameras=[
+        CameraSpec(name="wrist", pose=(0.0, 0.0, 0.4, 0.0, 0.0, 0.0), size=(96, 96)),
+        CameraSpec(name="side",  pose=(0.5, 0.0, 0.3, 0.0, 1.2, 0.0), size=(96, 96)),
+    ],
+)
+obs, _ = env.reset(seed=0)
+wrist = obs["images"]["wrist"]  # shape (96, 96, 3), uint8
+```
+
+`CameraSpec.pose` is `(x, y, z, rx, ry, rz)` in metres + MuJoCo-XYZ
+Euler radians (looks along local `-Z`); `CameraSpec.size` is `(H, W)`.
+The legacy `obs["image"]` key stays populated as an alias to the
+**first** camera's frame so single-view consumers (the runner's video
+recorder, OpenVLA-style adapters) keep working unchanged. The
+single-camera default (`cameras=None`) is byte-identical to the
+phase-1 contract. See
+[`docs/polish-exploration-multi-camera.md`](./docs/polish-exploration-multi-camera.md)
+for the full design and
+[`examples/evaluate_multi_camera.py`](./examples/evaluate_multi_camera.py)
+for a worked example.
+
+## Extending gauntlet
+
+Third-party policies and envs plug into gauntlet through Python's
+standard `importlib.metadata` entry-point mechanism — any
+pip-installable package can register itself without modifying
+gauntlet's source. Two groups are read by `gauntlet.plugins`:
+
+| Entry-point group   | Registers                                                               |
+|---------------------|-------------------------------------------------------------------------|
+| `gauntlet.policies` | A class (or zero-arg callable) returning a `gauntlet.policy.base.Policy` |
+| `gauntlet.envs`     | A class returning a `gauntlet.env.base.GauntletEnv`                      |
+
+A plugin author writes the adapter, then declares it in their own
+`pyproject.toml`:
+
+```toml
+[project.entry-points."gauntlet.policies"]
+sb3 = "my_gauntlet_plugin.sb3_adapter:SBAdapter"
+```
+
+After `pip install my-gauntlet-plugin`, `gauntlet run ... --policy sb3`
+resolves through the plugin path. Built-in adapters always win on
+collision; failed entry-point loads are wrapped in a
+`RuntimeWarning` and dropped from the registry — gauntlet itself
+stays operational. See
+[`docs/plugin-development.md`](./docs/plugin-development.md) for the
+full how-to (writing a Policy / Env plugin, constructor-argument
+patterns, testing) and
+[`docs/polish-exploration-plugin-system.md`](./docs/polish-exploration-plugin-system.md)
+for the design note (precedence rules, lazy discovery, collision
+handling).
+
 ## Development
 
 ```bash
@@ -271,16 +426,22 @@ uv run pytest
 
 ```
 src/gauntlet/
-  policy/    # Policy adapter protocol + reference wrappers (Random, Scripted, HF, LeRobot)
-  env/       # Parameterized envs — MuJoCo (core) + PyBullet ([pybullet] extra) + Genesis ([genesis] extra)
-  suite/     # YAML-defined perturbation grid suites
-  runner/    # Parallel rollout orchestration + seed management
-  report/    # Failure analysis + HTML/JSON generation
-  monitor/   # Runtime drift detection + action-entropy ([monitor] extra)
-  replay/    # Single-episode replay with axis overrides
-  ros2/      # ROS 2 publisher + recorder ([ros2] extra; rclpy via apt/Docker)
-  diff/      # Structured per-axis report deltas powering `gauntlet diff`
-  cli.py     # gauntlet run / report / compare / diff / monitor / replay / ros2
+  policy/      # Policy adapter protocol + reference wrappers (Random, Scripted, HF, LeRobot)
+  env/         # Parameterized envs — MuJoCo (core) + PyBullet/Genesis/Isaac (extras)
+  suite/       # YAML-defined perturbation grid suites (cartesian / LHS / Sobol)
+  runner/      # Parallel rollout orchestration + seed management + cache
+  report/      # Per-run failure analysis + HTML/JSON generation
+  monitor/     # Runtime drift detection + action-entropy ([monitor] extra)
+  replay/      # Single-episode replay with axis overrides
+  ros2/        # ROS 2 publisher + recorder ([ros2] extra; rclpy via apt/Docker)
+  diff/        # Structured per-axis report deltas powering `gauntlet diff`
+  aggregate/   # Fleet-wide failure-mode clustering across many runs
+  dashboard/   # Self-contained static SPA indexing every report.json
+  realsim/     # Real-to-sim scene ingestion + RealSimRenderer Protocol (renderer deferred)
+  plugins.py   # Entry-point discovery for third-party policies / envs
+  cli.py       # gauntlet run / report / compare / diff / aggregate /
+               # realsim / monitor / replay / ros2
+               # (dashboard ships as a Python API — see ## Fleet dashboard)
 ```
 
 ## License
