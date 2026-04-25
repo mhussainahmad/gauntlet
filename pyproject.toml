@@ -508,6 +508,7 @@ ignore_missing_imports = true
 module = [
     "gauntlet.aggregate.schema",
     "gauntlet.diff.diff",
+    "gauntlet.diff.paired",
     "gauntlet.monitor.schema",
     "gauntlet.realsim.schema",
     "gauntlet.report.schema",
