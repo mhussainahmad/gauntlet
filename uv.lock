@@ -2284,7 +2284,7 @@ requires-dist = [
     { name = "isaacsim", marker = "extra == 'isaac'", specifier = ">=5.0,<6", index = "https://pypi.nvidia.com/" },
     { name = "jinja2", specifier = ">=3.1,<4" },
     { name = "lerobot", extras = ["smolvla"], marker = "extra == 'lerobot'", specifier = ">=0.4,<1" },
-    { name = "mujoco", specifier = ">=3.2,<4" },
+    { name = "mujoco", specifier = ">=3.2,<5" },
     { name = "numpy", specifier = ">=1.26,<3" },
     { name = "pandas", specifier = ">=2.2,<4" },
     { name = "pillow", marker = "extra == 'hf'", specifier = ">=10.0,<12" },
