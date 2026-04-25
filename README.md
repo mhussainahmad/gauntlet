@@ -267,6 +267,39 @@ ffmpeg binary — no system ffmpeg install required. Pass
 constructed with `render_in_obs=True` when `record_video=True`; the
 example wires that automatically.
 
+### Multi-camera observations
+
+Multi-view policies (SmolVLA, ACT, Diffusion Policy — anything that
+consumes paired wrist + side + overhead frames) need more than the
+single `obs["image"]` the legacy `render_in_obs=True` path emits.
+Pass `cameras=[CameraSpec(...), ...]` to `TabletopEnv` or
+`PyBulletTabletopEnv` and each spec lands in `obs["images"][name]`:
+
+```python
+from gauntlet.env import CameraSpec, TabletopEnv
+
+env = TabletopEnv(
+    cameras=[
+        CameraSpec(name="wrist", pose=(0.0, 0.0, 0.4, 0.0, 0.0, 0.0), size=(96, 96)),
+        CameraSpec(name="side",  pose=(0.5, 0.0, 0.3, 0.0, 1.2, 0.0), size=(96, 96)),
+    ],
+)
+obs, _ = env.reset(seed=0)
+wrist = obs["images"]["wrist"]  # shape (96, 96, 3), uint8
+```
+
+`CameraSpec.pose` is `(x, y, z, rx, ry, rz)` in metres + MuJoCo-XYZ
+Euler radians (looks along local `-Z`); `CameraSpec.size` is `(H, W)`.
+The legacy `obs["image"]` key stays populated as an alias to the
+**first** camera's frame so single-view consumers (the runner's video
+recorder, OpenVLA-style adapters) keep working unchanged. The
+single-camera default (`cameras=None`) is byte-identical to the
+phase-1 contract. See
+[`docs/polish-exploration-multi-camera.md`](./docs/polish-exploration-multi-camera.md)
+for the full design and
+[`examples/evaluate_multi_camera.py`](./examples/evaluate_multi_camera.py)
+for a worked example.
+
 ## Development
 
 ```bash
