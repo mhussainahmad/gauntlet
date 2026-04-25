@@ -70,6 +70,33 @@ pi0 = [
     "transformers>=4.40,<5",
     "pillow>=10.0,<12",
 ]
+# Independent extra for the GR00T-N1 (NVIDIA humanoid) adapter — backlog
+# B-15. GR00T-N1 is distributed through lerobot's policy factory as
+# ``lerobot.policies.groot.GrootPolicy``. Upstream lerobot 0.4.4 exposes
+# a ``[groot]`` extra (verified via ``uv pip install --dry-run`` at
+# adapter build time) but that extra pulls ``flash-attn``, which requires
+# CUDA at pip-install time and breaks CPU-only installs (same reason the
+# [hf] extra omits flash-attn). We therefore pin plain ``lerobot`` and
+# let users opt into ``flash-attn`` separately when they actually have a
+# CUDA box — the GR00T modules import fine without it; only the inference
+# attention kernel needs it.
+groot = [
+    "lerobot>=0.4,<1",
+    "transformers>=4.40,<5",
+    "pillow>=10.0,<12",
+]
+# Independent extra for the RDT (Robotics Diffusion Transformer) adapter
+# — backlog B-15. Unlike GR00T-N1 / SmolVLA / π0, RDT does NOT ship via
+# the lerobot policy factory (no ``lerobot[rdt]`` extra exists as of
+# lerobot 0.4.4 — uv warns ``does not have an extra named rdt``). Loaded
+# instead via ``transformers.AutoModel.from_pretrained(..., trust_remote_code=True)``,
+# mirroring the OpenVLA / [hf] path.
+rdt = [
+    "torch>=2.2,<3",
+    "transformers>=4.40,<5",
+    "huggingface_hub>=0.20,<1",
+    "pillow>=10.0,<12",
+]
 # Drift detector (Phase 2 Task 3).
 # Torch is the only heavy dep; pillow is carried along so the optional
 # image-AE path (deferred follow-up) does not silently ImportError on a
@@ -299,6 +326,14 @@ conflicts = [
     [
         { extra = "isaac" },
         { extra = "pi0" },
+    ],
+    [
+        { extra = "isaac" },
+        { extra = "groot" },
+    ],
+    [
+        { extra = "isaac" },
+        { extra = "rdt" },
     ],
     [
         { extra = "isaac" },
@@ -600,6 +635,8 @@ module = [
     "gauntlet.policy.huggingface",
     "gauntlet.policy.lerobot",
     "gauntlet.policy.pi0",
+    "gauntlet.policy.groot",
+    "gauntlet.policy.rdt",
     # Lazy-import ``__getattr__`` (PEP 562) — narrowing defeats lazy load.
     "gauntlet.monitor",
     # rclpy ``Node`` typed as ``Any`` in upstream stubs (RFC-010 §3).
@@ -650,6 +687,8 @@ markers = [
     "hf: tests that require the [hf] extra (torch, transformers, PIL)",
     "lerobot: tests that require the [lerobot] extra (lerobot, torch, PIL)",
     "pi0: tests that require the [pi0] extra (lerobot[pi], torch, PIL) — backlog B-14",
+    "groot: tests that require the [groot] extra (lerobot[groot], torch, PIL) — backlog B-15",
+    "rdt: tests that require the [rdt] extra (transformers, torch, PIL, huggingface_hub) — backlog B-15",
     "monitor: tests that require the [monitor] extra (torch, PIL)",
     "pybullet: tests that require the [pybullet] extra (pybullet>=3.2)",
     "genesis: tests that require the [genesis] extra (genesis-world>=0.4, torch)",
