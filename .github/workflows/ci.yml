@@ -226,6 +226,9 @@ jobs:
   genesis-tests:
     name: genesis backend tests (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    # Heavy native deps (taichi/genesis) — CLAUDE.md hard constraint #9:
+    # heavy/hardware-only dep jobs must not block merge.
+    continue-on-error: true
     env:
       UV_PYTHON: ${{ matrix.python-version }}
     strategy:
@@ -259,6 +262,9 @@ jobs:
   ros2-tests:
     name: ros2-tests (rclpy mocked, py${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    # Heavy native deps (rclpy ecosystem) — CLAUDE.md hard constraint #9:
+    # heavy/hardware-only dep jobs must not block merge.
+    continue-on-error: true
     env:
       UV_PYTHON: ${{ matrix.python-version }}
     strategy:
