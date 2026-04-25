@@ -70,13 +70,22 @@ _APPLY_VALUE: dict[str, float] = {
     # (index 0); the apply value 0.0 hits that no-op slot. Real suites
     # rebind via :meth:`set_camera_extrinsics_list` before queueing.
     "camera_extrinsics": 0.0,
+    # B-43 — color_shift_synthetic is a *post-render* HSV axis; like
+    # image_attack it lives in the canonical AXIS_NAMES registry but
+    # the inner backend env does NOT implement it. The
+    # ColorShiftWrapper handles dispatch instead. Tests that exercise
+    # backend-direct ``set_perturbation`` filter this name out.
+    "color_shift_synthetic": 0.0,
 }
 
-# B-31 / B-05 — axes whose dispatch lives outside the inner backend env.
-# Filtered out of any test that drives ``TabletopEnv.set_perturbation``
-# directly (the env legitimately rejects them).
+# B-31 / B-05 / B-43 — axes whose dispatch lives outside the inner
+# backend env. Filtered out of any test that drives
+# ``TabletopEnv.set_perturbation`` directly (the env legitimately
+# rejects them).
 _BACKEND_DIRECT_AXES: tuple[str, ...] = tuple(
-    name for name in AXIS_NAMES if name not in {"image_attack", "instruction_paraphrase"}
+    name
+    for name in AXIS_NAMES
+    if name not in {"image_attack", "instruction_paraphrase", "color_shift_synthetic"}
 )
 
 
@@ -114,6 +123,7 @@ class TestAxisNamesRegistry:
             "instruction_paraphrase",
             "object_swap",
             "camera_extrinsics",
+            "color_shift_synthetic",
         )
 
     def test_axis_names_is_tuple(self) -> None:
