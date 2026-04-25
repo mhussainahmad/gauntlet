@@ -26,7 +26,7 @@ import json
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
-from typing import Annotated, Any, cast
+from typing import Annotated, TypeAlias, cast
 
 import typer
 from pydantic import ValidationError
@@ -130,18 +130,36 @@ def _fmt_path(path: Path) -> str:
     return f"[path]{path}[/]"
 
 
-def _read_json(path: Path) -> Any:
+# Recursive type for JSON-style nested data — same shape as
+# :data:`gauntlet.report.html._JsonValue`. Narrowed from ``Any`` so the
+# CLI's JSON read / validate / write helpers carry the actual structure
+# they accept (``json.load`` produces; pydantic ``model_dump(mode="json")``
+# returns; the report-package ``_nan_to_none`` walker accepts).
+_JsonValue: TypeAlias = (
+    float
+    | int
+    | str
+    | bool
+    | None
+    | dict[str, "_JsonValue"]
+    | list["_JsonValue"]
+    | tuple["_JsonValue", ...]
+)
+
+
+def _read_json(path: Path) -> _JsonValue:
     """Load JSON from *path* with a uniform error envelope.
 
-    Returns the parsed JSON tree (``Any``); the auto-detect logic in
-    :func:`_load_report_or_episodes` decides whether it is a Report or
-    an Episode list.
+    Returns the parsed JSON tree as a recursive :data:`_JsonValue`; the
+    auto-detect logic in :func:`_load_report_or_episodes` narrows it to
+    a Report (top-level ``dict``) or an Episode list (top-level
+    ``list``) before constructing pydantic models.
     """
     if not path.is_file():
         raise _fail(f"file not found: {path}")
     try:
         with path.open("r", encoding="utf-8") as fh:
-            return json.load(fh)
+            return cast("_JsonValue", json.load(fh))
     except json.JSONDecodeError as exc:
         raise _fail(f"{path}: invalid JSON ({exc.msg} at line {exc.lineno})") from exc
 
@@ -171,7 +189,7 @@ def _load_report_or_episodes(path: Path) -> Report:
     )
 
 
-def _episodes_from_dicts(raw: list[Any], *, source: Path) -> list[Episode]:
+def _episodes_from_dicts(raw: list[_JsonValue], *, source: Path) -> list[Episode]:
     """Validate a list of episode dicts, re-raising as a clean CLI error."""
     episodes: list[Episode] = []
     for i, item in enumerate(raw):
@@ -184,7 +202,7 @@ def _episodes_from_dicts(raw: list[Any], *, source: Path) -> list[Episode]:
     return episodes
 
 
-def _write_json(path: Path, payload: Any) -> None:
+def _write_json(path: Path, payload: _JsonValue) -> None:
     """Write *payload* to *path* as UTF-8 JSON, NaN-safe.
 
     All floats are passed through :func:`_nan_to_none` (lifted from
@@ -198,9 +216,9 @@ def _write_json(path: Path, payload: Any) -> None:
     )
 
 
-def _episodes_to_dicts(episodes: list[Episode]) -> list[dict[str, Any]]:
+def _episodes_to_dicts(episodes: list[Episode]) -> list[dict[str, _JsonValue]]:
     """Serialise episodes via Pydantic's JSON mode for round-tripping."""
-    return [ep.model_dump(mode="json") for ep in episodes]
+    return [cast("dict[str, _JsonValue]", ep.model_dump(mode="json")) for ep in episodes]
 
 
 def _make_env_factory(
@@ -403,8 +421,8 @@ def run(
     report_json_path = out / "report.json"
     report_html_path = out / "report.html"
 
-    _write_json(episodes_path, _episodes_to_dicts(episodes))
-    _write_json(report_json_path, report.model_dump(mode="json"))
+    _write_json(episodes_path, cast("_JsonValue", _episodes_to_dicts(episodes)))
+    _write_json(report_json_path, cast("_JsonValue", report.model_dump(mode="json")))
 
     if not no_html:
         write_html(report, report_html_path)
@@ -477,7 +495,7 @@ def _build_compare(
     *,
     threshold: float,
     min_cell_size: int,
-) -> dict[str, Any]:
+) -> dict[str, _JsonValue]:
     """Build the ``compare.json`` payload for two reports.
 
     A regression (improvement) is a per-cell perturbation_config that
@@ -489,8 +507,8 @@ def _build_compare(
     cells_b = {_cell_key(c.perturbation_config): c for c in report_b.per_cell}
     shared_keys = cells_a.keys() & cells_b.keys()
 
-    regressions: list[dict[str, Any]] = []
-    improvements: list[dict[str, Any]] = []
+    regressions: list[dict[str, _JsonValue]] = []
+    improvements: list[dict[str, _JsonValue]] = []
     for key in shared_keys:
         ca = cells_a[key]
         cb = cells_b[key]
@@ -521,9 +539,12 @@ def _build_compare(
             )
 
     # Stable order: worst regression / best improvement first, then by
-    # axis_combination repr for tie-breaking.
-    regressions.sort(key=lambda r: (r["delta"], repr(r["axis_combination"])))
-    improvements.sort(key=lambda r: (-r["delta"], repr(r["axis_combination"])))
+    # axis_combination repr for tie-breaking. ``r["delta"]`` is built as
+    # a Python float two stanzas above; the cast narrows the
+    # ``_JsonValue`` lookup so the arithmetic / tuple comparison type-
+    # check (every payload in the list is constructed in this function).
+    regressions.sort(key=lambda r: (cast("float", r["delta"]), repr(r["axis_combination"])))
+    improvements.sort(key=lambda r: (-cast("float", r["delta"]), repr(r["axis_combination"])))
 
     return {
         "a": {
@@ -539,8 +560,12 @@ def _build_compare(
         "delta_success_rate": report_b.overall_success_rate - report_a.overall_success_rate,
         "threshold": threshold,
         "min_cell_size": min_cell_size,
-        "regressions": regressions,
-        "improvements": improvements,
+        # ``regressions`` / ``improvements`` are constructed locally as
+        # ``list[dict[str, _JsonValue]]``; ``list`` is invariant in its
+        # parameter so the cast bridges to ``_JsonValue`` (which the
+        # downstream JSON writer + Chart.js consumer treat structurally).
+        "regressions": cast("_JsonValue", regressions),
+        "improvements": cast("_JsonValue", improvements),
     }
 
 
@@ -640,9 +665,14 @@ def compare(
     _echo_err(f"[ok]Wrote[/] {_fmt_path(out_path)}")
     _echo_err(f"  a: {report_a.suite_name} ({_fmt_success_rate(report_a.overall_success_rate)})")
     _echo_err(f"  b: {report_b.suite_name} ({_fmt_success_rate(report_b.overall_success_rate)})")
-    _echo_err(f"  delta success_rate: {_fmt_signed_pct(payload['delta_success_rate'])}")
-    n_regressions = len(payload["regressions"])
-    n_improvements = len(payload["improvements"])
+    # ``payload`` is built by ``_build_compare`` directly above; the
+    # casts narrow the recursive ``_JsonValue`` lookups so the float / len
+    # call-sites type-check (the structure is local-and-known).
+    _echo_err(
+        f"  delta success_rate: {_fmt_signed_pct(cast('float', payload['delta_success_rate']))}"
+    )
+    n_regressions = len(cast("list[object]", payload["regressions"]))
+    n_improvements = len(cast("list[object]", payload["improvements"]))
     regressions_style = "delta.down" if n_regressions else "delta.zero"
     improvements_style = "delta.up" if n_improvements else "delta.zero"
     _echo_err(
@@ -1186,13 +1216,16 @@ def replay(
     if out_path.parent and not out_path.parent.exists():
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    payload: dict[str, Any] = {
+    payload: dict[str, _JsonValue] = {
         "episode_id": f"{cell_index}:{episode_index}",
         "suite_name": target.suite_name,
         "policy": policy,
-        "overrides": overrides,
-        "original": target.model_dump(mode="json"),
-        "replayed": replayed.model_dump(mode="json"),
+        # ``overrides`` is ``dict[str, float]`` (parsed CLI flags); the
+        # cast bridges to ``_JsonValue`` (``dict`` is invariant in its
+        # value parameter so a structural narrow won't infer through).
+        "overrides": cast("_JsonValue", overrides),
+        "original": cast("_JsonValue", target.model_dump(mode="json")),
+        "replayed": cast("_JsonValue", replayed.model_dump(mode="json")),
     }
     _write_json(out_path, payload)
 
