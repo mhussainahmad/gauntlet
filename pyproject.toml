@@ -483,6 +483,7 @@ markers = [
     "ros2: tests that require the [ros2] extra (rclpy mocked at the module boundary)",
     "isaac: tests that require a real Isaac Sim install (isaacsim>=5.0) and a CUDA GPU; the default tests/isaac/ suite is mock-driven and unmarked",
     "video: tests that require the [video] extra (imageio[ffmpeg]>=2.34) for MP4 rollout recording",
+    "render: tests that exercise the offscreen mujoco GL renderer and need a working EGL/OSMesa stack; deselected by default CI runners where mujoco.Renderer aborts at the C level (no DISPLAY, no GPU)",
 ]
 
 [tool.coverage.run]
