@@ -1,6 +1,8 @@
 # Polish exploration: type tightening — eliminate `Any` outside FFI overrides
 
-Status: exploration / pre-implementation
+Status: shipped (this branch — Phase 2.5 follow-up — adds the
+project-wide `disallow_any_explicit` ratchet via per-module overrides,
+on top of the manual purge that PR #30 landed)
 Owner: phase-2.5/type-tightening branch
 Phase: 2.5 Task 15
 
@@ -245,3 +247,74 @@ synthetic) or §3b (FFI seam):
 Zero `Any` leaks remain in the pure-Python core helper code that this
 task targets. Excluding the sibling-owned `cli.py` and `diff/`
 (out of scope per §6) the in-scope-and-purgeable count is **0**.
+
+## 9. Phase 2.5 follow-up (this branch — `phase-2.5/type-tightening`)
+
+PR #30 deferred enabling `disallow_any_explicit = true` because the
+pydantic synthetic-method blocker (§3a) made the global flag noisy.
+This pass goes further by adopting **per-module overrides** —
+mypy 1.x supports `disallow_any_explicit` inside
+`[[tool.mypy.overrides]]`, so the flag can default to `true` for the
+pure-Python core while two narrow override blocks carve out the two
+documented buckets:
+
+* **Pydantic schema modules** (§3a): every `BaseModel` subclass would
+  otherwise trip `[explicit-any]`. The carve-out lists each schema
+  module by name (`gauntlet.{aggregate,monitor,realsim,report,ros2,
+  suite}.schema`, `gauntlet.runner.episode`, `gauntlet.diff.diff`).
+* **FFI seam modules** (§3b): wrappers around mujoco / gymnasium /
+  torch / transformers / lerobot / pybullet / genesis / isaacsim /
+  rclpy / imageio / numpy mixed-dtype Protocols / `importlib.metadata`
+  plugin loading / `yaml.safe_load`. Listed by module name in the
+  same `[[tool.mypy.overrides]]` block.
+
+The follow-up purge in this PR also tightens the CLI's JSON-walking
+helpers (`_read_json`, `_episodes_from_dicts`, `_write_json`,
+`_episodes_to_dicts`, `_build_compare`, `replay` payload) to the same
+recursive `_JsonValue` `TypeAlias` already used by
+`gauntlet.{aggregate,report,dashboard}.html` /
+`gauntlet.dashboard.build`. PR #30 had treated `cli.py` as
+sibling-owned and out of scope; that PR has merged, so `cli.py` is
+now in scope.
+
+`gauntlet.dashboard.build` and `gauntlet.realsim.pipeline` were
+considered for tightening but ended up in the FFI carve-out instead:
+the dashboard's index dict is the wire-format contract to the JS
+SPA (consumers index it deeply), and the realsim pipeline parses an
+external user-authored calibration JSON (mirrors `suite.loader`).
+
+### 9.1 Verification after the override
+
+```
+$ uv run --no-sync mypy
+Success: no issues found in 172 source files
+$ uv run --no-sync mypy --strict --disallow-any-explicit src/gauntlet
+Success: no issues found in 71 source files
+```
+
+Smoke test: injecting `def _new_leak(x: Any) -> Any: return x` into
+`cli.py` (a non-carved-out module) immediately produces
+`error: Explicit "Any" is not allowed [explicit-any]`. The carve-out
+blocks are narrow enough that *new* explicit `Any` in pure-gauntlet
+core code triggers a mypy failure at PR-review time.
+
+### 9.2 What remains as `Any`
+
+Everything left after the override is one of:
+
+* a `BaseModel` synthetic method (the pydantic plugin owns it);
+* a literal FFI carry — `mujoco` / `pybullet` / `genesis` / `isaacsim`
+  / `rclpy` / `torch` / `transformers` / `lerobot` / `imageio` /
+  `yaml.safe_load`;
+* a `gym.spaces.Space[Any]` Protocol field where the inner dtype is
+  legitimately heterogeneous across backends;
+* a `Callable[..., GauntletEnv]` factory ParamSpec where
+  heterogeneous backend init signatures preclude a `ParamSpec` fix;
+* a numpy `NDArray[Any]` payload where the dtype-mix is the contract
+  (mixed-dtype obs dicts);
+* a JSON wire-format edge to a non-Python consumer (dashboard SPA →
+  JS, realsim → user calibration files).
+
+None of these are actionable as further purges within Phase 2.5
+without a parallel upstream-stub change (pydantic, gymnasium,
+imageio, lerobot, rclpy).

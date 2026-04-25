@@ -364,7 +364,30 @@ warn_return_any = true
 no_implicit_reexport = true
 disallow_untyped_defs = true
 disallow_any_generics = true
+# Pure-Python core defaults to "no explicit ``Any``" (Phase 2.5 Task 15
+# / RFC §6 ratchet). Per-module overrides below carve out the two
+# legitimate bucket of leaks: (a) every pydantic ``BaseModel`` subclass
+# trips this rule because the pydantic v2 ``dataclass_transform`` plugin
+# synthesises a ``__mypy-replace`` method whose ``**kwargs: Any`` is
+# what mypy actually flags (no literal ``Any`` in our source —
+# repro in ``docs/polish-exploration-type-tightening.md`` §3a); and
+# (b) the FFI seams already documented under the ``ignore_missing_imports``
+# overrides further down (mujoco / gymnasium / torch / transformers /
+# pybullet / genesis / isaacsim / rclpy / imageio / lerobot). Any
+# *new* explicit ``Any`` typed by a developer in pure-gauntlet code
+# triggers ``[explicit-any]`` and CI rejects the diff.
+disallow_any_explicit = true
 files = ["src", "tests"]
+
+# Tests stay with the existing ``--strict`` surface — adding
+# ``disallow_any_explicit`` to ``tests/`` would force every hypothesis
+# decorator carrier (``Callable[..., None]`` synthetic) and every
+# ``pytest.fixture``-typed shim to grow ``# type: ignore``. Those
+# leaks are not in the production code path; the rule lives in the
+# ``src/gauntlet`` modules where the production contract is enforced.
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_any_explicit = false
 
 # MuJoCo bindings expose a large untyped C API surface.
 # Per spec §6, Any is permitted at the MuJoCo FFI boundary only.
@@ -463,6 +486,99 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = ["imageio", "imageio.*", "imageio_ffmpeg", "imageio_ffmpeg.*"]
 ignore_missing_imports = true
+
+# ---------- ``disallow_any_explicit`` per-module carve-outs ----------
+#
+# The two buckets below relax the project-wide
+# ``disallow_any_explicit = true`` from ``[tool.mypy]`` for modules
+# where ``Any`` is structurally unavoidable:
+#
+# 1. **Pydantic schema modules** — every ``class Foo(BaseModel):`` trips
+#    ``[explicit-any]`` because the pydantic v2 mypy plugin synthesises
+#    a ``__mypy-replace`` method whose ``**kwargs: Any`` is the literal
+#    ``Any`` mypy reports. Repro + full classification in
+#    ``docs/polish-exploration-type-tightening.md`` §3a. Listing each
+#    schema module explicitly here makes the carve-out visible at
+#    review time; a *new* ``Any`` literal authored by a developer in
+#    one of these modules still slips through (the downside is small —
+#    pydantic schemas already have a narrow surface, and a literal
+#    ``Any`` in a schema would have to bypass ``ConfigDict(extra="forbid")``
+#    to be observable at runtime).
+[[tool.mypy.overrides]]
+module = [
+    "gauntlet.aggregate.schema",
+    "gauntlet.diff.diff",
+    "gauntlet.monitor.schema",
+    "gauntlet.realsim.schema",
+    "gauntlet.report.schema",
+    "gauntlet.ros2.schema",
+    "gauntlet.runner.episode",
+    "gauntlet.suite.schema",
+]
+disallow_any_explicit = false
+
+# 2. **FFI seam modules** — wrappers around mujoco / gymnasium / torch /
+#    transformers / lerobot / pybullet / genesis / isaacsim / rclpy /
+#    imageio / numpy mixed-dtype Protocols / ``importlib.metadata``
+#    plugin loading / ``yaml.safe_load``. Per spec §6, ``Any`` is
+#    permitted at the FFI boundary; each module already carries a
+#    docstring or in-file comment explaining the carve-out. Full
+#    classification in ``docs/polish-exploration-type-tightening.md``
+#    §3b.
+[[tool.mypy.overrides]]
+module = [
+    # gymnasium ``spaces.Space[Any]`` Protocol fields + ``Callable[..., GauntletEnv]``
+    # factory signatures + ``dict[str, Any]`` info dict from gym ``step``.
+    "gauntlet.env",
+    "gauntlet.env.base",
+    "gauntlet.env.registry",
+    "gauntlet.env.tabletop",
+    # ``Callable[..., AxisSampler]`` factory ParamSpec (perturbation registry).
+    "gauntlet.env.perturbation.base",
+    # PyBullet / Genesis / Isaac backend wrappers — backend C++ surfaces
+    # carry no stubs (RFC-005 §11 / RFC-007 §4.2 / RFC-009 §4.4).
+    "gauntlet.env.pybullet",
+    "gauntlet.env.pybullet.tabletop_pybullet",
+    "gauntlet.env.genesis",
+    "gauntlet.env.genesis.tabletop_genesis",
+    "gauntlet.env.isaac",
+    "gauntlet.env.isaac.tabletop_isaac",
+    # Policy adapters — torch / transformers / lerobot / PIL FFI.
+    "gauntlet.policy",
+    "gauntlet.policy.base",
+    "gauntlet.policy.huggingface",
+    "gauntlet.policy.lerobot",
+    # Lazy-import ``__getattr__`` (PEP 562) — narrowing defeats lazy load.
+    "gauntlet.monitor",
+    # rclpy ``Node`` typed as ``Any`` in upstream stubs (RFC-010 §3).
+    "gauntlet.ros2",
+    "gauntlet.ros2.publisher",
+    "gauntlet.ros2.recorder",
+    # Runner FFI seams — numpy ``NDArray[Any]`` mixed-dtype payloads,
+    # gymnasium info dict, imageio.imwrite typed Any in stubs.
+    "gauntlet.runner.video",
+    "gauntlet.runner.worker",
+    # ``yaml.safe_load`` returns ``Any`` (yaml stubs do not narrow).
+    "gauntlet.suite.loader",
+    # External calibration-JSON ingest — ``json.loads`` of a user-
+    # authored manifest. Same shape as ``suite.loader`` (FFI to disk).
+    "gauntlet.realsim.pipeline",
+    # ``importlib.metadata`` entry-point loading — plugin classes are
+    # opaque until ``ep.load()`` materialises the third-party object.
+    "gauntlet.plugins",
+    # ``RealSimRenderer`` Protocol declares ``np.ndarray`` return —
+    # dtype/shape deliberately unfixed so any in-tree or third-party
+    # renderer can satisfy it (see ``realsim/renderer.py`` docstring).
+    "gauntlet.realsim.renderer",
+    # SPA index payload — the dict is the wire-format contract between
+    # the Python builder and the JS consumer (``dashboard.js``).
+    # Tightening the public ``dict[str, Any]`` to a recursive
+    # ``_JsonValue`` produces correct types but the JS-shape contract
+    # itself is open (the existing ``tests/test_dashboard.py`` indexes
+    # the structure deeply); treat the JSON output edge as FFI.
+    "gauntlet.dashboard.build",
+]
+disallow_any_explicit = false
 
 [tool.pytest.ini_options]
 minversion = "8.0"
