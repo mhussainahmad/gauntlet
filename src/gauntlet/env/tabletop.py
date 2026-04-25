@@ -127,9 +127,22 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
             "object_initial_pose_x",
             "object_initial_pose_y",
             "distractor_count",
+            # B-32 — initial-state OOD shift axis (LIBERO-PRO/Plus framing).
+            # See ``set_initial_state_ood_prior`` for prior configuration.
+            "initial_state_ood",
         }
     )
     VISUAL_ONLY_AXES: ClassVar[frozenset[str]] = frozenset()
+
+    # B-32 — default OOD prior. The training-time cube initial-XY
+    # distribution is uniform on ``[-_CUBE_INIT_HALFRANGE, _CUBE_INIT_HALFRANGE]``
+    # for x and y (z fixed at the rest height), so the in-distribution
+    # mean is the table centre and the per-axis std is
+    # ``halfrange / sqrt(3)`` (variance of the uniform). Z std is 0 by
+    # default — the OOD axis perturbs the table-plane pose, not height.
+    # User-supplied priors override these via ``set_initial_state_ood_prior``
+    # (or the YAML ``prior_mean`` / ``prior_std`` axis fields once wired).
+    _OOD_DEFAULT_PRIOR_MEAN: ClassVar[tuple[float, float, float]] = (0.0, 0.0, 0.0)
 
     # Per-step action scaling.
     MAX_LINEAR_STEP: float = 0.05  # metres per unit action
@@ -153,6 +166,16 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
     # Randomisation ranges (conservative — keep cube & target on the table).
     _CUBE_INIT_HALFRANGE: float = 0.15
     _TARGET_HALFRANGE: float = 0.2
+
+    # B-32 — std of the training initial-XY distribution. Uniform on
+    # ``[-_CUBE_INIT_HALFRANGE, _CUBE_INIT_HALFRANGE]`` has variance
+    # ``(2 * halfrange)^2 / 12`` so std = ``halfrange / sqrt(3)``. Z std
+    # defaults to 0 because the rest height is constant during training.
+    _OOD_DEFAULT_PRIOR_STD: ClassVar[tuple[float, float, float]] = (
+        _CUBE_INIT_HALFRANGE / 1.7320508075688772,
+        _CUBE_INIT_HALFRANGE / 1.7320508075688772,
+        0.0,
+    )
 
     def __init__(
         self,
@@ -254,6 +277,21 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         # next episode starts fresh. See spec §5 task 4: "applies to the env
         # before reset()".
         self._pending_perturbations: dict[str, float] = {}
+
+        # B-32 — OOD prior for the ``initial_state_ood`` axis. Tuples of
+        # length 3 (x, y, z). Defaults to the env's training-time
+        # initial-XY distribution; user overrides via
+        # :meth:`set_initial_state_ood_prior` (or, post-wiring, via the
+        # YAML ``prior_mean`` / ``prior_std`` axis fields).
+        self._ood_prior_mean: tuple[float, float, float] = type(self)._OOD_DEFAULT_PRIOR_MEAN
+        self._ood_prior_std: tuple[float, float, float] = type(self)._OOD_DEFAULT_PRIOR_STD
+        # Snapshot of the seed last passed to :meth:`reset`. Used to
+        # build a deterministic, isolated sub-stream for OOD sign draws
+        # so that adding the ``initial_state_ood`` axis to a queued set
+        # of perturbations cannot perturb the main ``self._rng`` stream
+        # (and thus cannot shift the random target / cube draws other
+        # axes depend on).
+        self._last_reset_seed: int | None = None
 
         # Per-episode state.
         self._rng: np.random.Generator = np.random.default_rng()
@@ -415,8 +453,11 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         Per spec §5 task 4 ("applies to the env before reset()"), every
         axis is recorded into a pending dict and applied by ``reset`` AFTER
         ``restore_baseline`` and AFTER the seed-driven randomisation. This
-        gives a single coherent contract for all 7 axes — pose axes
-        override the random XY, model-state axes mutate the model.
+        gives a single coherent contract for all axes — pose axes
+        override the random XY, model-state axes mutate the model. The
+        ``initial_state_ood`` axis (B-32) reuses the pose-override path:
+        the queued value is the unitless sigma multiplier ``V`` and the
+        env converts it to an XY pose via the configured prior.
 
         Raises:
             ValueError: if ``name`` is not a known axis or the value is out
@@ -431,7 +472,41 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
                 raise ValueError(
                     f"distractor_count must be in [0, {N_DISTRACTOR_SLOTS}]; got {count}"
                 )
+        if name == "initial_state_ood" and float(value) < 0:
+            # Negative sigma multipliers are nonsense — the magnitude
+            # encodes "how many sigma out", with the sign drawn per-dim
+            # from the env seed at apply time.
+            raise ValueError(f"initial_state_ood: sigma multiplier must be >= 0; got {value}")
         self._pending_perturbations[name] = float(value)
+
+    def set_initial_state_ood_prior(
+        self,
+        mean: tuple[float, float, float],
+        std: tuple[float, float, float],
+    ) -> None:
+        """Configure the training-distribution prior for the OOD axis (B-32).
+
+        ``mean`` and ``std`` are 3-tuples ``(x, y, z)`` describing the
+        training initial-pose distribution. The ``initial_state_ood``
+        axis interprets a queued sigma multiplier ``V`` as a pose of
+        ``mean + V * std * sign_per_dim`` (per LIBERO-PRO / LIBERO-Plus),
+        where ``sign_per_dim`` is drawn from a deterministic sub-stream
+        seeded by the env reset seed (so every (seed, V) pair is
+        reproducible). Each std entry must be ``>= 0``.
+
+        Defaults match the env's uniform training XY distribution; call
+        this method only when you have a different (e.g. auto-fit-from-
+        reference-run) prior.
+        """
+        if len(mean) != 3 or len(std) != 3:
+            raise ValueError(
+                f"initial_state_ood prior: mean and std must each be length 3; "
+                f"got len(mean)={len(mean)}, len(std)={len(std)}"
+            )
+        if any(float(s) < 0 for s in std):
+            raise ValueError(f"initial_state_ood prior: std entries must be >= 0; got std={std}")
+        self._ood_prior_mean = (float(mean[0]), float(mean[1]), float(mean[2]))
+        self._ood_prior_std = (float(std[0]), float(std[1]), float(std[2]))
 
     def _apply_pending_perturbations(self) -> None:
         """Apply every queued perturbation on top of the just-randomised state."""
@@ -461,6 +536,35 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
             self._data.qpos[self._cube_qpos_adr + 0] = float(value)
         elif name == "object_initial_pose_y":
             self._data.qpos[self._cube_qpos_adr + 1] = float(value)
+        elif name == "initial_state_ood":
+            # B-32 — sigma multiplier ``V`` mapped to a per-dim pose
+            # ``prior_mean + V * prior_std * sign_per_dim``. Sign is
+            # drawn from a deterministic sub-stream so the main
+            # ``self._rng`` stream (which other axes / target draws
+            # consume) is not perturbed by the presence of this axis.
+            sigma = float(value)
+            mean = self._ood_prior_mean
+            std = self._ood_prior_std
+            # Spawn an isolated child stream from the current seed via
+            # SeedSequence; falls back to a constant seed (0) when the
+            # caller passed seed=None to reset(). Either way the output
+            # is reproducible from the env's contract (``reset(seed=s)``
+            # is the only entropy source).
+            base_seed = self._last_reset_seed if self._last_reset_seed is not None else 0
+            sign_rng = np.random.default_rng(np.random.SeedSequence([base_seed, 0xB32]))
+            signs = np.where(sign_rng.random(3) < 0.5, -1.0, 1.0).astype(np.float64)
+            pose = (
+                mean[0] + sigma * std[0] * float(signs[0]),
+                mean[1] + sigma * std[1] * float(signs[1]),
+                mean[2] + sigma * std[2] * float(signs[2]),
+            )
+            qpos = self._data.qpos
+            qpos[self._cube_qpos_adr + 0] = pose[0]
+            qpos[self._cube_qpos_adr + 1] = pose[1]
+            # The cube is a free joint with three positional DoF; z is
+            # mutable too, but the rest height keeps the cube on the
+            # table when the default std[z]=0 collapses the offset.
+            qpos[self._cube_qpos_adr + 2] = self._CUBE_REST_Z + pose[2]
         elif name == "distractor_count":
             count = round(float(value))
             for i, gid in enumerate(self._distractor_geom_ids):
@@ -493,6 +597,10 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         # We manage our own RNG to avoid coupling to gymnasium's internal
         # stream ordering; the seed is the contract.
         self._rng = np.random.default_rng(seed)
+        # Snapshot the seed so the ``initial_state_ood`` apply branch
+        # can spawn an isolated child stream for sign draws without
+        # consuming entropy from ``self._rng``.
+        self._last_reset_seed = seed
 
         # Wipe any stale model perturbations from a prior episode BEFORE
         # we touch qpos / mocap / target. After this point the model is
