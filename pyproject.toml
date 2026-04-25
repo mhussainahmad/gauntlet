@@ -658,6 +658,12 @@ module = [
     # ``Space[Any]`` + ``dict[str, Any]`` Protocol surface as the
     # backend env modules above.
     "gauntlet.env.image_attack",
+    # B-43 — same wrapper pattern as image_attack: post-render HSV
+    # color-shift wrapper carrying the gymnasium ``Space[Any]`` +
+    # ``dict[str, Any]`` Protocol surface plus an ``__getattr__``
+    # proxy whose return is genuinely ``Any`` (the inner backend's
+    # extras are heterogeneous).
+    "gauntlet.env.color_attack",
     # B-05 — same wrapper pattern as image_attack: wraps any
     # GauntletEnv and carries the gymnasium ``Space[Any]`` +
     # ``dict[str, Any]`` Protocol surface, plus an ``__getattr__``
