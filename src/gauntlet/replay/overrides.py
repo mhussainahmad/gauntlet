@@ -105,7 +105,17 @@ def _value_allowed(axis: AxisSpec, value: float) -> bool:
     float cast) without permitting arbitrary off-set values.
     """
     if axis.values is not None:
-        return any(abs(value - v) <= _CATEGORICAL_TOL for v in axis.values)
+        # ``axis.values`` widened to ``list[float] | list[str]`` after
+        # B-05 added the categorical-string ``instruction_paraphrase``
+        # axis. ``parse_override`` constrains the user's value to
+        # ``float``, so str-valued entries can never match by
+        # construction; filter to numeric entries before subtracting so
+        # mypy --strict accepts the operand and so a future float / str
+        # mixed-list axis (none today) silently degrades to "no match"
+        # rather than ``TypeError`` at runtime.
+        return any(
+            isinstance(v, (int, float)) and abs(value - v) <= _CATEGORICAL_TOL for v in axis.values
+        )
     # Continuous: _check_shape_exclusive guarantees low and high are set.
     assert axis.low is not None
     assert axis.high is not None

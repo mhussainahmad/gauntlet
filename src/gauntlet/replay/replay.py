@@ -36,6 +36,11 @@ from gauntlet.env.registry import get_env_factory
 from gauntlet.policy.base import Policy
 from gauntlet.replay.overrides import validate_overrides
 from gauntlet.runner import Episode, execute_one
+from gauntlet.runner.provenance import (
+    capture_gauntlet_version,
+    capture_git_commit,
+    compute_suite_hash,
+)
 from gauntlet.runner.worker import WorkItem
 from gauntlet.suite.schema import Suite
 
@@ -219,6 +224,39 @@ def replay_one(
     factory = env_factory if env_factory is not None else get_env_factory(suite.env)
     env = factory()
     try:
-        return execute_one(env, policy_factory, item)
+        replayed = execute_one(env, policy_factory, item)
     finally:
         env.close()
+
+    # Echo the target's B-22 provenance trio onto the replayed Episode so
+    # ``replayed.model_dump() == target.model_dump()`` holds for the
+    # zero-override path. ``execute_one`` does not stamp these — only
+    # :meth:`Runner.run` does — so without this post-population the
+    # replayed Episode would carry ``None`` for all three fields and the
+    # bit-identity contract from the module docstring would silently break
+    # (regression introduced when B-22 / B-40 added the fields).
+    #
+    # Provenance is copied from *target* (preserving target identity)
+    # rather than recomputed from the current checkout, because the
+    # contract the tests pin is full-Episode equality against the original
+    # — when run in the same checkout the two sources happen to agree, but
+    # a replay across checkouts must still echo the *original* run's
+    # commit / version / suite hash. For legacy Episodes that pre-date
+    # B-22 (any field is ``None``), fall back to the same helpers
+    # :meth:`Runner.run` uses so the replayed Episode at least carries the
+    # current checkout's provenance instead of propagating ``None``.
+    return replayed.model_copy(
+        update={
+            "gauntlet_version": (
+                target.gauntlet_version
+                if target.gauntlet_version is not None
+                else capture_gauntlet_version()
+            ),
+            "suite_hash": (
+                target.suite_hash if target.suite_hash is not None else compute_suite_hash(suite)
+            ),
+            "git_commit": (
+                target.git_commit if target.git_commit is not None else capture_git_commit()
+            ),
+        }
+    )
