@@ -25,13 +25,29 @@ from gauntlet.diff.diff import CellFlip as CellFlip
 from gauntlet.diff.diff import ClusterDelta as ClusterDelta
 from gauntlet.diff.diff import ReportDiff as ReportDiff
 from gauntlet.diff.diff import diff_reports as diff_reports
+from gauntlet.diff.paired import McNemarResult as McNemarResult
+from gauntlet.diff.paired import PairedCellDelta as PairedCellDelta
+from gauntlet.diff.paired import PairedComparison as PairedComparison
+from gauntlet.diff.paired import PairingError as PairingError
+from gauntlet.diff.paired import compute_paired_cells as compute_paired_cells
+from gauntlet.diff.paired import mcnemar_test as mcnemar_test
+from gauntlet.diff.paired import pair_episodes as pair_episodes
+from gauntlet.diff.paired import paired_delta_ci as paired_delta_ci
 from gauntlet.diff.render import render_text as render_text
 
 __all__ = [
     "AxisDelta",
     "CellFlip",
     "ClusterDelta",
+    "McNemarResult",
+    "PairedCellDelta",
+    "PairedComparison",
+    "PairingError",
     "ReportDiff",
+    "compute_paired_cells",
     "diff_reports",
+    "mcnemar_test",
+    "pair_episodes",
+    "paired_delta_ci",
     "render_text",
 ]
