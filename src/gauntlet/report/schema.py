@@ -217,6 +217,24 @@ class FailureCluster(BaseModel):
     mean_collisions: float | None = None
     mean_joint_excursions: float | None = None
 
+    # B-02: per-cluster aggregates of the behavioural metrics on
+    # :class:`gauntlet.runner.Episode`. Each field is the cluster mean
+    # across the episodes that *did* report a value — episodes whose
+    # backend left the field ``None`` are dropped from both numerator
+    # and denominator (same partial-coverage handling as the actuator
+    # / safety trios above). ``None`` here means "no episode in this
+    # cluster carried behavioural telemetry"; the HTML report renders
+    # ``None`` as a dash, never as ``0``. Failure clusters surface
+    # these so a human reading the report can see "this combo fails
+    # AND moves jerkily AND takes 3x as long" — the policy-tied-on-
+    # success-rate-but-not-on-behaviour case the B-02 spec / RoboEval
+    # (RSS 2025) calls out.
+    mean_time_to_success: float | None = None
+    mean_path_length_ratio: float | None = None
+    mean_jerk_rms: float | None = None
+    mean_near_collision_count: float | None = None
+    mean_peak_force: float | None = None
+
 
 class Heatmap2D(BaseModel):
     """2D success-rate matrix for a pair of axes.
