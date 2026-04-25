@@ -413,7 +413,7 @@ def run(
         raise _fail(f"runner failed: {exc}") from exc
 
     try:
-        report = build_report(episodes, suite_env=suite.env)
+        report = build_report(episodes, suite_env=suite.env, sampling=suite.sampling)
     except ValueError as exc:
         raise _fail(f"could not build report: {exc}") from exc
 
