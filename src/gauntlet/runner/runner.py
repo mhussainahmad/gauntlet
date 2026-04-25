@@ -112,6 +112,7 @@ class Runner:
         policy_id: str | None = None,
         max_steps: int | None = None,
         measure_action_consistency: bool = False,
+        max_inference_ms: float | None = None,
     ) -> None:
         """Configure the runner.
 
@@ -199,6 +200,19 @@ class Runner:
                 :class:`GauntletEnv` does not expose a public getter;
                 an honest cache key needs the value as input. Ignored
                 when ``cache_dir is None``.
+            max_inference_ms: B-37 inference-latency budget in
+                milliseconds. When set, every Episode whose measured
+                p99 ``policy.act`` latency exceeds this threshold gets
+                ``metadata["inference_budget_violated"] = True`` so the
+                report's failure-cluster table can sort by it. Anti-
+                feature (deliberate): a SOFT flag — does NOT abort the
+                run, does NOT flip ``success``, and the metadata key is
+                *absent* (not ``False``) when the budget was met or no
+                budget was configured. Per-step latency itself is
+                always measured (always-on); only the budget compare
+                is gated. Default ``None`` keeps the metadata payload
+                byte-identical to the pre-B-37 contract for runs that
+                opt out of the budget.
             measure_action_consistency: B-18 opt-in for the action
                 mode-collapse metric. When ``True`` and the policy
                 implements :class:`gauntlet.policy.SamplablePolicy`
@@ -255,6 +269,7 @@ class Runner:
         self._policy_id = policy_id
         self._max_steps = max_steps
         self._measure_action_consistency = measure_action_consistency
+        self._max_inference_ms = max_inference_ms
         # Lazily constructed on the first ``run`` call when caching is
         # enabled. Held on the instance so :meth:`cache_stats` can be
         # called by callers (and by the CLI) after the run completes.
@@ -779,6 +794,7 @@ class Runner:
                         trajectory_format=trajectory_format,
                         video_config=video_config,
                         measure_action_consistency=self._measure_action_consistency,
+                        max_inference_ms=self._max_inference_ms,
                     )
                     fresh.append(episode)
                     running_n += 1
@@ -870,6 +886,7 @@ class Runner:
                     trajectory_format=trajectory_format,
                     video_config=video_config,
                     measure_action_consistency=self._measure_action_consistency,
+                    max_inference_ms=self._max_inference_ms,
                 )
                 for item in work_items
             ]
@@ -900,6 +917,7 @@ class Runner:
             trajectory_format=trajectory_format,
             video_config=video_config,
             measure_action_consistency=self._measure_action_consistency,
+            max_inference_ms=self._max_inference_ms,
         )
         with ctx.Pool(
             processes=self._n_workers,
