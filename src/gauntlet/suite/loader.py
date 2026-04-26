@@ -8,9 +8,11 @@ Two entry points:
 
 Both funnel through Pydantic's :meth:`BaseModel.model_validate`, which
 turns schema violations into :class:`pydantic.ValidationError`. The
-``Any`` returned by :func:`yaml.safe_load` is contained at the boundary
-— we validate the raw mapping and hand a typed :class:`Suite` back to
-callers.
+``Any`` returned by :func:`gauntlet.security.safe_yaml_load` (a thin
+alias of :func:`yaml.safe_load`) is contained at the boundary — we
+validate the raw mapping and hand a typed :class:`Suite` back to
+callers. Routing every read through :mod:`gauntlet.security.yaml_guard`
+gives the CI grep gate a single canonical call-site to verify.
 
 For backends that live behind optional extras (RFC-005 §11.2), the
 loader triggers the canonical module import after pydantic validation
@@ -28,9 +30,8 @@ import warnings
 from pathlib import Path
 from typing import Any, cast
 
-import yaml
-
 from gauntlet.env.registry import get_env_factory, registered_envs
+from gauntlet.security import safe_yaml_load
 from gauntlet.suite.schema import BUILTIN_BACKEND_IMPORTS, Suite
 
 __all__ = [
@@ -79,7 +80,7 @@ def load_suite(path: Path | str) -> Suite:
     if not p.is_file():
         raise FileNotFoundError(f"suite file not found: {p}")
     with p.open("r", encoding="utf-8") as fh:
-        raw: Any = yaml.safe_load(fh)
+        raw: Any = safe_yaml_load(fh)
     return _validate(raw, source=str(p))
 
 
@@ -90,12 +91,12 @@ def load_suite_from_string(yaml_text: str) -> Suite:
         pydantic.ValidationError: if the YAML contents fail validation.
         yaml.YAMLError: if the string is not valid YAML.
     """
-    raw: Any = yaml.safe_load(yaml_text)
+    raw: Any = safe_yaml_load(yaml_text)
     return _validate(raw, source="<string>")
 
 
 def _validate(raw: Any, *, source: str) -> Suite:
-    """Convert the ``Any`` from :func:`yaml.safe_load` into a typed Suite.
+    """Convert the ``Any`` from :func:`safe_yaml_load` into a typed Suite.
 
     The top-level YAML document must be a mapping — anything else
     (scalar, list, null) is rejected before Pydantic ever sees it so the
