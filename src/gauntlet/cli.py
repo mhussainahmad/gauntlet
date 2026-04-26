@@ -1620,6 +1620,22 @@ def diff(
 
 
 # ──────────────────────────────────────────────────────────────────────
+# `bisect` subcommand — cross-checkpoint regression bisection (B-39).
+# ──────────────────────────────────────────────────────────────────────
+#
+# Binary-searches an ordered checkpoint list ``[good, *intermediates, bad]``
+# for the first checkpoint at which the target cell's success rate
+# regressed beyond the paired-CRN confidence interval. Re-uses the
+# B-08 paired-CRN engine end-to-end so the bisect signal is variance-
+# reduced. Implementation lives in :mod:`gauntlet.bisect`; this CLI
+# wrapper is a thin Typer hand-off to ``bisect.cli.register``.
+
+from gauntlet.bisect.cli import register as _register_bisect_cli  # noqa: E402
+
+_register_bisect_cli(app)
+
+
+# ──────────────────────────────────────────────────────────────────────
 # `aggregate` subcommand — fleet-wide failure-mode clustering.
 # ──────────────────────────────────────────────────────────────────────
 #
