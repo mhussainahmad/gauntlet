@@ -148,12 +148,8 @@ After those S-class items the medium items become viable in pairs.
 
 ## Reports (new analysis surfaces)
 
-### B-17: Failure-mode taxonomy via trajectory clustering
-- **What:** Group failed episodes by trajectory similarity (DTW or learned embedding) and label clusters with a short auto-generated description ("dropped object before lift", "knocked target off table"). Surface as a new "failure modes" table beneath the existing failure-clusters table.
-- **Why:** "Unsupervised Discovery of Failure Taxonomies from Deployment Logs" (arxiv 2506.06570), RoboFail (arxiv 2412.02818). Failure clusters today are *axis-config* clusters; *trajectory* clusters are the orthogonal dimension that says "these failures look the same regardless of config".
-- **Scope:** M
-- **Disjoint with:** `report/`, requires trajectory dumps. New optional dependency on `tslearn` or `dtw-python`.
-- **Anti-feature?** Auto-labels are LLM-bait — easy to ship "knocked target off table" labels that are confidently wrong. Better to label by exemplar episode index than by prose.
+### B-17: Failure-mode taxonomy via trajectory clustering — Shipped 2026-04-26
+- **Status:** Shipped 2026-04-26. New `gauntlet.report.trajectory_taxonomy` module + a "Failure-Mode Taxonomy" subsection rendered beneath the existing axis-config failure-clusters table (orthogonal — config clusters say *which* perturbations failed; trajectory clusters say *how* the rollouts unfolded). Loads each failed episode's `cell_NNNN_ep_NNNN.npz` action stream, builds a pairwise distance matrix (DTW via the new `[trajectory-taxonomy]` extra, falls back to euclidean truncate-to-`min(T)` when the extra is absent), runs deterministic average-linkage agglomerative clustering, and silhouette-searches `k ∈ [2, min(8, n_failed - 1)]` when `n_clusters` is unset. Anti-feature framing preserved verbatim: clusters are labelled by the medoid's `cell_NNNN_ep_NNNN` index, NOT by auto-generated prose; the public dataclasses carry no prose-label field and the test suite asserts a future "helpful" addition trips CI.
 
 ### B-18: Policy-action consistency / mode-collapse metric
 - **What:** For chunked policies (diffusion, π0), sample N action chunks per state and compute action variance. Aggregate as a per-axis "action consistency" column in the report.
