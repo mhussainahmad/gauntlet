@@ -22,12 +22,15 @@ RFCs cross-linked from each section below.
 - [Episode (rollout result)](#episode-rollout-result)
 - [Report (failure analysis)](#report-failure-analysis)
 - [Diff (per-axis structured delta)](#diff-per-axis-structured-delta)
+- [Compare (regression verdict + cross-backend drift)](#compare-regression-verdict--cross-backend-drift)
+- [Bisect (cross-checkpoint regression search)](#bisect-cross-checkpoint-regression-search)
 - [Aggregate (fleet meta-report)](#aggregate-fleet-meta-report)
 - [Dashboard (static SPA)](#dashboard-static-spa)
 - [Replay (single-episode re-simulation)](#replay-single-episode-re-simulation)
 - [Monitor (drift detector)](#monitor-drift-detector)
 - [ROS 2 bridge](#ros-2-bridge)
 - [Real-to-sim (scene reconstruction)](#real-to-sim-scene-reconstruction)
+- [Security (path / YAML guards)](#security-path--yaml-guards)
 - [Plugins (third-party env / policy)](#plugins-third-party-env--policy)
 
 ---
@@ -388,7 +391,11 @@ wrapper; `render_html` returns the HTML string for in-memory use.
 ```python
 from gauntlet.diff import (
     ReportDiff, AxisDelta, CellFlip, ClusterDelta,
+    Verdict, VERDICT_REGRESSED, VERDICT_IMPROVED, VERDICT_WITHIN_NOISE,
     diff_reports, render_text,
+    # Paired-CRN (B-08) — opt-in, requires shared master_seed on both runs.
+    PairedComparison, PairedCellDelta, McNemarResult, PairingError,
+    pair_episodes, mcnemar_test, paired_delta_ci, compute_paired_cells,
 )
 ```
 
@@ -409,6 +416,169 @@ removed / `ClusterDelta` for shared clusters whose lift rose). Use
 when `gauntlet compare`'s yes/no verdict is too coarse and you need
 "what moved?". `render_text` produces a plain-text rendering; the CLI
 wraps it with rich color.
+
+### Regression-vs-noise verdict (B-20)
+
+`Verdict` is `Literal["regressed", "improved", "within_noise"]` plus
+the three constants `VERDICT_REGRESSED`, `VERDICT_IMPROVED`,
+`VERDICT_WITHIN_NOISE`. Each `CellFlip` carries a `verdict` field set
+by `diff_reports`: a flip whose magnitude exceeds
+`cell_flip_threshold` *and* whose Wilson / paired-CRN bracket
+excludes zero is tagged `regressed` or `improved`; otherwise it is
+tagged `within_noise`. CI gates should key off `regressed`, not the
+raw delta sign.
+
+### Paired-CRN comparison (B-08, B-39)
+
+```python
+from gauntlet.diff import compute_paired_cells, mcnemar_test, PairingError
+from gauntlet.runner import Episode  # episode lists from two paired runs
+
+paired = compute_paired_cells(episodes_a, episodes_b)  # list[PairedCellDelta]
+worst = sorted(paired, key=lambda p: p.delta_ci_high)[:5]
+```
+
+When two Runs share a `master_seed`, the Runner derives identical
+per-episode env seeds for every paired `(cell_index, episode_index)`
+key. `compute_paired_cells` pairs the resulting episodes, runs
+`mcnemar_test(b, c)` over the discordant counts, and returns one
+`PairedCellDelta` per cell with the Newcombe-Tango paired CI on
+`b_success_rate - a_success_rate`. The CI bracket shrinks roughly
+2-4x relative to two independent Wilson intervals — the variance
+reduction that `gauntlet bisect` (B-39) consumes. `pair_episodes` is
+the lower-level helper exposed for callers that want the discordant
+pairs directly. Raises `PairingError` (a `ValueError` subclass) when
+the two episode lists do not share a master seed or do not align
+key-for-key.
+
+---
+
+## Compare (regression verdict + cross-backend drift)
+
+```python
+from gauntlet.compare import (
+    to_github_summary,
+    AxisDrift, DriftMap, DriftMapError,
+    compute_drift_map, render_drift_map_table, top_axis_drifts,
+)
+```
+
+`gauntlet compare` is the binary regression-gate CLI; this module
+surfaces two structured outputs that ride on top of its
+`compare.json` payload.
+
+### `to_github_summary(compare_result) -> str` (B-24)
+
+```python
+import json
+from gauntlet.compare import to_github_summary
+
+with open("compare.json") as fh:
+    payload = json.load(fh)
+summary_md = to_github_summary(payload)
+# Append to GITHUB_STEP_SUMMARY in CI:
+# echo "$summary_md" >> "$GITHUB_STEP_SUMMARY"
+```
+
+Renders a `compare.json` payload as a markdown blob suitable for
+`$GITHUB_STEP_SUMMARY` — the GitHub Actions surface that lets a CI
+job emit a rich rendered report alongside the standard logs. Tables
+of regressed cells and intensified failure clusters land directly in
+the run summary tab without an extra artefact upload.
+
+### `compute_drift_map(report_a, report_b, ...) -> DriftMap` (B-29)
+
+```python
+from gauntlet.compare import compute_drift_map, render_drift_map_table
+
+drift = compute_drift_map(sim_report, real_report,
+                          a_label="sim", b_label="real")
+print(render_drift_map_table(drift))
+top = top_axis_drifts(drift, limit=5)  # list[AxisDrift]
+```
+
+Cross-backend embodiment-transfer scoring inspired by SIMPLER. For
+every shared `(axis, axis_value)` cell across two `Report`s, emits an
+`AxisDrift` (`a_rate`, `b_rate`, `delta`, `abs_delta`) so a fleet
+operator can answer "where does the sim/real gap concentrate?".
+`top_axis_drifts(drift, limit=N)` returns the top-N drifts ranked by
+`abs_delta`. `render_drift_map_table` renders a sorted markdown table
+suitable for stdout or a PR comment. `DriftMapError` (a `ValueError`
+subclass) signals incompatible report shapes (different axis schemas,
+different env families). See `docs/phase3-rfc-019-fleet-aggregate.md`
+for the framing.
+
+### Sim-vs-real correlation (B-28)
+
+```python
+from gauntlet.aggregate import (
+    AxisTransfer, SimRealReport, compute_sim_real_correlation,
+)
+
+corr = compute_sim_real_correlation(sim_episodes, real_episodes,
+                                    pair_key="instance_id")
+```
+
+`compute_sim_real_correlation` ranks each axis by how well its sim
+success rate predicts its real-rollout outcome (Spearman + per-axis
+Pearson). `SimRealReport` is the top-level pydantic model;
+`AxisTransfer` is one row per axis. The default pairing key is
+`instance_id` from `Episode.metadata`; pass `pair_key=` to use a
+different metadata field. SureSim-style framing — see the B-28
+backlog entry.
+
+---
+
+## Bisect (cross-checkpoint regression search)
+
+```python
+from gauntlet.bisect import (
+    BisectError, BisectResult, BisectStep, RunnerFactory, bisect,
+)
+```
+
+### `bisect(checkpoints, resolver, *, suite, target_cell_id, runner_factory=Runner, episodes_per_step=None) -> BisectResult` (B-39)
+
+```python
+from gauntlet.bisect import bisect
+from gauntlet.suite import load_suite
+
+suite = load_suite("examples/suites/cube_stack.yaml")
+result = bisect(
+    checkpoints=["v1-good", "v2", "v3", "v4-bad"],
+    resolver=lambda ckpt: lambda: load_my_policy(ckpt),
+    suite=suite,
+    target_cell_id=12,
+    episodes_per_step=64,
+)
+print(result.first_bad)         # e.g. "v3"
+for step in result.steps:
+    print(step.checkpoint, step.delta.delta_ci_high)
+```
+
+Binary-searches an ordered checkpoint list `[good, *intermediates,
+bad]` for the first checkpoint at which the named target cell's
+success rate dropped significantly below the known-good baseline. At
+each midpoint the engine runs the resolved policy on `suite`,
+filters episodes to `target_cell_id`, and consults
+`gauntlet.diff.paired.compute_paired_cells` for the paired CI. The
+collapse rule is one-sided: `delta_ci_high < 0` ⟹ midpoint
+significantly worse, move `hi = mid`. Episodes-per-cell can be
+overridden per step via `episodes_per_step` (defaults to
+`suite.episodes_per_cell`).
+
+`RunnerFactory` is the `Protocol` for the Runner constructor —
+defaults to the built-in `gauntlet.runner.Runner`, but downstream
+callers can wire a custom executor (subprocess pool, remote worker
+shim) by satisfying its single-method shape. `BisectError` (a
+`ValueError` subclass) signals bad inputs (target cell missing from
+the suite, fewer than 2 checkpoints) or the degenerate
+all-discordant-zero case. Each `BisectStep` row records the
+`checkpoint` queried, the resulting `PairedCellDelta`, and which
+search interval boundary moved. `BisectResult.first_bad` is the
+final answer; `result.steps` is the full audit trail. See
+`docs/backlog.md` B-39 for the anti-feature framing (no
+weight-interpolation, list-resolution-bound).
 
 ---
 
