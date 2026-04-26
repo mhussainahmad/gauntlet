@@ -661,6 +661,7 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = [
     "gauntlet.aggregate.schema",
+    "gauntlet.bisect.bisect",
     "gauntlet.diff.diff",
     "gauntlet.diff.paired",
     "gauntlet.monitor.schema",
