@@ -114,6 +114,34 @@ def build_sampler(mode: str, *, suite: Suite | None = None) -> Sampler:
             defence-in-depth for direct callers that bypass schema
             validation.
     """
+    builtin_modes = ("cartesian", "latin_hypercube", "sobol", "adversarial")
+
+    # Check for built-in / plugin collision BEFORE dispatching, so a
+    # third-party sampler that re-registers a built-in name surfaces
+    # the same RuntimeWarning the policy / env / axis registries emit.
+    # Identity collisions stay silent — gauntlet's own dogfooded
+    # ``cartesian`` entry point loads ``CartesianSampler`` itself.
+    from gauntlet.plugins import (
+        SAMPLER_ENTRY_POINT_GROUP,
+        discover_sampler_plugins,
+        warn_on_collision,
+    )
+
+    plugins = discover_sampler_plugins()
+    if mode in builtin_modes and mode in plugins:
+        # The plugin object the third party shipped vs the built-in
+        # class we resolve below. ``warn_on_collision`` is identity-
+        # based — same shape as the policy / env / axis registries —
+        # so the dogfooded ``cartesian = "..:CartesianSampler"`` entry
+        # point never warns.
+        warn_on_collision(
+            name=mode,
+            group=SAMPLER_ENTRY_POINT_GROUP,
+            builtin_obj=_builtin_sampler_class(mode),
+            plugin_obj=plugins[mode],
+            plugin_dist="<plugin>",
+        )
+
     if mode == "cartesian":
         return CartesianSampler()
     if mode == "latin_hypercube":
@@ -142,36 +170,38 @@ def build_sampler(mode: str, *, suite: Suite | None = None) -> Sampler:
             )
         return AdversarialSampler(load_pilot_report(suite.pilot_report))
     # Plugin fallthrough — third-party samplers registered under the
-    # ``gauntlet.samplers`` entry-point group. Built-ins above always
-    # win on identity collision (handled via ``warn_on_collision`` —
-    # but the four built-in modes are matched by string above before
-    # we ever look at plugins, so a plugin re-registering ``cartesian``
-    # never runs; the warning fires anyway via the built-in / plugin
-    # comparison below to keep the precedent visible).
-    from gauntlet.plugins import (
-        SAMPLER_ENTRY_POINT_GROUP,
-        discover_sampler_plugins,
-        warn_on_collision,
-    )
-
-    plugins = discover_sampler_plugins()
-    builtin_modes = ("cartesian", "latin_hypercube", "sobol", "adversarial")
+    # ``gauntlet.samplers`` entry-point group.
     if mode in plugins:
-        if mode in builtin_modes:
-            # Defence-in-depth: the early-return branches above should
-            # have handled this, but if a future refactor moves the
-            # dispatch order this keeps the warning visible.
-            warn_on_collision(  # pragma: no cover
-                name=mode,
-                group=SAMPLER_ENTRY_POINT_GROUP,
-                builtin_obj=object(),
-                plugin_obj=plugins[mode],
-                plugin_dist="<plugin>",
-            )
-        else:
-            return plugins[mode]()
+        return plugins[mode]()
     raise ValueError(
         f"unknown sampling mode {mode!r}; expected one of "
         f"{set(builtin_modes)} or a registered plugin "
         f"(installed plugins: {sorted(plugins)})",
     )
+
+
+def _builtin_sampler_class(mode: str) -> type[Sampler]:
+    """Return the class object backing built-in sampling ``mode``.
+
+    Identity-based collision detection in :func:`build_sampler` needs
+    to compare the third-party plugin's loaded class against the same
+    object the built-in dispatch will instantiate. Each branch lazy-
+    imports the matching class so this helper does NOT widen the
+    module's import cost — the same lazy-import discipline the main
+    dispatcher follows.
+    """
+    if mode == "cartesian":
+        return CartesianSampler
+    if mode == "latin_hypercube":
+        from gauntlet.suite.lhs import LatinHypercubeSampler
+
+        return LatinHypercubeSampler
+    if mode == "sobol":
+        from gauntlet.suite.sobol import SobolSampler
+
+        return SobolSampler
+    if mode == "adversarial":
+        from gauntlet.suite.adversarial import AdversarialSampler
+
+        return AdversarialSampler
+    raise ValueError(f"_builtin_sampler_class: not a built-in mode: {mode!r}")

@@ -276,6 +276,42 @@ def test_build_sampler_falls_through_to_plugin() -> None:
     with _patch_entry_points({SAMPLER_ENTRY_POINT_GROUP: eps}):
         sampler = build_sampler("my_sampler")
     assert isinstance(sampler, _FakePluginSampler)
+    # Iteration smoke — task spec asks for "a plugin sampler iterates".
+    # The fake emits a single all-zero cell; the contract is that the
+    # returned list satisfies SuiteCell so the runner can dispatch
+    # ``index`` / ``values`` without further introspection.
+    suite = Suite.model_validate(
+        {
+            "name": "tiny",
+            "env": "tabletop",
+            "episodes_per_cell": 1,
+            "axes": {
+                "lighting_intensity": AxisSpec.model_validate(
+                    {"low": 0.0, "high": 1.0, "steps": 1}
+                ).model_dump(),
+            },
+        }
+    )
+    cells = sampler.sample(suite, np.random.default_rng(0))
+    assert len(cells) == 1
+    assert cells[0].index == 0
+    assert set(cells[0].values) == {"lighting_intensity"}
+
+
+def test_build_sampler_builtin_wins_on_collision_with_warning() -> None:
+    """A plugin re-registering a built-in sampling mode warns and the
+    built-in is used. Mirrors the policies / envs / axes precedent so
+    samplers do not silently fall behind the rest of the registry."""
+    eps = [_FakeEntryPoint("cartesian", _FakePluginSampler, dist_name="rogue-pkg")]
+    with (
+        _patch_entry_points({SAMPLER_ENTRY_POINT_GROUP: eps}),
+        pytest.warns(RuntimeWarning, match=r"shadows the built-in 'cartesian'"),
+    ):
+        sampler = build_sampler("cartesian")
+    # Built-in CartesianSampler — NOT the rogue.
+    from gauntlet.suite.sampling import CartesianSampler
+
+    assert isinstance(sampler, CartesianSampler)
 
 
 def test_suite_schema_accepts_plugin_sampling_mode() -> None:
@@ -583,6 +619,39 @@ def test_every_discover_helper_warns_on_duplicate_name() -> None:
         ):
             result = helper()
         assert set(result) == {"dup"}
+
+
+def test_dogfood_axes_discovered_after_install() -> None:
+    """``[project.entry-points."gauntlet.axes"]`` registers gauntlet's
+    own torch-free axes. After ``uv pip install -e .`` they must
+    surface through :func:`discover_axis_plugins` — symmetric to the
+    policies / envs dogfood smoke tests in :mod:`tests.test_plugins`.
+    """
+    discover_axis_plugins.cache_clear()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        plugins = discover_axis_plugins()
+    assert {"lighting_intensity", "distractor_count"} <= set(plugins), (
+        f"Dogfood axis entry points missing — got {sorted(plugins)}. "
+        "Did you re-install after pyproject.toml changes? "
+        "Try: uv pip install -e ."
+    )
+
+
+def test_dogfood_samplers_discovered_after_install() -> None:
+    """The first-party ``cartesian`` sampler entry point must
+    materialise. LHS / Sobol / adversarial are NOT dogfooded (LHS /
+    Sobol could be added later; adversarial requires a non-zero-arg
+    constructor and is out of scope for the plugin contract)."""
+    discover_sampler_plugins.cache_clear()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        plugins = discover_sampler_plugins()
+    assert "cartesian" in plugins, (
+        f"Dogfood sampler entry point missing — got {sorted(plugins)}. "
+        "Did you re-install after pyproject.toml changes? "
+        "Try: uv pip install -e ."
+    )
 
 
 def test_every_discover_helper_caches_result() -> None:
