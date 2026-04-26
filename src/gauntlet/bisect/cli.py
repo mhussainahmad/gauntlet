@@ -45,18 +45,17 @@ from gauntlet.suite import load_suite
 __all__ = ["register"]
 
 
-def _resolver_factory(
-    spec_to_factory: Callable[[str], Callable[[], Policy]],
-) -> Callable[[str], Callable[[], Policy]]:
-    """Identity-wrap so callers can swap the policy-spec resolver in tests.
+def _default_resolver(spec: str) -> Callable[[], Policy]:
+    """Module-level dispatch to :func:`resolve_policy_factory`.
 
-    Production callers pass :func:`resolve_policy_factory` directly;
-    the indirection lives in the CLI module so tests can inject a
-    fake resolver via :func:`register` without monkey-patching the
-    policy registry. Returns the input unchanged -- the wrap is
-    purely a typing-narrowing seam.
+    Re-binding this function via :func:`unittest.mock.patch` (or
+    :func:`register`'s ``spec_to_factory`` override) is how tests
+    swap in a fake resolver. We dispatch through the module-level
+    name (rather than capturing :func:`resolve_policy_factory` in a
+    closure) so the patch site is the one the inner CLI body
+    actually consults at invocation time.
     """
-    return spec_to_factory
+    return resolve_policy_factory(spec)
 
 
 def _build_runner_factory(
@@ -139,7 +138,13 @@ def register(
             stub resolver that maps fake checkpoint ids to synthetic
             policies so the runner stays MuJoCo-free.
     """
-    resolver = _resolver_factory(spec_to_factory or resolve_policy_factory)
+    # Capture the explicit override (if any) at register time. When
+    # ``spec_to_factory is None`` we keep ``override`` as ``None`` and
+    # fall back to the module-level :func:`_default_resolver` at
+    # invocation time -- that indirection is what lets
+    # :func:`unittest.mock.patch` swap the resolver in tests without
+    # touching :func:`register`.
+    override = spec_to_factory
 
     @app.command("bisect")
     def bisect_cmd(
@@ -269,12 +274,17 @@ def register(
         intermediates = list(intermediate or [])
         ckpt_list = _resolve_ckpt_list(good, intermediates, bad)
 
-        # Per-checkpoint policy factory. Wrap the configured resolver so
-        # an unknown spec produces a clean BadParameter rather than a
-        # bare PolicySpecError leaking through to the user.
+        # Per-checkpoint policy factory. Resolve via the override
+        # captured at register time, falling back to
+        # :func:`_default_resolver` (which dispatches through the
+        # module-level :func:`resolve_policy_factory` import). Wrap
+        # so an unknown spec produces a clean BadParameter rather
+        # than a bare PolicySpecError leaking through.
+        active_resolver = override if override is not None else _default_resolver
+
         def policy_factory_resolver(spec: str) -> Callable[[], Policy]:
             try:
-                return resolver(spec)
+                return active_resolver(spec)
             except PolicySpecError as exc:
                 raise typer.BadParameter(f"checkpoint {spec!r}: {exc}") from exc
 
