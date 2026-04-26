@@ -539,12 +539,26 @@ class Suite(BaseModel):
     def _axes_nonempty_and_canonical(cls, v: dict[str, AxisSpec]) -> dict[str, AxisSpec]:
         if len(v) == 0:
             raise ValueError("axes: at least one axis must be defined")
+        # Built-ins are checked first; an unknown name then falls
+        # through to the third-party ``gauntlet.axes`` entry-point group
+        # so a plugin axis can be referenced from a suite YAML without
+        # touching the canonical AXIS_NAMES tuple. Lazy import — see
+        # ``gauntlet.policy.registry`` for the same cycle-avoidance
+        # rationale (the loader is on the YAML hot path).
         unknown = [name for name in v if name not in AXIS_NAMES]
         if unknown:
-            legal = ", ".join(AXIS_NAMES)
-            raise ValueError(
-                f"axes: unknown axis name(s) {unknown}; legal names are: {legal}",
-            )
+            from gauntlet.plugins import discover_axis_plugins
+
+            plugin_axes = set(discover_axis_plugins().keys())
+            still_unknown = [name for name in unknown if name not in plugin_axes]
+            if still_unknown:
+                legal = ", ".join(AXIS_NAMES)
+                plugin_legal = ", ".join(sorted(plugin_axes)) or "<none installed>"
+                raise ValueError(
+                    f"axes: unknown axis name(s) {still_unknown}; legal "
+                    f"built-in names are: {legal}; legal plugin names are: "
+                    f"{plugin_legal}",
+                )
         # B-32 — ``prior_mean`` / ``prior_std`` are only meaningful for
         # the ``initial_state_ood`` axis. Reject them on every other
         # axis so a confused YAML fails loudly instead of silently

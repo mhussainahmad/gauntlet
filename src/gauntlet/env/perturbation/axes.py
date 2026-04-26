@@ -541,14 +541,64 @@ _DEFAULT_CONSTRUCTORS: Final[dict[str, AxisCtor]] = {
 def axis_for(name: str) -> PerturbationAxis:
     """Build an axis with default bounds for the given canonical name.
 
+    Resolution order:
+
+    1. The first-party :data:`_DEFAULT_CONSTRUCTORS` table — built-ins
+       always win on collision (identity-based, same precedent as
+       :mod:`gauntlet.policy.registry` and :mod:`gauntlet.env.registry`).
+       A plugin shadowing a built-in name emits a :class:`RuntimeWarning`
+       and the built-in is returned.
+    2. The third-party :func:`gauntlet.plugins.discover_axis_plugins`
+       table (the ``gauntlet.axes`` ``[project.entry-points]`` group).
+       Each entry is a zero-arg callable returning a
+       :class:`PerturbationAxis`. The factory is invoked here; the
+       returned axis's :attr:`PerturbationAxis.name` MUST match
+       ``name`` — a mismatch is a packaging bug and surfaces as a
+       :class:`ValueError` the user can act on.
+
     Raises:
-        ValueError: if ``name`` is not one of the registered axis names.
+        ValueError: if ``name`` is not one of the registered built-ins
+            or successfully-loaded plugin axis names, or if a plugin
+            factory returns an axis whose ``.name`` differs from
+            ``name``.
     """
-    try:
-        ctor = _DEFAULT_CONSTRUCTORS[name]
-    except KeyError as exc:
-        raise ValueError(f"unknown perturbation axis name: {name!r}") from exc
-    return ctor()
+    builtin = _DEFAULT_CONSTRUCTORS.get(name)
+    # Lazy import — avoids a cycle (``gauntlet.plugins`` imports the
+    # axis Protocol from ``perturbation.base``) and keeps the
+    # built-ins-only fast path free of importlib.metadata cost.
+    from gauntlet.plugins import (
+        AXIS_ENTRY_POINT_GROUP,
+        discover_axis_plugins,
+        warn_on_collision,
+    )
+
+    plugins = discover_axis_plugins()
+    if builtin is not None:
+        plugin_ctor = plugins.get(name)
+        if plugin_ctor is not None:
+            warn_on_collision(
+                name=name,
+                group=AXIS_ENTRY_POINT_GROUP,
+                builtin_obj=builtin,
+                plugin_obj=plugin_ctor,
+                plugin_dist="<plugin>",
+            )
+        return builtin()
+    plugin_ctor = plugins.get(name)
+    if plugin_ctor is not None:
+        axis = plugin_ctor()
+        if axis.name != name:
+            raise ValueError(
+                f"axis plugin {name!r} returned a PerturbationAxis whose "
+                f"name {axis.name!r} differs from the registered entry-"
+                f"point key {name!r}; this is a packaging bug in the "
+                f"plugin distribution."
+            )
+        return axis
+    available = sorted({*_DEFAULT_CONSTRUCTORS, *plugins})
+    raise ValueError(
+        f"unknown perturbation axis name: {name!r}; available (built-ins + plugins): {available}",
+    )
 
 
 # ----- internals -------------------------------------------------------------
