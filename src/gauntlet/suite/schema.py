@@ -485,7 +485,13 @@ class Suite(BaseModel):
     axes: dict[str, AxisSpec]
     # See ``docs/polish-exploration-lhs-sampling.md``. Default preserves
     # the historical Cartesian-grid enumeration for every existing YAML.
-    sampling: SamplingMode = "cartesian"
+    # Field type intentionally widened from :data:`SamplingMode` to
+    # plain ``str`` so third-party samplers registered under the
+    # ``gauntlet.samplers`` ``[project.entry-points]`` group can be
+    # named here without touching the literal. Built-in modes still
+    # win on identity collision; the field-level validator below
+    # enforces the resolved-name set (built-ins plus plugins).
+    sampling: str = "cartesian"
     # Required for ``sampling != "cartesian"`` and forbidden for
     # ``sampling == "cartesian"`` — enforced by ``_check_sampling_inputs``
     # below. Sample budget for LHS / Sobol / adversarial; ignored
@@ -601,6 +607,27 @@ class Suite(BaseModel):
                     "'camera_extrinsics' (B-42) axis",
                 )
         return v
+
+    @field_validator("sampling")
+    @classmethod
+    def _sampling_known(cls, v: str) -> str:
+        # Built-in modes are always valid; unknown names fall through
+        # to the ``gauntlet.samplers`` plugin registry. Lazy import —
+        # keeps the schema cheap on the cartesian/LHS/Sobol common
+        # path. Mirrors the axes-validator pattern.
+        if v in SAMPLING_MODES:
+            return v
+        from gauntlet.plugins import discover_sampler_plugins
+
+        plugin_modes = discover_sampler_plugins()
+        if v in plugin_modes:
+            return v
+        legal = ", ".join(SAMPLING_MODES)
+        plugin_legal = ", ".join(sorted(plugin_modes)) or "<none installed>"
+        raise ValueError(
+            f"sampling: unknown sampling mode {v!r}; legal built-in "
+            f"modes are: {legal}; legal plugin modes are: {plugin_legal}"
+        )
 
     @field_validator("n_samples")
     @classmethod

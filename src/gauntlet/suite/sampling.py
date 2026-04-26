@@ -141,7 +141,37 @@ def build_sampler(mode: str, *, suite: Suite | None = None) -> Sampler:
                 "model_validate?",
             )
         return AdversarialSampler(load_pilot_report(suite.pilot_report))
+    # Plugin fallthrough — third-party samplers registered under the
+    # ``gauntlet.samplers`` entry-point group. Built-ins above always
+    # win on identity collision (handled via ``warn_on_collision`` —
+    # but the four built-in modes are matched by string above before
+    # we ever look at plugins, so a plugin re-registering ``cartesian``
+    # never runs; the warning fires anyway via the built-in / plugin
+    # comparison below to keep the precedent visible).
+    from gauntlet.plugins import (
+        SAMPLER_ENTRY_POINT_GROUP,
+        discover_sampler_plugins,
+        warn_on_collision,
+    )
+
+    plugins = discover_sampler_plugins()
+    builtin_modes = ("cartesian", "latin_hypercube", "sobol", "adversarial")
+    if mode in plugins:
+        if mode in builtin_modes:
+            # Defence-in-depth: the early-return branches above should
+            # have handled this, but if a future refactor moves the
+            # dispatch order this keeps the warning visible.
+            warn_on_collision(  # pragma: no cover
+                name=mode,
+                group=SAMPLER_ENTRY_POINT_GROUP,
+                builtin_obj=object(),
+                plugin_obj=plugins[mode],
+                plugin_dist="<plugin>",
+            )
+        else:
+            return plugins[mode]()
     raise ValueError(
         f"unknown sampling mode {mode!r}; expected one of "
-        "{'cartesian', 'latin_hypercube', 'sobol', 'adversarial'}",
+        f"{set(builtin_modes)} or a registered plugin "
+        f"(installed plugins: {sorted(plugins)})",
     )
