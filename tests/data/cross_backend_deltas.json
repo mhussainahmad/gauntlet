@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "doc": "Cross-backend determinism waiver list — Phase 2.5 Task 17. Each pair of backends (A, B) declares the maximum absolute per-key delta their state-only observation may exhibit at the same seed and the same canned action sequence, plus a one-line rationale. The cross_backend_allowed_delta test compares against this; a new delta means an entry must be added (or the bound widened with a justification) before the gate goes green. Pair keys are formatted '<lo>__<hi>' with backend names sorted ascending so each pair has exactly one canonical key.",
+  "schema": {
+    "max_abs_delta_per_key": "dict mapping each obs key (cube_pos, cube_quat, ee_pos, gripper, target_pos) to the max absolute float delta the test may observe across the two backends. Missing key means '0.0' (gated as bit-identical).",
+    "rationale": "human-readable single sentence; cite the RFC or upstream solver-version note when possible."
+  },
+  "pairs": {
+    "mujoco__pybullet": {
+      "max_abs_delta_per_key": {
+        "cube_pos": 1e-06,
+        "cube_quat": 1e-06,
+        "ee_pos": 0.0,
+        "gripper": 0.0,
+        "target_pos": 0.0
+      },
+      "rationale": "MuJoCo and PyBullet differ at solver-tolerance level on free-body cube_pos / cube_quat after the same seed (RFC-005 §4); ee_pos / gripper / target_pos are deterministic in both backends and gated as byte-identical."
+    },
+    "genesis__mujoco": {
+      "max_abs_delta_per_key": {
+        "cube_pos": 1e-06,
+        "cube_quat": 1e-06,
+        "ee_pos": 0.0,
+        "gripper": 0.0,
+        "target_pos": 0.0
+      },
+      "rationale": "Genesis state-only first cut (RFC-007 §3) ships a different solver default than MuJoCo; cube_pos / cube_quat agree to solver tolerance, the rest are deterministic mocap fields and gated as byte-identical."
+    },
+    "isaac__mujoco": {
+      "max_abs_delta_per_key": {
+        "cube_pos": 1e-06,
+        "cube_quat": 1e-06,
+        "ee_pos": 0.0,
+        "gripper": 0.0,
+        "target_pos": 0.0
+      },
+      "rationale": "Isaac Sim adapter is exercised under a sys.modules fake (RFC-009 §8) in the default test job; the published bound matches the MuJoCo<->PyBullet pair pending real-Kit gating."
+    },
+    "genesis__pybullet": {
+      "max_abs_delta_per_key": {
+        "cube_pos": 2e-06,
+        "cube_quat": 2e-06,
+        "ee_pos": 0.0,
+        "gripper": 0.0,
+        "target_pos": 0.0
+      },
+      "rationale": "Two non-reference solvers compared via the triangle inequality (mujoco<->pybullet + mujoco<->genesis); 2e-6 is the additive bound."
+    },
+    "isaac__pybullet": {
+      "max_abs_delta_per_key": {
+        "cube_pos": 2e-06,
+        "cube_quat": 2e-06,
+        "ee_pos": 0.0,
+        "gripper": 0.0,
+        "target_pos": 0.0
+      },
+      "rationale": "Triangle-inequality bound vs the MuJoCo reference; refresh once both extras run together in CI."
+    },
+    "genesis__isaac": {
+      "max_abs_delta_per_key": {
+        "cube_pos": 2e-06,
+        "cube_quat": 2e-06,
+        "ee_pos": 0.0,
+        "gripper": 0.0,
+        "target_pos": 0.0
+      },
+      "rationale": "Triangle-inequality bound vs the MuJoCo reference; refresh once both extras run together in CI."
+    }
+  }
+}
