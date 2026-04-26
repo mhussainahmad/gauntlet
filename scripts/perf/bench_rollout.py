@@ -180,6 +180,13 @@ def main(
     runner_wall_seconds: float = 0.0
     try:
         runner_start = time.perf_counter()
+        # NOTE: lambda is safe ONLY because n_workers=1 (the in-process
+        # fast path skips the pickle round-trip). If this script is ever
+        # extended to expose --workers as a CLI flag, switch to
+        # ``functools.partial(RandomPolicy, action_dim=..., seed=...)``
+        # so the spawn pool can pickle the factory across the process
+        # boundary; see scripts/perf/bench_runner_scaling.py for the
+        # canonical pattern.
         results = runner.run(
             policy_factory=lambda: RandomPolicy(action_dim=_TABLETOP_ACTION_DIM, seed=seed),
             suite=suite,
