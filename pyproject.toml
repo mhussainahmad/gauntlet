@@ -819,6 +819,7 @@ markers = [
     "mlflow: tests that require the [mlflow] extra (mlflow>=2.10) for the optional MLflow mirror sink (B-27)",
     "render: tests that exercise the offscreen mujoco GL renderer and need a working EGL/OSMesa stack; deselected by default CI runners where mujoco.Renderer aborts at the C level (no DISPLAY, no GPU)",
     "slow: tests deselected from the default pytest run because they spawn subprocesses or do real work that takes several seconds; opt in with `-m slow`. Used by tests/test_bench_smoke.py to exercise the Phase 2.5 T12 scripts/perf/bench_*.py CLIs end-to-end on tiny budgets",
+    "hypothesis_property: hypothesis-driven property/fuzz tests added under Phase 2.5 T13 (perturbation axis bounds, action clipping, observation NaN/Inf detection, reset-after-step ordering). Opt-in via `-m hypothesis_property` for a focused run; the default profile uses max_examples=200 and deadline=None, the `ci` profile (loaded automatically when GAUNTLET_HYPOTHESIS_PROFILE=ci) lowers max_examples to 50 to keep CI wall-time bounded",
 ]
 
 [tool.coverage.run]
