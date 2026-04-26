@@ -14,6 +14,18 @@ This module is the dispatch layer behind :attr:`Suite.sampling`:
   sampling bandit over the perturbation hypercube, conditioned on a
   pilot run's :class:`gauntlet.report.schema.Report`. Biases coverage
   toward high-failure bins; do not use for benchmark reporting.
+* ``"worst_case_continuous"`` —
+  :class:`gauntlet.suite.worst_case.WorstCaseContinuousSampler` (B-44).
+  Eva-VLA-inspired (arXiv 2509.18953) gradient-free differential-
+  evolution search over the continuous-axis bounding box. Distinct
+  from ``"adversarial"`` (B-07) which is a *discrete* Thompson-
+  sampling bandit over the existing axis grid; B-44 is *continuous*
+  DE over the underlying physical parameters. The Sampler-protocol
+  ``sample()`` method intentionally raises — worst-case search needs
+  online per-candidate feedback, so callers invoke
+  :meth:`WorstCaseContinuousSampler.optimize` directly with a live
+  objective. Anti-feature: always report worst-case alongside the
+  unbiased baseline.
 
 The :class:`Sampler` protocol is intentionally minimal: ``sample(suite,
 rng)`` returns a list of :class:`SuiteCell` records. The Runner is
@@ -114,7 +126,13 @@ def build_sampler(mode: str, *, suite: Suite | None = None) -> Sampler:
             defence-in-depth for direct callers that bypass schema
             validation.
     """
-    builtin_modes = ("cartesian", "latin_hypercube", "sobol", "adversarial")
+    builtin_modes = (
+        "cartesian",
+        "latin_hypercube",
+        "sobol",
+        "adversarial",
+        "worst_case_continuous",
+    )
 
     # Check for built-in / plugin collision BEFORE dispatching, so a
     # third-party sampler that re-registers a built-in name surfaces
@@ -169,6 +187,15 @@ def build_sampler(mode: str, *, suite: Suite | None = None) -> Sampler:
                 "model_validate?",
             )
         return AdversarialSampler(load_pilot_report(suite.pilot_report))
+    if mode == "worst_case_continuous":
+        # B-44 — same lazy-import rationale. The sampler's ``.sample()``
+        # is intentionally a hard error (worst-case search needs online
+        # feedback); ``build_sampler`` still returns a working object so
+        # the dispatch table stays uniform and callers that go through
+        # ``WorstCaseContinuousSampler.optimize`` get the right type.
+        from gauntlet.suite.worst_case import WorstCaseContinuousSampler
+
+        return WorstCaseContinuousSampler()
     # Plugin fallthrough — third-party samplers registered under the
     # ``gauntlet.samplers`` entry-point group.
     if mode in plugins:
@@ -204,4 +231,8 @@ def _builtin_sampler_class(mode: str) -> type[Sampler]:
         from gauntlet.suite.adversarial import AdversarialSampler
 
         return AdversarialSampler
+    if mode == "worst_case_continuous":
+        from gauntlet.suite.worst_case import WorstCaseContinuousSampler
+
+        return WorstCaseContinuousSampler
     raise ValueError(f"_builtin_sampler_class: not a built-in mode: {mode!r}")
