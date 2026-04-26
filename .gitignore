@@ -32,6 +32,11 @@ out/
 results/
 *.results.json
 
+# Phase 2.5 T12 performance-benchmark sidecars. The scripts under
+# scripts/perf/bench_*.py default to writing under benchmarks/*.json;
+# the scripts and the docs are checked in, the actual numbers are not.
+benchmarks/*.json
+
 # Drift-detector artefacts (trajectory dumps, AE weights).
 # Test runs produce these under tmp paths but also land in ad-hoc local
 # directories when users follow the quickstart; never commit them.
