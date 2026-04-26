@@ -16,7 +16,6 @@ Suggested ordering for the next continuous-polish loop (smallest, highest-rigour
 4. **B-43** Color / saturation visual-bias axis — S, backend-agnostic post-render, complements B-31.
 5. **B-37** Inference-latency / wall-clock budget tracking — S, fills the `runner/` gap VLA-Perf flagged.
 6. **B-38** Inference-delay jitter perturbation axis — S, builds on B-37; tests RTC-style real-time chunking.
-7. **B-39** Cross-checkpoint regression bisection (`gauntlet bisect`) — M, git-bisect for policy regressions.
 
 After those S-class items the medium items become viable in pairs.
 
@@ -242,12 +241,8 @@ After those S-class items the medium items become viable in pairs.
 - **Disjoint with:** New axis class in `env/perturbation/axes.py`, hook in the runner's act-call path. Backend-agnostic (operates on the policy interface, not the sim).
 - **Anti-feature?** Sleep-based delay is a sim of a sim — real-world inference delay co-occurs with thermal throttling, batch-pipeline contention, and network jitter that a flat `time.sleep` doesn't model. Useful as a coarse axis, dishonest as an exact predictor.
 
-### B-39: Cross-checkpoint regression bisection (`gauntlet bisect`)
-- **What:** New CLI `gauntlet bisect --good <ckpt-a> --bad <ckpt-b> --suite <suite.yaml> --target-cell <cell-id>` that, given two policy checkpoints and a single failing cell, binary-searches the intermediate checkpoints (linearly interpolating weights for compatible architectures, or sampling user-provided checkpoint paths) to find the first regression. Re-uses the paired-CRN engine from B-08 so the bisect signal is variance-reduced.
-- **Why:** WorldEval (arxiv 2505.19017) and AutoEval (arxiv 2503.24278) both establish that automated per-checkpoint ranking is feasible and useful; the engineering extension — git-bisect for policy training runs — is the natural CLI manifestation but is not shipped by either. Direct fit for the "what changed?" question every fleet operator asks. Re-uses the paired-comparison machinery already in `diff/paired.py`.
-- **Scope:** M
-- **Disjoint with:** New `bisect/` module, new CLI subcommand, depends on B-08 (paired CRN) for variance reduction. Conflicts mildly with B-26 (early-stop pruning) since bisect needs a full deterministic cell-level result.
-- **Anti-feature?** Weight interpolation only makes sense for same-architecture LoRA-style fine-tunes; for the general case the user must supply intermediate checkpoint paths, which means they need to have saved them, which most training runs don't. Falls back gracefully to "linear-search the user's provided list" but loses its bisect-y appeal.
+### B-39: Cross-checkpoint regression bisection (`gauntlet bisect`) — Shipped 2026-04-26
+- **Status:** Shipped 2026-04-26. New `gauntlet.bisect` package + `gauntlet bisect` Typer subcommand. Binary-searches an ordered checkpoint list `[good, *intermediates, bad]` against a single target cell, paired against the cached good baseline via the B-08 `compute_paired_cells` engine. Decision rule collapses the search interval whenever the target cell's Newcombe / Tango paired-CI upper bound falls strictly below zero. Anti-feature framing preserved verbatim: no weight-space interpolation; the user supplies discrete checkpoint ids and a resolver (any `--policy` spec) that knows how to load each one.
 
 ### B-40: Suite-level provenance hash + result cache key
 - **What:** Extend `runner/provenance.py` so each Suite emits a deterministic 16-char hash of `(suite YAML AST, axis values sorted, episodes_per_cell, gauntlet version, env asset SHAs)`. Use this hash as the on-disk cache key in `runner/cache.py`. New CLI `gauntlet suite hash <suite.yaml>` prints it. Two suites with identical semantics produce identical hashes regardless of YAML key ordering.
