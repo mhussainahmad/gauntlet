@@ -964,6 +964,11 @@ from gauntlet.realsim import (
     IngestionError, SceneIOError,
     RealSimRenderer, RendererFactory, RendererRegistryError,
     register_renderer, get_renderer, list_renderers,
+    # Phase 3 T18 — raw capture-dir input pipeline.
+    RealSceneInput, RealSceneInputError,
+    INTRINSICS_REQUIRED_KEYS,
+    load_real_scene, validate_scene_input,
+    scene_to_camera_extrinsics, RendererNotImplementedError,
 )
 ```
 
@@ -1002,6 +1007,74 @@ RGB). The first concrete implementation (gaussian splatting) is
 deferred. The registry is module-local, not part of
 `gauntlet.plugins`, until a concrete renderer ships and a follow-up
 RFC promotes it.
+
+### `RealSceneInput` + `load_real_scene` (Phase 3 T18 raw capture-dir parse)
+
+```python
+from gauntlet.realsim import (
+    RealSceneInput, RealSceneInputError,
+    INTRINSICS_REQUIRED_KEYS,
+    load_real_scene, validate_scene_input,
+)
+
+scene = load_real_scene("captures/robot42-log7/")
+warnings = validate_scene_input(scene)
+for w in warnings:
+    print("warn:", w)
+```
+
+`RealSceneInput` is the **raw** parse of a structured COLMAP / Polycam
+/ NeRFStudio export — frozen dataclass with flat `intrinsics: dict[str,
+float]`, `extrinsics_per_frame: list[np.ndarray]` (4x4 row-major
+camera-to-world poses), optional `depth_maps` / `point_cloud` sidecar
+paths, and freeform `metadata`. Sits one layer below the curated
+`Scene` artefact: `Scene` is what a renderer wants, `RealSceneInput` is
+what a capture pipeline emits. `INTRINSICS_REQUIRED_KEYS` is the
+frozenset of pinhole intrinsics keys (`fx`, `fy`, `cx`, `cy`, `width`,
+`height`) `load_real_scene` demands; distortion coefficients are
+optional. `RealSceneInputError` (a `ValueError` subclass) is raised on
+hard parse failures (missing required file, JSON-decode failure,
+schema-shape violation, traversal attempt). Soft validation findings —
+partial distortion, single-frame extrinsics, depth-map files declared
+but missing on disk, etc. — are returned by `validate_scene_input` as a
+list of warning strings (empty list = clean). Every path-typed JSON
+field flows through `gauntlet.security.safe_join`. `RealSceneInput` is
+`frozen=True` and serialises via `to_dict()`, *not* `dataclasses.asdict`
+(which leaves `np.ndarray` verbatim). See `docs/realsim.md` for the
+on-disk capture-dir layout and the COLMAP / Polycam conversion notes.
+
+### `scene_to_camera_extrinsics` (B-42 axis bridge)
+
+```python
+from gauntlet.realsim import scene_to_camera_extrinsics
+
+values = scene_to_camera_extrinsics(scene, n_samples=16)
+# values is a list[ {"translation": [..], "rotation": [..]} ]
+# matching gauntlet.suite.schema.ExtrinsicsValue.
+```
+
+Converts a `RealSceneInput` into a `camera_extrinsics`-axis values
+list (B-42 — see `docs/api.md` "Perturbation axes"). Translation is
+the homogeneous translation column of each 4x4 pose in metres;
+rotation is the XYZ-Euler decomposition (radians, MuJoCo / PyBullet
+convention) of the rotation sub-block. Sub-samples to `n_samples`
+evenly-spaced frames when the capture has more, returns one entry
+per frame when it has fewer. Output shape is exactly
+`gauntlet.suite.schema.ExtrinsicsValue`, so a suite YAML's
+`extrinsics_values:` block can ingest the result verbatim.
+
+### `RendererNotImplementedError` (future seam)
+
+T18 ships the **input pipeline only**. The gaussian-splatting / NeRF
+/ mesh renderer that consumes a `RealSceneInput` to paint pixels is
+deferred to a future PR. `RendererNotImplementedError` (subclasses
+`NotImplementedError`) is the explicit named seam: any future helper
+that pretends to render must raise it until the renderer lands. A
+meta-test
+(`tests/test_realsim_scene_to_axis.py::test_no_accidental_renderer_landed`)
+walks `gauntlet.realsim.__all__` on every CI run and fails if a
+public symbol accidentally grows a working `render` method other
+than the `RealSimRenderer` Protocol declaration.
 
 ---
 
