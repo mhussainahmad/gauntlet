@@ -29,6 +29,7 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 
+from gauntlet.report import Report, build_report, render_html
 from gauntlet.report.trajectory_taxonomy import (
     TaxonomyError,
     TaxonomyResult,
@@ -418,3 +419,77 @@ def test_dtw_path_clusters_three_families(tmp_path: Path) -> None:
         distance="dtw",
     )
     assert len(result.clusters) == 3
+
+
+# ── HTML render integration ───────────────────────────────────────────
+
+
+def _build_minimal_report(episodes: list[Episode]) -> Report:
+    """Build a :class:`Report` from a list of :class:`Episode`."""
+    return build_report(episodes)
+
+
+def test_render_html_without_trajectory_dir_omits_taxonomy_section(tmp_path: Path) -> None:
+    """Default `render_html(report)` (no second arg) renders no taxonomy section.
+
+    Backward-compat contract: existing callers see no taxonomy
+    section at all (it is absent entirely).
+    """
+    episodes = _seed_dataset(tmp_path, n_per_family=2)
+    report = _build_minimal_report(episodes)
+    html = render_html(report)
+    assert "Failure-mode taxonomy" not in html
+    assert "Failure-Mode Taxonomy" not in html
+
+
+def test_render_html_with_trajectory_dir_renders_taxonomy_table(tmp_path: Path) -> None:
+    """When `trajectory_dir` + `episodes` are passed, the taxonomy table renders.
+
+    The exemplar episode id (a `cell_NNNN_ep_NNNN` string) appears in
+    the output — confirming the medoid-by-id labelling reached the
+    rendered HTML.
+    """
+    import re
+
+    episodes = _seed_dataset(tmp_path, n_per_family=3)
+    report = _build_minimal_report(episodes)
+    html = render_html(report, trajectory_dir=tmp_path, episodes=episodes)
+    assert "Failure-mode taxonomy" in html
+    # All exemplar ids follow the `cell_NNNN_ep_NNNN` pattern; at
+    # least one such id must appear in the rendered HTML.
+    assert re.search(r"cell_\d{4}_ep_\d{4}", html), (
+        "expected at least one cell_NNNN_ep_NNNN exemplar id in HTML"
+    )
+
+
+def test_render_html_missing_trajectory_dir_renders_unavailable_notice(tmp_path: Path) -> None:
+    """A missing trajectory dir collapses to the one-line notice.
+
+    Per the B-17 spec: "if no trajectories were dumped, render a one-
+    line 'Trajectory taxonomy unavailable — re-run with `--trajectory-
+    dir`' notice rather than crashing."
+    """
+    missing = tmp_path / "no-such-dir"
+    # No NPZs anywhere; report has at least one failed episode.
+    episodes = [
+        _ep(cell_index=0, episode_index=0, success=False),
+        _ep(cell_index=0, episode_index=1, success=True),
+    ]
+    report = _build_minimal_report(episodes)
+    html = render_html(report, trajectory_dir=missing, episodes=episodes)
+    assert "Trajectory taxonomy unavailable" in html
+    assert "--trajectory-dir" in html
+    # Notice path: NO table column headers from the taxonomy table.
+    assert "Mean Intra-Cluster Distance" not in html
+
+
+def test_render_html_no_failures_renders_unavailable_notice(tmp_path: Path) -> None:
+    """All-success run with a trajectory_dir falls back to the notice."""
+    rng = np.random.default_rng(0)
+    actions = _shape_a(rng)
+    _write_npz(tmp_path, cell_index=0, episode_index=0, actions=actions)
+    episodes = [_ep(cell_index=0, episode_index=0, success=True)]
+    report = _build_minimal_report(episodes)
+    html = render_html(report, trajectory_dir=tmp_path, episodes=episodes)
+    assert "Trajectory taxonomy unavailable" in html
+    assert "no failures to cluster" in html.lower()
