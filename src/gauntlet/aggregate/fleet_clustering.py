@@ -231,10 +231,10 @@ class _SignatureKey:
 
     def to_payload(self) -> dict[str, _JsonValue]:
         """Render to a JSON-friendly dict for the cluster representative."""
-        axes_payload: dict[str, _JsonValue] = {name: value for name, value in self.axes}
-        behav_payload: dict[str, _JsonValue] = {
-            name: value for name, value in zip(_BEHAVIOURAL_FIELDS, self.behavioural, strict=True)
-        }
+        axes_payload: dict[str, _JsonValue] = dict(self.axes)
+        behav_payload: dict[str, _JsonValue] = dict(
+            zip(_BEHAVIOURAL_FIELDS, self.behavioural, strict=True),
+        )
         return {
             "axes": axes_payload,
             "wilson_lower_bound": self.wilson_lower,
