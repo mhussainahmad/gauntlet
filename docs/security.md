@@ -30,11 +30,54 @@ existing behaviour, they do not add new defences.
 
 | Class | OWASP / CWE | Test module | Safe because |
 |-------|-------------|-------------|--------------|
-| Unsafe YAML deserialisation | CVE-2017-18342 class | `tests/test_security_yaml.py` | `gauntlet.suite.loader` uses `yaml.safe_load`, which rejects `!!python/object/apply`, `!!python/object/new`, and `!!python/name`. |
+| Unsafe YAML deserialisation | CVE-2017-18342 class | `tests/test_security_yaml.py`, `tests/test_security_yaml_guard.py` | Every YAML read in `src/gauntlet` flows through `gauntlet.security.safe_yaml_load`, a thin wrapper around `yaml.safe_load`. The grep gate in `tests/test_security_yaml_guard.py::test_no_unsafe_yaml_load_in_src` asserts no `yaml.load(` occurrence (without `safe_`) appears under `src/gauntlet` outside the wrapper module — closing the door on a future refactor that re-introduces the unsafe loader. |
+| Path traversal at sink boundaries | OWASP A01 / CWE-22 | `tests/test_security_paths.py` | The CLI section pins typer-boundary behaviour for traversal-shaped inputs (`../etc/passwd`, NUL injection, symlink escape) — every subcommand surfaces a clean `typer.Exit(1)`. The helper section pins `gauntlet.security.safe_join`, which resolves `base + parts` and rejects parent-traversal, absolute-path injection, and (in `follow_symlinks=False` mode) symlink escape. `safe_join` is wired into `gauntlet.runner.parquet.parquet_path_for` as defence-in-depth; on every legitimate input the result equals the bare `/`-join, but a future refactor that threads a user-controlled string into the filename cannot bypass the check without a visible diff. |
 | HTML XSS in report | OWASP A03 / CWE-79 | `tests/test_security_html_report.py` | `gauntlet.report.html` builds its Jinja env with `select_autoescape(("html","xml","jinja"))` and the template is `report.html.jinja`. Every user-controlled interpolation (`suite_name`, axis names, cluster keys) is HTML-escaped. The embedded `<script id="report-data">` JSON block uses `|tojson` which escapes `</script>` as `<\/script>`. |
-| CLI path traversal / NUL injection | OWASP A01 / CWE-22 | `tests/test_security_paths.py` | All CLI subcommands gate file inputs through `Path.is_file()` before any open attempt and surface failures as clean `typer.Exit(1)`. Traversal-shaped paths fail with `not found` or with `yaml.YAMLError` / `ValidationError`; no payload is ever silently accepted as a valid suite. |
 | Override-string command injection | OWASP A03 / CWE-78 | `tests/test_security_overrides.py` | `gauntlet.replay.parse_override` is pure string slicing + `float()`. There is no shell invocation, `eval`, or template expansion. The test sniffs `sys.modules` to catch a future refactor that lazily imports `subprocess`. |
 | Multiprocessing fork-time state inheritance | n/a | `tests/test_security_pickle.py` | `gauntlet.runner.runner.Runner` raises `ValueError` for any `start_method` except `"spawn"` (runner.py:135-141). Every worker starts with a fresh interpreter and no inherited mutable globals. |
+
+## Centralised helpers (`gauntlet.security`)
+
+Phase 2.5 Task 16 collected the input-boundary helpers under one
+package so the audit surface is one ripgrep away:
+
+* `gauntlet.security.safe_join(base, *parts, follow_symlinks=True)` —
+  sandboxed path join. Raises `PathTraversalError` (a `ValueError`
+  subclass) on `..` escape, absolute-path injection, or — when
+  `follow_symlinks=False` — a symlink whose target leaves `base`.
+  Use at boundaries where a filename component is joined under a
+  trusted root.
+* `gauntlet.security.safe_yaml_load(stream)` — canonical YAML entry
+  point. Thin alias of `yaml.safe_load`; exception envelope is
+  unchanged. The CI grep gate asserts no `yaml.load(` (without
+  `safe_`) occurrence appears under `src/gauntlet` outside this
+  wrapper.
+* `gauntlet.security.PathTraversalError`,
+  `gauntlet.security.YamlSecurityError` — `ValueError` subclasses
+  reserved for the helpers above. `YamlSecurityError` is forward-
+  compatible (the current wrapper does not raise it; a strict-mode
+  policy layered later would).
+
+### Boundaries intentionally NOT hardened
+
+The honest scope of `safe_join`. These boundaries accept cross-dir
+or arbitrary user-supplied paths by design; sandboxing them would
+regress legitimate use:
+
+* `gauntlet.suite.loader._resolve_and_check_pilot_report` — pilot-
+  report paths are intentionally resolved relative to the suite YAML's
+  parent and may legitimately reference a sibling directory (`../
+  pilots/foo.json`).
+* `Runner.trajectory_dir` / `Runner.video_dir` / `Runner.cache_dir` —
+  user-supplied output roots. The user is the trust root; there is
+  no base to sandbox against.
+* `gauntlet.plugins` entry-point discovery — relies on the package-
+  resource path materialised by `importlib.metadata`. The plugin
+  contract trusts the resolved entry-point target.
+
+If a future audit decides any of these should be hardened, the change
+should land as a follow-up task with an `xfail(strict=True, reason=
+"follow-up")` regression test added here first.
 
 ## Known follow-up gaps
 

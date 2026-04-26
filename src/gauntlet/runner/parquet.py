@@ -50,6 +50,8 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
+from gauntlet.security import safe_join
+
 __all__ = ["TrajectoryDict", "parquet_path_for", "write_parquet"]
 
 
@@ -88,8 +90,28 @@ def parquet_path_for(trajectory_dir: Path, cell_index: int, episode_index: int) 
     apart from the ``.parquet`` suffix — so a side-by-side ``npz`` /
     ``parquet`` directory layout pairs up by basename and a DuckDB /
     pandas glob is deterministic across reruns.
+
+    Phase 2.5 Task 16 — the path is asserted to live under
+    ``trajectory_dir`` via :func:`gauntlet.security.safe_join`. The
+    filename component is built from ``int`` inputs only (the
+    format-string ``cell_{:04d}_ep_{:04d}.parquet`` cannot escape
+    ``trajectory_dir`` by construction), so on every legitimate input
+    ``safe_join`` returns the same path the bare ``/`` operator would.
+    The check exists so a future refactor that threads a user-
+    controlled string into the filename cannot bypass the sandbox
+    without removing the helper call — that diff would be visible in
+    code review. We discard the resolved form and return the original
+    ``trajectory_dir / filename`` shape to keep the contract identical
+    to the pre-T16 behaviour (relative-in, relative-out preserves
+    backwards compatibility for callers that compare with
+    ``.glob('*.parquet')`` results).
     """
-    return trajectory_dir / f"cell_{cell_index:04d}_ep_{episode_index:04d}.parquet"
+    filename = f"cell_{cell_index:04d}_ep_{episode_index:04d}.parquet"
+    # Defence-in-depth check; raises PathTraversalError if the filename
+    # ever escapes ``trajectory_dir`` (cannot happen with the current
+    # int-only format string, but is a guard against future regressions).
+    safe_join(trajectory_dir, filename)
+    return trajectory_dir / filename
 
 
 def write_parquet(path: Path, trajectory: TrajectoryDict) -> Path:

@@ -771,6 +771,9 @@ module = [
     "gauntlet.runner.sinks",
     # ``yaml.safe_load`` returns ``Any`` (yaml stubs do not narrow).
     "gauntlet.suite.loader",
+    # Phase 2.5 Task 16 — canonical YAML wrapper. Forwards ``Any`` from
+    # ``yaml.safe_load``; same FFI carve-out as ``gauntlet.suite.loader``.
+    "gauntlet.security.yaml_guard",
     # External calibration-JSON ingest — ``json.loads`` of a user-
     # authored manifest. Same shape as ``suite.loader`` (FFI to disk).
     "gauntlet.realsim.pipeline",
