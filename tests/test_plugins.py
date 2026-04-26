@@ -306,13 +306,30 @@ def test_warn_on_collision_warns_when_objects_differ() -> None:
 
 
 def test_module_public_surface() -> None:
-    """The public surface is exactly what's documented."""
+    """The public surface is exactly what's documented.
+
+    The four newer ``gauntlet.{axes,samplers,sinks,cli}`` groups are
+    asserted alongside the original two — keeping all six name pairs
+    in one place is the cheapest regression guard against an
+    accidental ``__all__`` drift when a future polish task adds a
+    seventh group.
+    """
     expected = {
+        # Original two.
         "POLICY_ENTRY_POINT_GROUP",
         "ENV_ENTRY_POINT_GROUP",
         "discover_policy_plugins",
         "discover_env_plugins",
         "warn_on_collision",
+        # Polish-task expansion.
+        "AXIS_ENTRY_POINT_GROUP",
+        "SAMPLER_ENTRY_POINT_GROUP",
+        "SINK_ENTRY_POINT_GROUP",
+        "CLI_ENTRY_POINT_GROUP",
+        "discover_axis_plugins",
+        "discover_sampler_plugins",
+        "discover_sink_plugins",
+        "discover_cli_plugins",
     }
     assert expected == set(plugins.__all__)
 

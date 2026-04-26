@@ -485,7 +485,13 @@ class Suite(BaseModel):
     axes: dict[str, AxisSpec]
     # See ``docs/polish-exploration-lhs-sampling.md``. Default preserves
     # the historical Cartesian-grid enumeration for every existing YAML.
-    sampling: SamplingMode = "cartesian"
+    # Field type intentionally widened from :data:`SamplingMode` to
+    # plain ``str`` so third-party samplers registered under the
+    # ``gauntlet.samplers`` ``[project.entry-points]`` group can be
+    # named here without touching the literal. Built-in modes still
+    # win on identity collision; the field-level validator below
+    # enforces the resolved-name set (built-ins plus plugins).
+    sampling: str = "cartesian"
     # Required for ``sampling != "cartesian"`` and forbidden for
     # ``sampling == "cartesian"`` — enforced by ``_check_sampling_inputs``
     # below. Sample budget for LHS / Sobol / adversarial; ignored
@@ -539,12 +545,26 @@ class Suite(BaseModel):
     def _axes_nonempty_and_canonical(cls, v: dict[str, AxisSpec]) -> dict[str, AxisSpec]:
         if len(v) == 0:
             raise ValueError("axes: at least one axis must be defined")
+        # Built-ins are checked first; an unknown name then falls
+        # through to the third-party ``gauntlet.axes`` entry-point group
+        # so a plugin axis can be referenced from a suite YAML without
+        # touching the canonical AXIS_NAMES tuple. Lazy import — see
+        # ``gauntlet.policy.registry`` for the same cycle-avoidance
+        # rationale (the loader is on the YAML hot path).
         unknown = [name for name in v if name not in AXIS_NAMES]
         if unknown:
-            legal = ", ".join(AXIS_NAMES)
-            raise ValueError(
-                f"axes: unknown axis name(s) {unknown}; legal names are: {legal}",
-            )
+            from gauntlet.plugins import discover_axis_plugins
+
+            plugin_axes = set(discover_axis_plugins().keys())
+            still_unknown = [name for name in unknown if name not in plugin_axes]
+            if still_unknown:
+                legal = ", ".join(AXIS_NAMES)
+                plugin_legal = ", ".join(sorted(plugin_axes)) or "<none installed>"
+                raise ValueError(
+                    f"axes: unknown axis name(s) {still_unknown}; legal "
+                    f"built-in names are: {legal}; legal plugin names are: "
+                    f"{plugin_legal}",
+                )
         # B-32 — ``prior_mean`` / ``prior_std`` are only meaningful for
         # the ``initial_state_ood`` axis. Reject them on every other
         # axis so a confused YAML fails loudly instead of silently
@@ -587,6 +607,27 @@ class Suite(BaseModel):
                     "'camera_extrinsics' (B-42) axis",
                 )
         return v
+
+    @field_validator("sampling")
+    @classmethod
+    def _sampling_known(cls, v: str) -> str:
+        # Built-in modes are always valid; unknown names fall through
+        # to the ``gauntlet.samplers`` plugin registry. Lazy import —
+        # keeps the schema cheap on the cartesian/LHS/Sobol common
+        # path. Mirrors the axes-validator pattern.
+        if v in SAMPLING_MODES:
+            return v
+        from gauntlet.plugins import discover_sampler_plugins
+
+        plugin_modes = discover_sampler_plugins()
+        if v in plugin_modes:
+            return v
+        legal = ", ".join(SAMPLING_MODES)
+        plugin_legal = ", ".join(sorted(plugin_modes)) or "<none installed>"
+        raise ValueError(
+            f"sampling: unknown sampling mode {v!r}; legal built-in "
+            f"modes are: {legal}; legal plugin modes are: {plugin_legal}"
+        )
 
     @field_validator("n_samples")
     @classmethod
