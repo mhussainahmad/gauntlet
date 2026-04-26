@@ -22,12 +22,15 @@ RFCs cross-linked from each section below.
 - [Episode (rollout result)](#episode-rollout-result)
 - [Report (failure analysis)](#report-failure-analysis)
 - [Diff (per-axis structured delta)](#diff-per-axis-structured-delta)
+- [Compare (regression verdict + cross-backend drift)](#compare-regression-verdict--cross-backend-drift)
+- [Bisect (cross-checkpoint regression search)](#bisect-cross-checkpoint-regression-search)
 - [Aggregate (fleet meta-report)](#aggregate-fleet-meta-report)
 - [Dashboard (static SPA)](#dashboard-static-spa)
 - [Replay (single-episode re-simulation)](#replay-single-episode-re-simulation)
 - [Monitor (drift detector)](#monitor-drift-detector)
 - [ROS 2 bridge](#ros-2-bridge)
 - [Real-to-sim (scene reconstruction)](#real-to-sim-scene-reconstruction)
+- [Security (path / YAML guards)](#security-path--yaml-guards)
 - [Plugins (third-party env / policy)](#plugins-third-party-env--policy)
 
 ---
@@ -35,7 +38,11 @@ RFCs cross-linked from each section below.
 ## Environment Protocol and backends
 
 ```python
-from gauntlet.env import GauntletEnv, CameraSpec
+from gauntlet.env import (
+    GauntletEnv, CameraSpec,
+    AXIS_NAMES, PerturbationAxis, axis_for,
+    N_DISTRACTOR_SLOTS,
+)
 ```
 
 `GauntletEnv` is a structural `typing.Protocol` (RFC-005 §3) — any
@@ -51,6 +58,18 @@ the queue.
 camera. `pose = (x, y, z, rx, ry, rz)` is metres + MuJoCo-XYZ Euler
 radians. `size = (H, W)`. See
 `docs/polish-exploration-multi-camera.md` for the full contract.
+
+`AXIS_NAMES` is the canonical ordered tuple of every scalar
+perturbation axis name the harness understands (the original seven
+plus B-32 / B-31 / B-05 / B-06 / B-42 / B-43 / B-38 additions). Stable
+contract — Suite YAML keys, Runner cell ids, Report axis labels all
+key off it. `PerturbationAxis(name, kind, sampler, bounds)` is the
+frozen record one axis is described by; `axis_for(name)` returns the
+default-configured `PerturbationAxis` registered under `name`. See
+`gauntlet.env.perturbation` for the per-axis constructor surface
+(`lighting_intensity`, `camera_offset_x`, …, `inference_delay_jitter`).
+`N_DISTRACTOR_SLOTS` is the integer cap on the `distractor_count`
+axis; downstream code reads it instead of hard-coding the bound.
 
 ### `TabletopEnv`
 
@@ -111,6 +130,26 @@ deferred. Construction boots `SimulationApp({"headless": True})`
 (camera and texture axes are visual-only and excluded). Requires the
 `[isaac]` extra and a CUDA-capable RTX-class GPU.
 
+### `MobileTabletopEnv` (B-13)
+
+```python
+from gauntlet.env import MobileTabletopEnv
+
+env = MobileTabletopEnv()
+# Action: [dx, dy, dz, drx, dry, drz, gripper, base_vx, base_vy, base_omega_z]
+```
+
+Composition wrapper around `TabletopEnv` adding a kinematic SE(2) base.
+The first 7 action slots are the inner pick twist; the trailing 3 slots
+are integrated kinematically (`base_pose <- base_pose + (vx, vy,
+omega) * BASE_DT`). Observation is every key the inner env publishes
+plus `pose: Box(shape=(3,))`, the integrated `(x, y, theta)`. Success
+is `nav_done AND picked` — base XY within `NAV_RADIUS` of a fixed
+base-frame target table AND the inner env reporting a successful
+grasp. Phase-1 scope: the wrapper does NOT forward perturbations to
+the inner env (`AXIS_NAMES` is empty); the freejoint-mounted-arm and
+collision rebake are deferred. Registered as `tabletop-mobile`.
+
 ### Env registry
 
 ```python
@@ -143,6 +182,11 @@ import torch / pybullet / genesis / isaacsim. Idempotent.
 from gauntlet.suite import (
     Suite, SuiteCell, AxisSpec, SamplingMode, SAMPLING_MODES,
     load_suite, load_suite_from_string,
+    BUILTIN_BACKEND_IMPORTS,
+    # Worst-case continuous search (B-44).
+    WorstCaseConfig,
+    # Suite linter (B-25).
+    LintFinding, LintSeverity, lint_suite,
 )
 ```
 
@@ -187,13 +231,43 @@ RNG `Suite.cells()` seeds from `suite.seed`. See
 `docs/polish-exploration-lhs-sampling.md` and
 `docs/polish-exploration-sobol-sampler.md`.
 
+### `lint_suite(suite) -> list[LintFinding]` (B-25)
+
+```python
+from gauntlet.suite import load_suite, lint_suite
+
+suite = load_suite("examples/suites/lighting_sweep.yaml")
+for finding in lint_suite(suite):
+    print(finding.severity, finding.rule, finding.message)
+```
+
+Static linter for `Suite` objects. Returns one `LintFinding` per
+issue (`severity: LintSeverity = "warning" | "error"`, `rule: str`,
+`message: str`, optional `axis: str`). The five rules — unused axis,
+cartesian explosion, visual-only-axis on a state-only backend,
+trivial single-step axis, and unsupported sampling-mode pairing —
+are documented in `docs/backlog.md` B-25. The CLI surface is
+`gauntlet suite check`; the pure-Python entry point exists so
+notebook callers can lint without going through subprocess.
+
+### Worst-case continuous search (B-44)
+
+`WorstCaseConfig` is the per-suite opt-in field on `Suite` that
+configures `gauntlet.suite.worst_case.WorstCaseContinuousSampler`:
+differential-evolution search over the suite's continuous axes for
+the perturbation that minimises success rate. The sampler is the
+strongest variance-amplifier the harness ships — a separate Suite
+plus an explicit knob, not a default — and is documented under the
+B-44 anti-feature warning (Eva-VLA-style attack: low yield against
+robust policies, deceptive success-rate floor against brittle ones).
+
 ---
 
 ## Policy adapters
 
 ```python
 from gauntlet.policy import (
-    Policy, ResettablePolicy, Action, Observation,
+    Policy, ResettablePolicy, SamplablePolicy, Action, Observation,
     RandomPolicy, ScriptedPolicy, DEFAULT_PICK_AND_PLACE_TRAJECTORY,
     HuggingFacePolicy, LeRobotPolicy,
     PolicySpecError, resolve_policy_factory,
@@ -203,7 +277,18 @@ from gauntlet.policy import (
 `Policy` is the minimal `runtime_checkable` Protocol: `act(obs) ->
 action`. `ResettablePolicy` adds `reset(rng)` — the Runner calls it at
 the start of every episode when present so stochastic policies re-seed
-deterministically.
+deterministically. `SamplablePolicy` (B-18) adds
+`act_n(obs, n=8) -> Sequence[Action]`: the runner draws `n`
+independent actions at a handful of trajectory steps to compute the
+mode-collapse metric stored on `Episode.action_variance`.
+Implementations MUST keep `act_n` side-effect free on per-episode
+state (snapshot + restore the RNG / chunk-queue cursor) so the
+measured rollout's actions remain identical to an unmeasured rollout
+with the same `Episode.seed` — preserving the determinism that B-08
+CRN paired-compare and B-39 bisect rely on. Greedy / open-loop
+policies (Scripted, OpenVLA-greedy) deliberately do not implement
+this Protocol; the runner keys off `isinstance` and writes
+`Episode.action_variance=None`.
 
 ### `RandomPolicy`
 
@@ -278,8 +363,20 @@ Resolves a policy spec string to a zero-arg factory. Raises
 ## Runner (parallel rollout)
 
 ```python
-from gauntlet.runner import Runner, Episode, WorkItem, execute_one
+from gauntlet.runner import (
+    Runner, Episode, WorkItem, execute_one, TrajectoryFormat,
+    # Provenance capture (B-22 / B-40).
+    SUITE_PROVENANCE_HASH_VERSION,
+    capture_gauntlet_version, capture_git_commit,
+    compute_env_asset_shas, compute_suite_hash,
+    compute_suite_provenance_hash,
+)
 ```
+
+`TrajectoryFormat` is `Literal["npz", "parquet", "both"]` — the value
+`Runner(trajectory_format=...)` and the per-Episode write path
+(`gauntlet.runner.worker.write_trajectory_*`) accept. `"parquet"` and
+`"both"` require the `[parquet]` extra (B-23).
 
 ### `Runner`
 
@@ -320,6 +417,35 @@ The per-episode primitive shared by both execution paths. Public so
 `gauntlet.replay.replay_one` can reuse it; ordinary callers go through
 `Runner.run`.
 
+### Provenance capture (B-22, B-40)
+
+```python
+from gauntlet.runner import (
+    capture_gauntlet_version, capture_git_commit,
+    compute_env_asset_shas, compute_suite_hash,
+    compute_suite_provenance_hash, SUITE_PROVENANCE_HASH_VERSION,
+)
+
+prov_hash = compute_suite_provenance_hash(
+    suite=suite,
+    gauntlet_version=capture_gauntlet_version(),
+    git_commit=capture_git_commit(),
+    env_asset_shas=compute_env_asset_shas(),
+)
+```
+
+Each `Episode` carries the provenance trio (`gauntlet_version`,
+`suite_hash`, `git_commit`) the Runner stamps before dispatch.
+`compute_suite_hash(suite)` is the pure suite-only hash; the full
+`compute_suite_provenance_hash(...)` folds in the gauntlet version,
+git commit, and env asset SHAs to produce the deterministic 16-char
+key the rollout cache and `gauntlet repro` CLI use to detect drift.
+`SUITE_PROVENANCE_HASH_VERSION` is the schema version baked into the
+hash — bumping it invalidates every cached rollout key. The capture
+helpers are deliberately fail-soft: a missing distribution, a missing
+git binary, or a missing assets directory each return `None` rather
+than crash the rollout loop. See B-22 and B-40 in `docs/backlog.md`.
+
 ---
 
 ## Episode (rollout result)
@@ -351,6 +477,13 @@ JSON.
 from gauntlet.report import (
     Report, AxisBreakdown, CellBreakdown, FailureCluster, Heatmap2D,
     build_report, render_html, write_html,
+    # Calibration-aware abstention scoring (B-04).
+    AbstentionMetrics, compute_abstention_metrics,
+    # Sobol sensitivity indices (B-19).
+    SensitivityIndex,
+    # Failure-mode taxonomy via DTW clustering (B-17).
+    TaxonomyError, TaxonomyResult, TrajectoryCluster,
+    cluster_failed_trajectories,
 )
 ```
 
@@ -381,6 +514,62 @@ the success-rate matrix for a pair of axes; keys in
 Renders the per-run HTML artifact. `write_html` is the file-writing
 wrapper; `render_html` returns the HTML string for in-memory use.
 
+### Calibration-aware abstention scoring (B-04)
+
+```python
+from gauntlet.report import compute_abstention_metrics
+
+metrics = compute_abstention_metrics(episodes)  # AbstentionMetrics | None
+```
+
+`compute_abstention_metrics` computes selective-prediction metrics
+over a list of `Episode` whose `failure_alarm` field has been
+populated by `gauntlet.monitor.ConformalFailureDetector` (B-01).
+Returns an `AbstentionMetrics` carrying the AURC (area under the risk-
+coverage curve) plus the corrected-success-rate at the calibrated
+confidence level. Returns `None` (not a stub) when no episode in the
+input set carries `failure_alarm` — the metric is undefined without an
+upstream conformal detector. References FIPER (arxiv 2510.09459) and
+FAIL-Detect (arxiv 2503.08558).
+
+### Sobol sensitivity indices (B-19)
+
+`SensitivityIndex` (one row per axis) carries the closed-form
+Saltelli decomposition of the success-rate variance: per-axis first-
+order index `S1` (axis-alone variance contribution) and total-order
+index `ST` (axis + interactions). Computed from
+`Report.per_axis` weighted by per-axis-value population so the
+output reflects sweep imbalance. `report.sensitivity_indices` is the
+field on `Report` populated by `build_report` when sufficient
+per-axis cell counts exist; pure numpy, no scipy. The `B-42 SO(3)`
+rotation axis carries a documented bias warning surfaced by the HTML
+renderer — see `gauntlet.report.sobol_indices.CAMERA_EXTRINSICS_SO3_WARNING`.
+
+### Failure-mode taxonomy (B-17)
+
+```python
+from gauntlet.report import (
+    cluster_failed_trajectories, TaxonomyResult, TrajectoryCluster,
+    TaxonomyError,
+)
+
+result = cluster_failed_trajectories(
+    failed_episodes, trajectory_dir="run_out/traj/",
+)
+for cluster in result.clusters:
+    print(cluster.label, cluster.exemplar_episode_index, cluster.n_members)
+```
+
+Clusters failed-rollout trajectories by Dynamic-Time-Warping distance
+and emits a `TaxonomyResult` of `TrajectoryCluster` rows. Each cluster
+is labelled by its medoid episode (`exemplar_episode_index`) — never
+by an LLM-generated prose label, per the B-17 anti-feature note: the
+report links to the exemplar trajectory and lets the operator name
+the failure mode by inspection rather than fabricate one.
+`TaxonomyError` (a `ValueError` subclass) signals missing trajectory
+NPZs, mismatched episode counts, or fewer-than-2 failures. Requires
+the `[trajectory-taxonomy]` extra (`dtw>=1.4`).
+
 ---
 
 ## Diff (per-axis structured delta)
@@ -388,7 +577,11 @@ wrapper; `render_html` returns the HTML string for in-memory use.
 ```python
 from gauntlet.diff import (
     ReportDiff, AxisDelta, CellFlip, ClusterDelta,
+    Verdict, VERDICT_REGRESSED, VERDICT_IMPROVED, VERDICT_WITHIN_NOISE,
     diff_reports, render_text,
+    # Paired-CRN (B-08) — opt-in, requires shared master_seed on both runs.
+    PairedComparison, PairedCellDelta, McNemarResult, PairingError,
+    pair_episodes, mcnemar_test, paired_delta_ci, compute_paired_cells,
 )
 ```
 
@@ -409,6 +602,169 @@ removed / `ClusterDelta` for shared clusters whose lift rose). Use
 when `gauntlet compare`'s yes/no verdict is too coarse and you need
 "what moved?". `render_text` produces a plain-text rendering; the CLI
 wraps it with rich color.
+
+### Regression-vs-noise verdict (B-20)
+
+`Verdict` is `Literal["regressed", "improved", "within_noise"]` plus
+the three constants `VERDICT_REGRESSED`, `VERDICT_IMPROVED`,
+`VERDICT_WITHIN_NOISE`. Each `CellFlip` carries a `verdict` field set
+by `diff_reports`: a flip whose magnitude exceeds
+`cell_flip_threshold` *and* whose Wilson / paired-CRN bracket
+excludes zero is tagged `regressed` or `improved`; otherwise it is
+tagged `within_noise`. CI gates should key off `regressed`, not the
+raw delta sign.
+
+### Paired-CRN comparison (B-08, B-39)
+
+```python
+from gauntlet.diff import compute_paired_cells, mcnemar_test, PairingError
+from gauntlet.runner import Episode  # episode lists from two paired runs
+
+paired = compute_paired_cells(episodes_a, episodes_b)  # list[PairedCellDelta]
+worst = sorted(paired, key=lambda p: p.delta_ci_high)[:5]
+```
+
+When two Runs share a `master_seed`, the Runner derives identical
+per-episode env seeds for every paired `(cell_index, episode_index)`
+key. `compute_paired_cells` pairs the resulting episodes, runs
+`mcnemar_test(b, c)` over the discordant counts, and returns one
+`PairedCellDelta` per cell with the Newcombe-Tango paired CI on
+`b_success_rate - a_success_rate`. The CI bracket shrinks roughly
+2-4x relative to two independent Wilson intervals — the variance
+reduction that `gauntlet bisect` (B-39) consumes. `pair_episodes` is
+the lower-level helper exposed for callers that want the discordant
+pairs directly. Raises `PairingError` (a `ValueError` subclass) when
+the two episode lists do not share a master seed or do not align
+key-for-key.
+
+---
+
+## Compare (regression verdict + cross-backend drift)
+
+```python
+from gauntlet.compare import (
+    to_github_summary,
+    AxisDrift, DriftMap, DriftMapError,
+    compute_drift_map, render_drift_map_table, top_axis_drifts,
+)
+```
+
+`gauntlet compare` is the binary regression-gate CLI; this module
+surfaces two structured outputs that ride on top of its
+`compare.json` payload.
+
+### `to_github_summary(compare_result) -> str` (B-24)
+
+```python
+import json
+from gauntlet.compare import to_github_summary
+
+with open("compare.json") as fh:
+    payload = json.load(fh)
+summary_md = to_github_summary(payload)
+# Append to GITHUB_STEP_SUMMARY in CI:
+# echo "$summary_md" >> "$GITHUB_STEP_SUMMARY"
+```
+
+Renders a `compare.json` payload as a markdown blob suitable for
+`$GITHUB_STEP_SUMMARY` — the GitHub Actions surface that lets a CI
+job emit a rich rendered report alongside the standard logs. Tables
+of regressed cells and intensified failure clusters land directly in
+the run summary tab without an extra artefact upload.
+
+### `compute_drift_map(report_a, report_b, ...) -> DriftMap` (B-29)
+
+```python
+from gauntlet.compare import compute_drift_map, render_drift_map_table
+
+drift = compute_drift_map(sim_report, real_report,
+                          a_label="sim", b_label="real")
+print(render_drift_map_table(drift))
+top = top_axis_drifts(drift, limit=5)  # list[AxisDrift]
+```
+
+Cross-backend embodiment-transfer scoring inspired by SIMPLER. For
+every shared `(axis, axis_value)` cell across two `Report`s, emits an
+`AxisDrift` (`a_rate`, `b_rate`, `delta`, `abs_delta`) so a fleet
+operator can answer "where does the sim/real gap concentrate?".
+`top_axis_drifts(drift, limit=N)` returns the top-N drifts ranked by
+`abs_delta`. `render_drift_map_table` renders a sorted markdown table
+suitable for stdout or a PR comment. `DriftMapError` (a `ValueError`
+subclass) signals incompatible report shapes (different axis schemas,
+different env families). See `docs/phase3-rfc-019-fleet-aggregate.md`
+for the framing.
+
+### Sim-vs-real correlation (B-28)
+
+```python
+from gauntlet.aggregate import (
+    AxisTransfer, SimRealReport, compute_sim_real_correlation,
+)
+
+corr = compute_sim_real_correlation(sim_episodes, real_episodes,
+                                    pair_key="instance_id")
+```
+
+`compute_sim_real_correlation` ranks each axis by how well its sim
+success rate predicts its real-rollout outcome (Spearman + per-axis
+Pearson). `SimRealReport` is the top-level pydantic model;
+`AxisTransfer` is one row per axis. The default pairing key is
+`instance_id` from `Episode.metadata`; pass `pair_key=` to use a
+different metadata field. SureSim-style framing — see the B-28
+backlog entry.
+
+---
+
+## Bisect (cross-checkpoint regression search)
+
+```python
+from gauntlet.bisect import (
+    BisectError, BisectResult, BisectStep, RunnerFactory, bisect,
+)
+```
+
+### `bisect(checkpoints, resolver, *, suite, target_cell_id, runner_factory=Runner, episodes_per_step=None) -> BisectResult` (B-39)
+
+```python
+from gauntlet.bisect import bisect
+from gauntlet.suite import load_suite
+
+suite = load_suite("examples/suites/cube_stack.yaml")
+result = bisect(
+    checkpoints=["v1-good", "v2", "v3", "v4-bad"],
+    resolver=lambda ckpt: lambda: load_my_policy(ckpt),
+    suite=suite,
+    target_cell_id=12,
+    episodes_per_step=64,
+)
+print(result.first_bad)         # e.g. "v3"
+for step in result.steps:
+    print(step.checkpoint, step.delta.delta_ci_high)
+```
+
+Binary-searches an ordered checkpoint list `[good, *intermediates,
+bad]` for the first checkpoint at which the named target cell's
+success rate dropped significantly below the known-good baseline. At
+each midpoint the engine runs the resolved policy on `suite`,
+filters episodes to `target_cell_id`, and consults
+`gauntlet.diff.paired.compute_paired_cells` for the paired CI. The
+collapse rule is one-sided: `delta_ci_high < 0` ⟹ midpoint
+significantly worse, move `hi = mid`. Episodes-per-cell can be
+overridden per step via `episodes_per_step` (defaults to
+`suite.episodes_per_cell`).
+
+`RunnerFactory` is the `Protocol` for the Runner constructor —
+defaults to the built-in `gauntlet.runner.Runner`, but downstream
+callers can wire a custom executor (subprocess pool, remote worker
+shim) by satisfying its single-method shape. `BisectError` (a
+`ValueError` subclass) signals bad inputs (target cell missing from
+the suite, fewer than 2 checkpoints) or the degenerate
+all-discordant-zero case. Each `BisectStep` row records the
+`checkpoint` queried, the resulting `PairedCellDelta`, and which
+search interval boundary moved. `BisectResult.first_bad` is the
+final answer; `result.steps` is the full audit trail. See
+`docs/backlog.md` B-39 for the anti-feature framing (no
+weight-interpolation, list-resolution-bound).
 
 ---
 
@@ -498,15 +854,42 @@ parser, exported for notebook callers. `OverrideError` is a
 from gauntlet.monitor import (
     PerEpisodeDrift, DriftReport,
     ActionEntropyStats, action_entropy,
+    ConformalFailureDetector,
     StateAutoencoder, train_ae, score_drift,  # require [monitor] extra
 )
 ```
 
 Torch-free symbols (`PerEpisodeDrift`, `DriftReport`,
-`action_entropy`, `ActionEntropyStats`) are eagerly re-exported.
-Torch-backed symbols (`StateAutoencoder`, `train_ae`, `score_drift`)
-are lazy — accessing them on a torch-free install raises a clean
-`ImportError` with the install hint.
+`action_entropy`, `ActionEntropyStats`, `ConformalFailureDetector`)
+are eagerly re-exported. Torch-backed symbols (`StateAutoencoder`,
+`train_ae`, `score_drift`) are lazy — accessing them on a torch-free
+install raises a clean `ImportError` with the install hint.
+
+### `ConformalFailureDetector` (B-01)
+
+```python
+from gauntlet.monitor import ConformalFailureDetector
+
+# Calibrate on a held-out set of *successful* episodes from the same
+# (policy, env) pair. Episodes must come from a SamplablePolicy run
+# so Episode.action_variance is populated.
+det = ConformalFailureDetector.fit(calibration_episodes, alpha=0.05)
+score, alarm = det.score(candidate_episode)
+det.to_dict()                  # JSON-serialisable round-trip artefact
+```
+
+Split-conformal failure-prediction detector keyed off
+`Episode.action_variance` (the B-18 mode-collapse signal). Computes
+the calibration-quantile threshold under the FIPER-style finite-
+sample correction (`ceil((n + 1) * (1 - alpha)) / n`-quantile of the
+calibration scores). At score time returns a per-episode
+`(failure_score, failure_alarm)` pair: the score is the candidate's
+`action_variance` divided by the threshold (>1 ⟹ more uncertain than
+calibration); the alarm is `score > 1.0`. Pure numpy — no torch, no
+scipy. Asymmetric by design: greedy policies leave
+`Episode.action_variance` as `None` and the detector skips them
+rather than fabricating a 0.0 signal. See `docs/backlog.md` B-01 for
+the FIPER / FAIL-Detect references.
 
 ### `train_ae(trajectory_dir, *, out_dir, reference_suite, latent_dim=8, epochs=50, batch_size=256, lr=1e-3, seed=0)`
 
@@ -576,12 +959,25 @@ See `docs/phase2-rfc-010-ros2-integration.md`.
 from gauntlet.realsim import (
     Scene, CameraFrame, CameraIntrinsics, Pose,
     SCENE_SCHEMA_VERSION, MANIFEST_FILENAME,
+    IMAGE_MAGIC_BYTES, POSE_BOTTOM_ROW_TOLERANCE,
     ingest_frames, save_scene, load_scene,
     IngestionError, SceneIOError,
     RealSimRenderer, RendererFactory, RendererRegistryError,
     register_renderer, get_renderer, list_renderers,
 )
 ```
+
+`IMAGE_MAGIC_BYTES` is the `dict[str, bytes]` mapping from
+human-readable container name (`"png"`, `"jpeg"`, `"ppm-binary"`,
+`"ppm-ascii"`) to the magic-byte prefix the ingest pipeline checks
+before accepting a frame — magic-byte sniffing rather than Pillow /
+imageio import on the hot path. `POSE_BOTTOM_ROW_TOLERANCE` is the
+absolute tolerance the schema validator applies to the bottom row of
+each `Pose` 4x4 matrix (`[0, 0, 0, 1]` to within this much) before
+rejecting a non-rigid transform. `RendererFactory` is the
+`Callable[[], RealSimRenderer]` type alias — the value
+`register_renderer(name, factory)` accepts and `get_renderer(name)`
+returns.
 
 ### `ingest_frames(frames_dir, calib_path, *, source=None) -> Scene`
 
@@ -606,6 +1002,63 @@ RGB). The first concrete implementation (gaussian splatting) is
 deferred. The registry is module-local, not part of
 `gauntlet.plugins`, until a concrete renderer ships and a follow-up
 RFC promotes it.
+
+---
+
+## Security (path / YAML guards)
+
+```python
+from gauntlet.security import (
+    safe_join, safe_yaml_load,
+    PathTraversalError, YamlSecurityError,
+)
+```
+
+Centralised input-boundary helpers — Phase 2.5 Task 16. The contract
+is deliberately narrow; both helpers exist so every call-site flows
+through one place and the CI grep gate can verify no caller bypasses
+them.
+
+### `safe_join(root, *parts) -> Path`
+
+```python
+from gauntlet.security import safe_join, PathTraversalError
+
+try:
+    full = safe_join(out_dir, user_supplied_relative)
+except PathTraversalError as exc:
+    ...  # reject the request
+```
+
+Sandboxed path join with explicit traversal rejection. Used at every
+sink / cache boundary where a user-supplied component is joined under
+a trusted root: replay output, parquet trajectory dumps, fleet
+aggregation discovery, dashboard artefact paths. Rejects empty parts,
+absolute parts, parts containing `..` segments, and any join whose
+realpath escapes `root`. Raises `PathTraversalError` (a `ValueError`
+subclass).
+
+### `safe_yaml_load(stream) -> object`
+
+```python
+from gauntlet.security import safe_yaml_load
+
+with open(suite_path) as fh:
+    raw = safe_yaml_load(fh)
+```
+
+The canonical YAML entry point. Wraps `yaml.safe_load` so every
+call-site flows through one place; the CI grep gate verifies that
+PyYAML's unsafe-loader entry points (`yaml.load`, `yaml.unsafe_load`,
+`yaml.full_load`) never re-enter `src/`. Unsafe-tag rejections still
+flow through `yaml.YAMLError` (existing regression tests in
+`tests/test_security_yaml.py` keep working unchanged);
+`YamlSecurityError` (a `ValueError` subclass) is reserved for future
+strict-mode rejections layered on top.
+
+See `docs/security.md` for the documented threat classes — path
+traversal at sink / cache boundaries and unsafe YAML deserialisation
+— and the test-side enforcement contract.
 
 ---
 

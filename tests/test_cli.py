@@ -132,6 +132,35 @@ def test_help_lists_three_subcommands(runner: CliRunner) -> None:
         assert cmd in result.stdout
 
 
+def test_help_epilog_references_api_docs(runner: CliRunner) -> None:
+    """Top-level ``--help`` epilog points readers at docs/api.md.
+
+    Phase 2.5 T14 polish — the CLI is the discovery surface, so the
+    epilog must cross-reference the authoritative API reference and
+    extension-points pages so a first-time user knows where to go.
+    """
+    result = runner.invoke(app, ["--help"])
+    assert result.exit_code == 0, result.stderr
+    assert "docs/api.md" in result.stdout
+    assert "GAUNTLET_SPEC.md" in result.stdout
+    assert "docs/extension-points.md" in result.stdout
+
+
+def test_version_flag_prints_package_version(runner: CliRunner) -> None:
+    """``gauntlet --version`` prints :data:`gauntlet.__version__` and exits 0.
+
+    Eager Typer callback short-circuits before subcommand dispatch, so
+    no Runner / Suite / pytest-cov spawn machinery fires. Stdout is the
+    bare version string with a single trailing newline (typer.echo
+    contract).
+    """
+    from gauntlet import __version__
+
+    result = runner.invoke(app, ["--version"])
+    assert result.exit_code == 0, result.stderr
+    assert result.stdout.strip() == __version__
+
+
 # ──────────────────────────────────────────────────────────────────────
 # 2 — `run --help` exposes the documented options.
 # ──────────────────────────────────────────────────────────────────────
