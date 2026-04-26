@@ -182,6 +182,11 @@ import torch / pybullet / genesis / isaacsim. Idempotent.
 from gauntlet.suite import (
     Suite, SuiteCell, AxisSpec, SamplingMode, SAMPLING_MODES,
     load_suite, load_suite_from_string,
+    BUILTIN_BACKEND_IMPORTS,
+    # Worst-case continuous search (B-44).
+    WorstCaseConfig,
+    # Suite linter (B-25).
+    LintFinding, LintSeverity, lint_suite,
 )
 ```
 
@@ -225,6 +230,36 @@ direction numbers (21-dimension cap). Both are deterministic given the
 RNG `Suite.cells()` seeds from `suite.seed`. See
 `docs/polish-exploration-lhs-sampling.md` and
 `docs/polish-exploration-sobol-sampler.md`.
+
+### `lint_suite(suite) -> list[LintFinding]` (B-25)
+
+```python
+from gauntlet.suite import load_suite, lint_suite
+
+suite = load_suite("examples/suites/lighting_sweep.yaml")
+for finding in lint_suite(suite):
+    print(finding.severity, finding.rule, finding.message)
+```
+
+Static linter for `Suite` objects. Returns one `LintFinding` per
+issue (`severity: LintSeverity = "warning" | "error"`, `rule: str`,
+`message: str`, optional `axis: str`). The five rules — unused axis,
+cartesian explosion, visual-only-axis on a state-only backend,
+trivial single-step axis, and unsupported sampling-mode pairing —
+are documented in `docs/backlog.md` B-25. The CLI surface is
+`gauntlet suite check`; the pure-Python entry point exists so
+notebook callers can lint without going through subprocess.
+
+### Worst-case continuous search (B-44)
+
+`WorstCaseConfig` is the per-suite opt-in field on `Suite` that
+configures `gauntlet.suite.worst_case.WorstCaseContinuousSampler`:
+differential-evolution search over the suite's continuous axes for
+the perturbation that minimises success rate. The sampler is the
+strongest variance-amplifier the harness ships — a separate Suite
+plus an explicit knob, not a default — and is documented under the
+B-44 anti-feature warning (Eva-VLA-style attack: low yield against
+robust policies, deceptive success-rate floor against brittle ones).
 
 ---
 
@@ -328,8 +363,20 @@ Resolves a policy spec string to a zero-arg factory. Raises
 ## Runner (parallel rollout)
 
 ```python
-from gauntlet.runner import Runner, Episode, WorkItem, execute_one
+from gauntlet.runner import (
+    Runner, Episode, WorkItem, execute_one, TrajectoryFormat,
+    # Provenance capture (B-22 / B-40).
+    SUITE_PROVENANCE_HASH_VERSION,
+    capture_gauntlet_version, capture_git_commit,
+    compute_env_asset_shas, compute_suite_hash,
+    compute_suite_provenance_hash,
+)
 ```
+
+`TrajectoryFormat` is `Literal["npz", "parquet", "both"]` — the value
+`Runner(trajectory_format=...)` and the per-Episode write path
+(`gauntlet.runner.worker.write_trajectory_*`) accept. `"parquet"` and
+`"both"` require the `[parquet]` extra (B-23).
 
 ### `Runner`
 
@@ -370,6 +417,35 @@ The per-episode primitive shared by both execution paths. Public so
 `gauntlet.replay.replay_one` can reuse it; ordinary callers go through
 `Runner.run`.
 
+### Provenance capture (B-22, B-40)
+
+```python
+from gauntlet.runner import (
+    capture_gauntlet_version, capture_git_commit,
+    compute_env_asset_shas, compute_suite_hash,
+    compute_suite_provenance_hash, SUITE_PROVENANCE_HASH_VERSION,
+)
+
+prov_hash = compute_suite_provenance_hash(
+    suite=suite,
+    gauntlet_version=capture_gauntlet_version(),
+    git_commit=capture_git_commit(),
+    env_asset_shas=compute_env_asset_shas(),
+)
+```
+
+Each `Episode` carries the provenance trio (`gauntlet_version`,
+`suite_hash`, `git_commit`) the Runner stamps before dispatch.
+`compute_suite_hash(suite)` is the pure suite-only hash; the full
+`compute_suite_provenance_hash(...)` folds in the gauntlet version,
+git commit, and env asset SHAs to produce the deterministic 16-char
+key the rollout cache and `gauntlet repro` CLI use to detect drift.
+`SUITE_PROVENANCE_HASH_VERSION` is the schema version baked into the
+hash — bumping it invalidates every cached rollout key. The capture
+helpers are deliberately fail-soft: a missing distribution, a missing
+git binary, or a missing assets directory each return `None` rather
+than crash the rollout loop. See B-22 and B-40 in `docs/backlog.md`.
+
 ---
 
 ## Episode (rollout result)
@@ -401,6 +477,13 @@ JSON.
 from gauntlet.report import (
     Report, AxisBreakdown, CellBreakdown, FailureCluster, Heatmap2D,
     build_report, render_html, write_html,
+    # Calibration-aware abstention scoring (B-04).
+    AbstentionMetrics, compute_abstention_metrics,
+    # Sobol sensitivity indices (B-19).
+    SensitivityIndex,
+    # Failure-mode taxonomy via DTW clustering (B-17).
+    TaxonomyError, TaxonomyResult, TrajectoryCluster,
+    cluster_failed_trajectories,
 )
 ```
 
@@ -430,6 +513,62 @@ the success-rate matrix for a pair of axes; keys in
 
 Renders the per-run HTML artifact. `write_html` is the file-writing
 wrapper; `render_html` returns the HTML string for in-memory use.
+
+### Calibration-aware abstention scoring (B-04)
+
+```python
+from gauntlet.report import compute_abstention_metrics
+
+metrics = compute_abstention_metrics(episodes)  # AbstentionMetrics | None
+```
+
+`compute_abstention_metrics` computes selective-prediction metrics
+over a list of `Episode` whose `failure_alarm` field has been
+populated by `gauntlet.monitor.ConformalFailureDetector` (B-01).
+Returns an `AbstentionMetrics` carrying the AURC (area under the risk-
+coverage curve) plus the corrected-success-rate at the calibrated
+confidence level. Returns `None` (not a stub) when no episode in the
+input set carries `failure_alarm` — the metric is undefined without an
+upstream conformal detector. References FIPER (arxiv 2510.09459) and
+FAIL-Detect (arxiv 2503.08558).
+
+### Sobol sensitivity indices (B-19)
+
+`SensitivityIndex` (one row per axis) carries the closed-form
+Saltelli decomposition of the success-rate variance: per-axis first-
+order index `S1` (axis-alone variance contribution) and total-order
+index `ST` (axis + interactions). Computed from
+`Report.per_axis` weighted by per-axis-value population so the
+output reflects sweep imbalance. `report.sensitivity_indices` is the
+field on `Report` populated by `build_report` when sufficient
+per-axis cell counts exist; pure numpy, no scipy. The `B-42 SO(3)`
+rotation axis carries a documented bias warning surfaced by the HTML
+renderer — see `gauntlet.report.sobol_indices.CAMERA_EXTRINSICS_SO3_WARNING`.
+
+### Failure-mode taxonomy (B-17)
+
+```python
+from gauntlet.report import (
+    cluster_failed_trajectories, TaxonomyResult, TrajectoryCluster,
+    TaxonomyError,
+)
+
+result = cluster_failed_trajectories(
+    failed_episodes, trajectory_dir="run_out/traj/",
+)
+for cluster in result.clusters:
+    print(cluster.label, cluster.exemplar_episode_index, cluster.n_members)
+```
+
+Clusters failed-rollout trajectories by Dynamic-Time-Warping distance
+and emits a `TaxonomyResult` of `TrajectoryCluster` rows. Each cluster
+is labelled by its medoid episode (`exemplar_episode_index`) — never
+by an LLM-generated prose label, per the B-17 anti-feature note: the
+report links to the exemplar trajectory and lets the operator name
+the failure mode by inspection rather than fabricate one.
+`TaxonomyError` (a `ValueError` subclass) signals missing trajectory
+NPZs, mismatched episode counts, or fewer-than-2 failures. Requires
+the `[trajectory-taxonomy]` extra (`dtw>=1.4`).
 
 ---
 
@@ -863,6 +1002,63 @@ RGB). The first concrete implementation (gaussian splatting) is
 deferred. The registry is module-local, not part of
 `gauntlet.plugins`, until a concrete renderer ships and a follow-up
 RFC promotes it.
+
+---
+
+## Security (path / YAML guards)
+
+```python
+from gauntlet.security import (
+    safe_join, safe_yaml_load,
+    PathTraversalError, YamlSecurityError,
+)
+```
+
+Centralised input-boundary helpers — Phase 2.5 Task 16. The contract
+is deliberately narrow; both helpers exist so every call-site flows
+through one place and the CI grep gate can verify no caller bypasses
+them.
+
+### `safe_join(root, *parts) -> Path`
+
+```python
+from gauntlet.security import safe_join, PathTraversalError
+
+try:
+    full = safe_join(out_dir, user_supplied_relative)
+except PathTraversalError as exc:
+    ...  # reject the request
+```
+
+Sandboxed path join with explicit traversal rejection. Used at every
+sink / cache boundary where a user-supplied component is joined under
+a trusted root: replay output, parquet trajectory dumps, fleet
+aggregation discovery, dashboard artefact paths. Rejects empty parts,
+absolute parts, parts containing `..` segments, and any join whose
+realpath escapes `root`. Raises `PathTraversalError` (a `ValueError`
+subclass).
+
+### `safe_yaml_load(stream) -> object`
+
+```python
+from gauntlet.security import safe_yaml_load
+
+with open(suite_path) as fh:
+    raw = safe_yaml_load(fh)
+```
+
+The canonical YAML entry point. Wraps `yaml.safe_load` so every
+call-site flows through one place; the CI grep gate verifies that
+PyYAML's unsafe-loader entry points (`yaml.load`, `yaml.unsafe_load`,
+`yaml.full_load`) never re-enter `src/`. Unsafe-tag rejections still
+flow through `yaml.YAMLError` (existing regression tests in
+`tests/test_security_yaml.py` keep working unchanged);
+`YamlSecurityError` (a `ValueError` subclass) is reserved for future
+strict-mode rejections layered on top.
+
+See `docs/security.md` for the documented threat classes — path
+traversal at sink / cache boundaries and unsafe YAML deserialisation
+— and the test-side enforcement contract.
 
 ---
 
