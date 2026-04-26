@@ -69,13 +69,17 @@ from gauntlet.runner import (
 from gauntlet.suite.schema import AxisSpec, Suite
 
 # 10-step canned action sequence. Generated once at module import via a
-# fixed-seed numpy Generator so the test is hermetic — no test-side
-# randomness, no clock entropy. The values themselves do not matter;
-# what matters is that they are float64 and the same on every test
-# invocation.
+# single fixed-seed numpy Generator so the test is hermetic — no test-
+# side randomness, no clock entropy. The Generator is constructed ONCE
+# (not per-element); the previous shape ``tuple(... for _ in range(10))``
+# with the constructor inside the comprehension produced 10 fresh
+# generators all seeded identically and therefore 10 IDENTICAL action
+# vectors. That weakens the audit because a backend that ignored the
+# action-index would still pass; pulling 10 distinct samples from the
+# same generator is what makes the rollout actually varied.
+_CANNED_RNG = np.random.default_rng(0xC1DE)
 _CANNED_ACTIONS: tuple[np.ndarray, ...] = tuple(
-    np.random.default_rng(0xC1DE).uniform(-1.0, 1.0, size=(7,)).astype(np.float64)
-    for _ in range(10)
+    _CANNED_RNG.uniform(-1.0, 1.0, size=(7,)).astype(np.float64) for _ in range(10)
 )
 _CANNED_SEED: int = 42
 
