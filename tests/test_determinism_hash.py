@@ -43,6 +43,9 @@ skipping any pair touching Isaac when its real binding is absent.
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
+import textwrap
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -51,12 +54,19 @@ import numpy as np
 import pytest
 
 from gauntlet.env.tabletop import TabletopEnv
+from gauntlet.policy.scripted import ScriptedPolicy
+from gauntlet.replay import replay_one
 from gauntlet.runner import (
     IMAGE_OBS_KEYS,
     STATE_OBS_KEYS,
+    Episode,
+    Runner,
     assert_byte_identical,
+    episode_hash,
     obs_state_hash,
+    rollout_hash,
 )
+from gauntlet.suite.schema import AxisSpec, Suite
 
 # 10-step canned action sequence. Generated once at module import via a
 # fixed-seed numpy Generator so the test is hermetic — no test-side
@@ -385,3 +395,223 @@ def test_cross_backend_deltas_json_schema_pinned() -> None:
         assert "max_abs_delta_per_key" in entry
         assert "rationale" in entry
         assert entry["rationale"].strip()
+
+
+# ----------------------------------------------------------------------------
+# Subprocess byte-identity — same backend, same canned rollout in a child
+# Python interpreter. The subprocess prints the rollout digest and exits;
+# the parent compares.
+# ----------------------------------------------------------------------------
+
+
+# Source the child process executes. Triple-quoted string kept here (not
+# a separate file) so the test is hermetic; the child receives it via
+# ``-c`` so we never shell-glob a path. ``sys.executable`` guarantees we
+# stay inside the same venv as the parent — no system-Python fallback,
+# no PATH-dependent surprises.
+_SUBPROCESS_ROLLOUT_SOURCE: str = textwrap.dedent(
+    """
+    import json
+    import sys
+
+    import numpy as np
+
+    from gauntlet.env.tabletop import TabletopEnv
+    from gauntlet.runner import obs_state_hash, rollout_hash
+
+    actions_payload = json.loads(sys.argv[1])
+    seed = int(sys.argv[2])
+    actions = [np.asarray(a, dtype=np.float64) for a in actions_payload]
+
+    env = TabletopEnv()
+    try:
+        initial_obs, _ = env.reset(seed=seed)
+        initial_state = {
+            k: np.asarray(v, dtype=np.float64).tolist()
+            for k, v in initial_obs.items()
+            if k not in {"image", "images"}
+        }
+        terminal_obs = initial_obs
+        for action in actions:
+            terminal_obs, _, terminated, truncated, _ = env.step(action)
+        rollout = rollout_hash(
+            initial_obs=initial_obs,
+            actions=actions,
+            terminal_obs=terminal_obs,
+            success=False,
+            length=len(actions),
+        )
+    finally:
+        env.close()
+
+    print(json.dumps({
+        "initial_obs_hash": obs_state_hash(initial_obs),
+        "terminal_obs_hash": obs_state_hash(terminal_obs),
+        "rollout_hash": rollout,
+    }))
+    """
+).strip()
+
+
+def test_mujoco_subprocess_byte_identical() -> None:
+    """Same canned rollout in a child interpreter must produce the
+    same digest as the in-process rollout. Catches a class of
+    determinism leaks that only fire when fresh Python state is
+    spun up — e.g. a global numpy ``Generator`` accidentally shared
+    across resets, an env that reads ``os.urandom`` at module import.
+
+    The child is invoked through :data:`sys.executable` so the venv is
+    inherited; no shell, no PATH-dependent Python.
+    """
+    in_process_initial: str
+    in_process_terminal: str
+    in_process_rollout: str
+
+    env = TabletopEnv()
+    try:
+        initial_obs, _ = env.reset(seed=_CANNED_SEED)
+        in_process_initial = obs_state_hash(initial_obs)
+        terminal_obs = initial_obs
+        for action in _CANNED_ACTIONS:
+            terminal_obs, _, _terminated, _truncated, _ = env.step(action)
+        in_process_terminal = obs_state_hash(terminal_obs)
+        in_process_rollout = rollout_hash(
+            initial_obs=initial_obs,
+            actions=_CANNED_ACTIONS,
+            terminal_obs=terminal_obs,
+            success=False,
+            length=len(_CANNED_ACTIONS),
+        )
+    finally:
+        env.close()
+
+    actions_payload = json.dumps([a.tolist() for a in _CANNED_ACTIONS])
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            _SUBPROCESS_ROLLOUT_SOURCE,
+            actions_payload,
+            str(_CANNED_SEED),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    child = json.loads(completed.stdout.strip().splitlines()[-1])
+    assert child["initial_obs_hash"] == in_process_initial, (
+        f"subprocess initial obs digest {child['initial_obs_hash']} "
+        f"!= in-process {in_process_initial}"
+    )
+    assert child["terminal_obs_hash"] == in_process_terminal, (
+        f"subprocess terminal obs digest {child['terminal_obs_hash']} "
+        f"!= in-process {in_process_terminal}"
+    )
+    assert child["rollout_hash"] == in_process_rollout, (
+        f"subprocess rollout digest {child['rollout_hash']} != in-process {in_process_rollout}"
+    )
+
+
+# ----------------------------------------------------------------------------
+# Replay episode-hash stability — the bit-identity contract of
+# :func:`gauntlet.replay.replay_one` translated into a single comparable
+# digest. Companion to ``tests/test_replay.py::test_zero_override_bit_identity``
+# which asserts full Episode equality.
+# ----------------------------------------------------------------------------
+
+
+def _make_fast_env() -> Any:
+    """Pickle-friendly env factory for the Runner pool."""
+    return TabletopEnv(max_steps=20)
+
+
+def _make_scripted_policy() -> ScriptedPolicy:
+    return ScriptedPolicy()
+
+
+def _replay_test_suite() -> Suite:
+    """Smallest non-trivial Suite that exercises >1 cell + >1 episode/cell.
+
+    Mirrors the shape used by ``tests/test_replay.py`` so both files
+    have the same load-bearing topology.
+    """
+    return Suite(
+        name="determinism-hash-replay",
+        env="tabletop",
+        seed=4242,
+        episodes_per_cell=2,
+        axes={
+            "lighting_intensity": AxisSpec(low=0.4, high=1.2, steps=2),
+        },
+    )
+
+
+def _find_episode(episodes: list[Episode], cell_index: int, episode_index: int) -> Episode:
+    for ep in episodes:
+        if ep.cell_index == cell_index and ep.episode_index == episode_index:
+            return ep
+    raise AssertionError(f"no episode at ({cell_index}, {episode_index})")
+
+
+def test_replay_episode_hash_stable() -> None:
+    """Run a small Suite, replay a target episode, and assert the
+    :func:`episode_hash` matches.
+
+    Stricter than ``test_zero_override_bit_identity`` for one reason:
+    full Episode equality includes wall-clock fields (inference
+    latencies) that happen to round-trip via Pydantic's ``model_dump``
+    only when the policy is deterministic enough to produce identical
+    timings. The episode_hash deliberately excludes those, so this
+    test passes even when ``model_dump`` would be flaky on the timing
+    fields.
+    """
+    suite = _replay_test_suite()
+    runner = Runner(n_workers=1, env_factory=_make_fast_env)
+    episodes = runner.run(policy_factory=_make_scripted_policy, suite=suite)
+
+    target = _find_episode(episodes, cell_index=0, episode_index=1)
+    replayed = replay_one(
+        target=target,
+        suite=suite,
+        policy_factory=_make_scripted_policy,
+        env_factory=_make_fast_env,
+    )
+
+    assert episode_hash(target) == episode_hash(replayed), (
+        f"replay episode_hash drift: target={episode_hash(target)} "
+        f"replayed={episode_hash(replayed)}"
+    )
+
+
+def test_episode_hash_distinguishes_seed_change() -> None:
+    """Two episodes with different seeds must hash differently —
+    a regression guard against an over-aggressive exclusion list."""
+    base = _replay_test_suite()
+    runner = Runner(n_workers=1, env_factory=_make_fast_env)
+    episodes = runner.run(policy_factory=_make_scripted_policy, suite=base)
+    a = _find_episode(episodes, cell_index=0, episode_index=0)
+    b = _find_episode(episodes, cell_index=0, episode_index=1)
+    # Two episodes from the same cell differ in ``episode_index`` and
+    # ``seed`` (Runner spawns one SeedSequence per episode); the hash
+    # must surface that.
+    assert a.seed != b.seed
+    assert episode_hash(a) != episode_hash(b)
+
+
+def test_episode_hash_independent_of_metadata() -> None:
+    """``metadata`` is excluded from the hash — adding a stray key
+    must not perturb the digest. Pins the exclusion list against a
+    future "we should hash metadata too" refactor."""
+    suite = _replay_test_suite()
+    runner = Runner(n_workers=1, env_factory=_make_fast_env)
+    episodes = runner.run(policy_factory=_make_scripted_policy, suite=suite)
+    target = _find_episode(episodes, cell_index=0, episode_index=0)
+    perturbed = target.model_copy(
+        update={
+            "metadata": {**target.metadata, "irrelevant_key": "irrelevant_value"},
+            "video_path": "videos/should-not-affect-hash.mp4",
+            "git_commit": "deadbeef",
+        }
+    )
+    assert episode_hash(target) == episode_hash(perturbed)
