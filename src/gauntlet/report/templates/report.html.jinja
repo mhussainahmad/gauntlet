@@ -516,6 +516,69 @@ Data-embed conventions:
   {% endif %}
 </section>
 
+{# ─── 2½. Failure-mode taxonomy via trajectory clustering (B-17) ───
+   Group failed episodes by trajectory (action-stream) similarity. This
+   is the ORTHOGONAL companion to the axis-config failure-clusters
+   table above: that one says *which* perturbations failed, this one
+   says *how* the failed rollouts unfolded — same failure shape across
+   different configs. Per ``docs/backlog.md`` B-17, the cluster label
+   is the EXEMPLAR EPISODE INDEX (the medoid's
+   ``cell_NNNN_ep_NNNN`` id), never an auto-generated prose label —
+   prose labels are LLM-bait that ship confidently-wrong descriptions.
+   Refs: arxiv 2506.06570 (failure taxonomies), arxiv 2412.02818
+   (RoboFail / RoboMD).
+
+   Renders only when the caller passed ``trajectory_dir`` to
+   ``render_html`` (i.e. signalled intent). When the dir is missing or
+   no trajectory NPZs are available, ``taxonomy_notice`` carries a
+   one-line explanation and the table is replaced by it. #}
+{% if taxonomy is not none or taxonomy_notice is not none %}
+<section>
+  <h2>Failure-mode taxonomy</h2>
+  <p class="subtle">
+    Failed-trajectory clusters by action-stream similarity (DTW; falls
+    back to euclidean when the <code>[trajectory-taxonomy]</code> extra
+    is absent). Clusters are labelled by their <em>exemplar episode
+    index</em> — the medoid of the group; auto-generated prose labels
+    are an explicit anti-feature per the backlog.
+  </p>
+  {% if taxonomy is not none %}
+  <div class="card">
+    <table>
+      <thead>
+        <tr>
+          <th class="num">Cluster ID</th>
+          <th class="num"># Episodes</th>
+          <th>Exemplar Episode ID</th>
+          <th class="num">Mean Intra-Cluster Distance</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for cluster in taxonomy.clusters %}
+        <tr>
+          <td class="num">{{ cluster.cluster_id }}</td>
+          <td class="num">{{ cluster.member_episode_ids|length }}</td>
+          <td><code>{{ cluster.exemplar_episode_id }}</code></td>
+          <td class="num">{{ '%.4f'|format(cluster.intra_cluster_distance) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if taxonomy.silhouette is not none %}
+    <p class="subtle">
+      Silhouette score: {{ '%.3f'|format(taxonomy.silhouette) }}
+      (Rousseeuw 1987; higher is better, range [-1, 1]).
+    </p>
+    {% endif %}
+  </div>
+  {% else %}
+  <div class="card empty-state">
+    {{ taxonomy_notice }}
+  </div>
+  {% endif %}
+</section>
+{% endif %}
+
 {# ─── 2a. Calibration-aware abstention scoring (B-04) ───
    "Did the policy know it was failing?" — selective-prediction
    numbers over the B-01 conformal failure detector. Rendered only

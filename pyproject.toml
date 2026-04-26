@@ -213,6 +213,20 @@ mlflow = [
 parquet = [
     "pyarrow>=15.0,<22",
 ]
+# Independent extra for B-17 "Failure-mode taxonomy via trajectory
+# clustering". Pulls ``dtw-python`` for the dynamic-time-warping
+# distance metric; the only transitive dep is numpy (much lighter than
+# tslearn, which would drag scikit-learn + scipy + joblib). Lazy-
+# imported inside :func:`gauntlet.report.trajectory_taxonomy._dtw_distance`;
+# missing extra raises a clean :class:`gauntlet.report.TaxonomyError`
+# (subclass of ``ImportError``) on first call. The euclidean fallback
+# distance keeps the feature usable without the extra — the default
+# install ships a degraded but functional taxonomy, never a hard
+# block. Lower bound 1.4 is the first release with the
+# ``dist_method="euclidean"`` keyword and full Python 3.12 wheels.
+trajectory-taxonomy = [
+    "dtw-python>=1.4,<2",
+]
 
 [project.scripts]
 gauntlet = "gauntlet.cli:app"
@@ -639,6 +653,17 @@ ignore_missing_imports = true
 # installed (the default job state).
 [[tool.mypy.overrides]]
 module = ["wandb", "wandb.*", "mlflow", "mlflow.*"]
+ignore_missing_imports = true
+
+# dtw-python ships no type stubs; the [trajectory-taxonomy] extra
+# (B-17) is off by default. Same FFI-boundary carve-out shape as
+# imageio / pyarrow / wandb above — lets mypy import-check
+# ``gauntlet.report.trajectory_taxonomy`` even when the extra is not
+# installed (the default job state). The lazy import in
+# ``_dtw_distance`` and the ``cast`` on the result attribute keep the
+# ``Any`` confined to a single line.
+[[tool.mypy.overrides]]
+module = ["dtw", "dtw.*"]
 ignore_missing_imports = true
 
 # ---------- ``disallow_any_explicit`` per-module carve-outs ----------
