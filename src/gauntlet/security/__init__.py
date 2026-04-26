@@ -10,8 +10,8 @@ YAML deserialisation). The contract is deliberately narrow:
   joined under a trusted root.
 * :func:`safe_yaml_load` — the canonical YAML entry point. Wraps
   :func:`yaml.safe_load` so every call-site flows through one place;
-  ripgrepping for ``yaml.load(`` (without ``safe_``) becomes the CI
-  contract that PyYAML's unsafe loaders never re-enter ``src/``.
+  the CI grep gate verifies that PyYAML's unsafe-loader entry points
+  never re-enter ``src/``.
 
 Errors:
 
