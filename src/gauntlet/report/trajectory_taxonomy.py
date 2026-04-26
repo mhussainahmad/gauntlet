@@ -207,7 +207,7 @@ def _dtw_distance(a: NDArray[np.float64], b: NDArray[np.float64]) -> float:
     missing — callers ``except ImportError`` to fall back.
     """
     try:
-        from dtw import dtw as _dtw_fn  # type: ignore[import-not-found]
+        from dtw import dtw as _dtw_fn
     except ImportError as exc:
         raise TaxonomyError(
             "DTW distance requires the [trajectory-taxonomy] extra. "
