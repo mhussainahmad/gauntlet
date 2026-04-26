@@ -415,3 +415,59 @@ class Episode(BaseModel):
     # ------------------------------------------------------------------
 
     source: Literal["sim", "real"] | None = None
+
+    # ------------------------------------------------------------------
+    # Long-horizon subtask credit (B-09 stub) — partial-credit accounting
+    # for skill-chaining envs that satisfy the
+    # :class:`gauntlet.env.base.SubtaskMilestone` Protocol (currently
+    # only :class:`gauntlet.env.tabletop_stack.TabletopStackEnv`). The
+    # field carries the *final* monotonic-non-decreasing
+    # ``info["subtask_completion"]`` list emitted by the env's last
+    # ``step()`` of the rollout. Length equals the env's ``n_subtasks``;
+    # ``True`` flags every milestone that was hit at any point in the
+    # rollout (the latch is preserved by the env, not the runner).
+    #
+    # Refs: LAMBDA (arxiv 2412.05313), RoboCerebra (arxiv 2506.06677) —
+    # binary success undercounts long-horizon failures because a policy
+    # that nails the first two of three steps and stalls is identical
+    # in the report to a policy that did nothing. The list lets the
+    # report layer surface "succeeded at substep 0/3 only" cells.
+    #
+    # Default ``None`` keeps the field semantically inert for the
+    # legacy single-step flow:
+    #
+    # * Single-step envs (TabletopEnv, MobileTabletopEnv, the PyBullet
+    #   / Genesis / Isaac stubs) leave it ``None`` — they do not
+    #   satisfy :class:`SubtaskMilestone`, and there is no honest
+    #   ``[bool]`` payload to emit (a one-element list aliasing
+    #   ``success`` would be a mistake: it commits to a schema for an
+    #   env class that never asked for it).
+    # * Long-horizon envs that do satisfy the Protocol but ran without
+    #   the runner-side wiring (this stub PR is exactly that case)
+    #   ALSO leave the field ``None`` — populating it requires the
+    #   worker to forward the per-step info, which is the B-09
+    #   follow-up. The env-side ``info["subtask_completion"]`` is
+    #   already published.
+    # * A *new* Episode produced by a fully-wired runner emits the
+    #   list directly; ``None`` vs. a populated list is the
+    #   "did the runner observe per-subtask credit?" signal the
+    #   report layer keys off.
+    #
+    # ``extra="forbid"`` semantics (mirrors the ``video_path`` /
+    # provenance / B-37 blocks above): an old reader on a new JSON
+    # rejects under ``extra="forbid"`` — that is the standard
+    # schema-addition trade-off; the reverse direction (new reader on
+    # old JSON) loads cleanly under the field default. No fixture
+    # JSON files in the repo carry the field today, so the addition
+    # is back-compat-clean for everything currently checked in.
+    #
+    # Schema evolution path (deferred to the B-09 follow-up):
+    # a per-subtask name registry (``subtask_names: tuple[str, ...]``)
+    # and a per-subtask reward decomposition vector are the obvious
+    # next fields; both ride on the same ``Optional[..] = None``
+    # back-compat pattern. Keeping the first cut to a single
+    # ``list[bool] | None`` field minimises the surface for a stub
+    # PR while leaving the seam open.
+    # ------------------------------------------------------------------
+
+    subtask_completion: list[bool] | None = None
