@@ -65,6 +65,21 @@ if TYPE_CHECKING:
 _SinkConfigValue: TypeAlias = str | int | float | bool | None
 
 
+class _ClickMain(Protocol):
+    """Subset of :meth:`click.BaseCommand.main` we need.
+
+    The Typer ↔ Click bridge in :func:`_install_click_plugin` only ever
+    invokes ``click_cmd.main(args=..., standalone_mode=False)``; this
+    Protocol documents the call shape so mypy --strict (with
+    ``disallow_any_explicit``) can type-check the cast at the call site
+    without importing click at module scope just for typing.
+    """
+
+    def __call__(self, *, args: list[str], standalone_mode: bool) -> object:
+        """Invoke the click command with the given argv."""
+        ...
+
+
 class _SinkFactory(Protocol):
     """Concrete constructor signature shared by every plugin sink.
 
@@ -3337,6 +3352,116 @@ def suite_plan(
         "episode counts (GAUNTLET_SPEC.md §1, 'failures over averages'). "
         "Treat each cell's number as a floor, never a ceiling.",
     )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# `ext` sub-app — third-party CLI plugins under ``gauntlet ext <name>``.
+# ──────────────────────────────────────────────────────────────────────
+#
+# Plugin commands registered under the ``gauntlet.cli``
+# ``[project.entry-points]`` group are mounted here so the first-party
+# command surface stays clean and a plugin cannot silently shadow a
+# built-in. The sub-app is constructed unconditionally (so ``gauntlet
+# ext --help`` always works); plugin registration happens once at module
+# import time inside :func:`_register_cli_plugins`.
+
+ext_app = typer.Typer(
+    name="ext",
+    help=(
+        "Third-party CLI extensions registered under the "
+        "'gauntlet.cli' entry-point group. See docs/extension-points.md "
+        "for the publishing recipe."
+    ),
+    no_args_is_help=True,
+    add_completion=False,
+)
+app.add_typer(ext_app, name="ext")
+
+
+def _install_click_plugin(parent: typer.Typer, click_cmd: object, name: str) -> None:
+    """Mount a Click command/group under ``parent`` as a Typer command.
+
+    Typer's :meth:`add_typer` only accepts other Typer instances, so a
+    bare :class:`click.Command` / :class:`click.Group` plugin is wrapped
+    in a thin Typer ``command`` whose body forwards remaining argv to
+    the click command's ``main`` (with ``standalone_mode=False`` so
+    Click does not ``sys.exit`` past Typer's error handling). The
+    wrapper opts into ``ignore_unknown_options`` /
+    ``allow_extra_args`` so the click command's own option parser sees
+    the user's flags unchanged.
+    """
+    # Lazy import — we only need the click types when a plugin actually
+    # ships a Click object, and the import path is light anyway (Typer
+    # imports click at module load).
+    import click
+
+    # ``click.Command`` covers both ``Command`` (leaf) and ``Group``
+    # (multi). We avoid ``click.BaseCommand`` because Click 9.x removes
+    # it; ``Command`` has been the public root since 8.x.
+    if not isinstance(click_cmd, click.Command):  # defence in depth
+        raise TypeError(
+            f"CLI plugin {name!r}: expected typer.Typer / click.Command / "
+            f"click.Group, got {type(click_cmd).__name__}"
+        )
+    # The instance attributes ``.help`` and ``.main`` aren't reflected
+    # on the class itself in click 8.x, so mypy --strict can't see them
+    # through the ``isinstance`` narrowing. ``getattr`` documents the
+    # intentional duck-typed access (the Typer ↔ Click bridge has no
+    # stricter contract than what click itself ships).
+    help_text_attr = getattr(click_cmd, "help", None)
+    help_text = help_text_attr if isinstance(help_text_attr, str) else ""
+    main_fn = cast("_ClickMain", click_cmd.main)
+
+    @parent.command(
+        name=name,
+        help=help_text,
+        context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
+    )
+    def _proxy(ctx: typer.Context) -> None:
+        main_fn(args=ctx.args, standalone_mode=False)
+
+
+_registered_cli_plugins: set[str] = set()
+
+
+def _register_cli_plugins() -> None:
+    """Mount every ``gauntlet.cli`` entry-point plugin under :data:`ext_app`.
+
+    Idempotent: each plugin name is registered at most once across
+    repeat calls (the :data:`_registered_cli_plugins` guard set). Tests
+    that inject fake entry points via :func:`unittest.mock.patch` on
+    :func:`importlib.metadata.entry_points` must call
+    :meth:`discover_cli_plugins.cache_clear` and then this function (in
+    that order) to materialise their fakes onto :data:`ext_app`.
+
+    Built-in commands always win on identity collision (warn, do not
+    error — same precedent as policies / envs). Discovery failures and
+    duplicate entry-point names within the group are handled inside
+    :func:`gauntlet.plugins.discover_cli_plugins`; this function only
+    decides how to mount each successfully-loaded object.
+    """
+    # Lazy import — keeps the test fixture's `from gauntlet import cli`
+    # cheap when the test does not exercise plugin discovery.
+    from gauntlet.plugins import discover_cli_plugins
+
+    plugins = discover_cli_plugins()
+    for name, obj in plugins.items():
+        if name in _registered_cli_plugins:
+            continue
+        if isinstance(obj, typer.Typer):
+            ext_app.add_typer(obj, name=name)
+        else:
+            # ``click.BaseCommand`` covers both ``click.Command`` (leaf)
+            # and ``click.Group`` (multi). The duck-typed wrapper
+            # handles both via ``BaseCommand.main``.
+            _install_click_plugin(ext_app, obj, name=name)
+        _registered_cli_plugins.add(name)
+
+
+# Run once at module import so a freshly-installed plugin shows up
+# without any caller having to opt in. The guard set above keeps
+# subsequent calls (from tests, or from a re-import path) safe.
+_register_cli_plugins()
 
 
 # ``python -m gauntlet.cli`` parity with the installed entry point.
