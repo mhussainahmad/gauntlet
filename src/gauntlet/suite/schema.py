@@ -56,13 +56,20 @@ __all__ = [
     "SamplingMode",
     "Suite",
     "SuiteCell",
+    "WorstCaseConfig",
 ]
 
 
 # Public type alias so the loader / Sampler dispatch / docs all key off
 # the same string set. Adding a new mode requires touching this literal
 # and ``gauntlet.suite.sampling.build_sampler`` together — by design.
-SamplingMode = Literal["cartesian", "latin_hypercube", "sobol", "adversarial"]
+SamplingMode = Literal[
+    "cartesian",
+    "latin_hypercube",
+    "sobol",
+    "adversarial",
+    "worst_case_continuous",
+]
 
 # Tuple form of the same set, used by validators that need a runtime
 # ``in`` check (Pydantic narrows ``Literal`` in the model but the
@@ -72,6 +79,7 @@ SAMPLING_MODES: Final[tuple[SamplingMode, ...]] = (
     "latin_hypercube",
     "sobol",
     "adversarial",
+    "worst_case_continuous",
 )
 
 
@@ -184,6 +192,49 @@ class ExtrinsicsRange(BaseModel):
                 )
             out.append([lo, hi])
         return out
+
+
+class WorstCaseConfig(BaseModel):
+    """Optional ``worst_case`` sub-config for ``sampling=worst_case_continuous`` (B-44).
+
+    Carries the differential-evolution knobs the
+    :class:`gauntlet.suite.worst_case.WorstCaseContinuousSampler`
+    consumes when the user wires the mode through a YAML rather than
+    constructing the sampler directly. Every field is optional; the
+    sampler falls back to its module-level defaults
+    (:data:`gauntlet.suite.worst_case.DEFAULT_MAX_EVALUATIONS`,
+    :data:`gauntlet.suite.worst_case.DEFAULT_EPISODES_PER_EVAL`) for
+    any field left unset.
+
+    Attributes:
+        max_evaluations: Hard cap on objective-function calls inside
+            DE. Must be ``>= 1`` when set.
+        episodes_per_eval: Number of episodes the per-candidate failure
+            score is averaged over. Must be ``>= 1`` when set.
+        seed: Optional per-search seed. Distinct from :attr:`Suite.seed`
+            so a user can keep the suite-wide seed stable across DE
+            re-runs while changing only the search-side entropy.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_evaluations: int | None = Field(default=None)
+    episodes_per_eval: int | None = Field(default=None)
+    seed: int | None = Field(default=None)
+
+    @field_validator("max_evaluations")
+    @classmethod
+    def _max_evaluations_positive(cls, v: int | None) -> int | None:
+        if v is not None and v < 1:
+            raise ValueError(f"worst_case.max_evaluations must be >= 1; got {v}")
+        return v
+
+    @field_validator("episodes_per_eval")
+    @classmethod
+    def _episodes_per_eval_positive(cls, v: int | None) -> int | None:
+        if v is not None and v < 1:
+            raise ValueError(f"worst_case.episodes_per_eval must be >= 1; got {v}")
+        return v
 
 
 class AxisSpec(BaseModel):
@@ -505,6 +556,13 @@ class Suite(BaseModel):
     # relative to the suite YAML's parent directory by ``load_suite``;
     # absolute paths and string-loaded suites pass through unchanged.
     pilot_report: str | None = None
+    # B-44 — optional knobs for ``sampling="worst_case_continuous"``
+    # (Eva-VLA-inspired worst-case search). Forbidden on every other
+    # mode (a stale ``worst_case`` block is the same footgun as a
+    # stale ``pilot_report`` reference). All sub-fields are optional;
+    # missing fields fall back to the
+    # :mod:`gauntlet.suite.worst_case` module-level defaults.
+    worst_case: WorstCaseConfig | None = None
 
     # ------------------------------------------------------------------
     # Field-level checks.
@@ -681,6 +739,39 @@ class Suite(BaseModel):
                 "for sampling=adversarial; drop the pilot_report field "
                 "or switch to sampling=adversarial.",
             )
+        # B-44 — ``worst_case`` sub-config is exclusive to the
+        # worst_case_continuous sampler; mixing it with any other mode
+        # silently ignores the knobs, which is exactly the footgun the
+        # anti-feature note calls out.
+        if self.sampling != "worst_case_continuous" and self.worst_case is not None:
+            raise ValueError(
+                f"sampling={self.sampling}: worst_case sub-config is only "
+                "valid for sampling=worst_case_continuous; drop the "
+                "worst_case block or switch to sampling=worst_case_continuous.",
+            )
+        # B-44 — worst_case_continuous needs at least one continuous
+        # axis; an all-categorical suite is not searchable. Surface
+        # this before the n_samples / steps gating below so the user
+        # gets the most informative error.
+        if self.sampling == "worst_case_continuous":
+            continuous_axes_present = [
+                name
+                for name, spec in self.axes.items()
+                if spec.values is None
+                and spec.extrinsics_values is None
+                and spec.extrinsics_range is None
+                and spec.low is not None
+                and spec.high is not None
+            ]
+            if not continuous_axes_present:
+                raise ValueError(
+                    "sampling=worst_case_continuous: at least one "
+                    "continuous axis ({low, high} bounds) is required; "
+                    "the differential-evolution search has nothing to "
+                    "optimise over an all-categorical suite. Add a "
+                    "continuous axis (e.g. lighting_intensity, "
+                    "camera_offset_x) or pick a different sampling mode.",
+                )
         if self.sampling == "cartesian":
             # n_samples is meaningless for Cartesian (cell count is the
             # axis-step product). Reject explicitly so a user who ports
@@ -708,6 +799,28 @@ class Suite(BaseModel):
                         f"axis spec: continuous shape requires low, high, "
                         f"steps; missing ['steps'] on axis {axis_name!r} "
                         "(required for sampling=cartesian)",
+                    )
+        elif self.sampling == "worst_case_continuous":
+            # B-44 — the DE budget is the ``worst_case.max_evaluations``
+            # field; the suite-level ``n_samples`` is meaningless here
+            # and accepting it silently would invite the same footgun as
+            # a stale ``n_samples`` on a Cartesian YAML. Reject loudly.
+            if self.n_samples is not None:
+                raise ValueError(
+                    "sampling=worst_case_continuous: n_samples must be "
+                    "omitted (the search budget is worst_case.max_evaluations, "
+                    f"not n_samples); got n_samples={self.n_samples}",
+                )
+            # ``steps`` is forbidden for the same reason it is forbidden
+            # under LHS / Sobol / adversarial — the budget is per-search,
+            # not per-axis-step.
+            for axis_name, spec in self.axes.items():
+                if spec.steps is not None:
+                    raise ValueError(
+                        f"axis spec: sampling={self.sampling} forbids "
+                        f"per-axis steps; got steps={spec.steps} on axis "
+                        f"{axis_name!r}. Drop the steps key — the worst-"
+                        "case search budget is set by worst_case.max_evaluations.",
                     )
         else:
             # LHS / Sobol / adversarial: n_samples is required and
