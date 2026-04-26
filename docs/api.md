@@ -32,6 +32,7 @@ RFCs cross-linked from each section below.
 - [Real-to-sim (scene reconstruction)](#real-to-sim-scene-reconstruction)
 - [Security (path / YAML guards)](#security-path--yaml-guards)
 - [Plugins (third-party env / policy)](#plugins-third-party-env--policy)
+- [Type strictness](#type-strictness)
 
 ---
 
@@ -1155,3 +1156,84 @@ built-ins and plugins. The built-in registries (`gauntlet.policy.registry`,
 `gauntlet.env.registry`) enforce built-in-wins precedence one layer
 up. See `docs/polish-exploration-plugin-system.md` and
 `docs/plugin-development.md`.
+
+---
+
+## Type strictness
+
+The harness ships under `mypy --strict` plus the project-wide ratchet
+`disallow_any_explicit = true` (Phase 2.5 T15). A new explicit
+`Any` typed by a developer in pure-gauntlet code triggers
+`[explicit-any]` and CI rejects the diff. The regression gate is
+`tests/test_type_strictness.py` (slow-marked) — it spawns
+`python -m mypy --strict src/gauntlet` and asserts a clean exit.
+Run it locally with `pytest -m slow tests/test_type_strictness.py`.
+
+### Policy
+
+- `Any` is disallowed at the project level. Tighten to a real type
+  (a concrete class, a `TypedDict`, a `Union` / discriminated union,
+  a `Protocol`, or a `numpy.typing.NDArray[<dtype>]`) before reaching
+  for a carve-out.
+- Add a per-module carve-out **only** when the boundary is genuinely
+  dynamic — an FFI seam to a stub-less third-party library (mujoco,
+  pybullet, genesis, isaacsim, rclpy, lerobot, torch sub-surfaces),
+  a `**kwargs: Any` synthesised by a `dataclass_transform` plugin
+  (every pydantic v2 `BaseModel` trips this), `yaml.safe_load` /
+  `json.loads` of an externally-authored file at the parse boundary,
+  or `importlib.metadata` entry-point loading where the loaded
+  symbol is opaque until materialised.
+- A new carve-out lands as a one-line `module = "gauntlet.<name>"`
+  entry inside the existing `[[tool.mypy.overrides]]` block in
+  `pyproject.toml`, with a one-line comment in the line above
+  explaining the boundary. No `# type: ignore` lines — prefer the
+  per-module carve-out so the contract is visible at PR review time.
+- Pure-gauntlet code (anything outside the carve-out list) stays
+  `Any`-free. If you find yourself wanting `Any` inside a non-carved
+  module, the right move is usually to refactor the boundary so the
+  `Any` lives in a thin adapter on the FFI side, then narrow the
+  return value into a real type at the seam.
+
+### Currently carved-out modules
+
+The full list lives in `pyproject.toml` under
+`[[tool.mypy.overrides]]` blocks (the two with
+`disallow_any_explicit = false`). Two structural buckets, with the
+narrowing rationale recorded inline next to each entry:
+
+- **Pydantic schema modules** (9): `gauntlet.aggregate.schema`,
+  `gauntlet.bisect.bisect`, `gauntlet.diff.diff`,
+  `gauntlet.diff.paired`, `gauntlet.monitor.schema`,
+  `gauntlet.realsim.schema`, `gauntlet.report.schema`,
+  `gauntlet.ros2.schema`, `gauntlet.runner.episode`,
+  `gauntlet.suite.schema`. Each is a `BaseModel` subclass; the
+  pydantic v2 mypy plugin synthesises `__mypy-replace(**kwargs: Any)`
+  which is what mypy actually flags. The carve-out is not a license
+  for new `Any` literals in the schema bodies — `ConfigDict(extra="forbid")`
+  + the existing `mypy_strict_optional` setup keeps the surface
+  honest.
+- **FFI seam modules**: env wrappers (`gauntlet.env`,
+  `gauntlet.env.base`, `gauntlet.env.tabletop`,
+  `gauntlet.env.image_attack`, `gauntlet.env.color_attack`,
+  `gauntlet.env.instruction`, the pybullet / genesis / isaac
+  backends, and the perturbation factory base), policy adapters
+  (`gauntlet.policy` plus `huggingface`, `lerobot`, `pi0`, `groot`,
+  `rdt`, `dt`), runner FFI seams (`gauntlet.runner.video`,
+  `gauntlet.runner.worker`, `gauntlet.runner.parquet`,
+  `gauntlet.runner.sinks`), the lazy-import `__getattr__` shims
+  (`gauntlet.monitor`), the ROS 2 bridge (`gauntlet.ros2`,
+  `gauntlet.ros2.publisher`, `gauntlet.ros2.recorder`), the YAML
+  parse boundary (`gauntlet.suite.loader`,
+  `gauntlet.security.yaml_guard`), the realsim JSON ingest
+  (`gauntlet.realsim.pipeline`, `gauntlet.realsim.renderer`), the
+  plugin entry-point loader (`gauntlet.plugins`), and the dashboard
+  SPA index payload (`gauntlet.dashboard.build`).
+
+The merged carve-out list is structurally larger than a "<8 modules"
+shape because the harness sits on top of a wide collection of
+stub-less third-party C/C++ surfaces (mujoco, pybullet, genesis,
+isaacsim, rclpy, plus the optional torch / lerobot / transformers /
+pyarrow / imageio / wandb / mlflow / dtw extras), and each backend
+adds its own wrapper module. Trim the list when an upstream stub
+package lands; do not add to it without a one-line rationale next to
+the entry.
