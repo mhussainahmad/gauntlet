@@ -38,7 +38,11 @@ RFCs cross-linked from each section below.
 ## Environment Protocol and backends
 
 ```python
-from gauntlet.env import GauntletEnv, CameraSpec
+from gauntlet.env import (
+    GauntletEnv, CameraSpec,
+    AXIS_NAMES, PerturbationAxis, axis_for,
+    N_DISTRACTOR_SLOTS,
+)
 ```
 
 `GauntletEnv` is a structural `typing.Protocol` (RFC-005 §3) — any
@@ -54,6 +58,18 @@ the queue.
 camera. `pose = (x, y, z, rx, ry, rz)` is metres + MuJoCo-XYZ Euler
 radians. `size = (H, W)`. See
 `docs/polish-exploration-multi-camera.md` for the full contract.
+
+`AXIS_NAMES` is the canonical ordered tuple of every scalar
+perturbation axis name the harness understands (the original seven
+plus B-32 / B-31 / B-05 / B-06 / B-42 / B-43 / B-38 additions). Stable
+contract — Suite YAML keys, Runner cell ids, Report axis labels all
+key off it. `PerturbationAxis(name, kind, sampler, bounds)` is the
+frozen record one axis is described by; `axis_for(name)` returns the
+default-configured `PerturbationAxis` registered under `name`. See
+`gauntlet.env.perturbation` for the per-axis constructor surface
+(`lighting_intensity`, `camera_offset_x`, …, `inference_delay_jitter`).
+`N_DISTRACTOR_SLOTS` is the integer cap on the `distractor_count`
+axis; downstream code reads it instead of hard-coding the bound.
 
 ### `TabletopEnv`
 
@@ -113,6 +129,26 @@ deferred. Construction boots `SimulationApp({"headless": True})`
 (~5-s amortised cost per worker). Declares the 5 state-only axes
 (camera and texture axes are visual-only and excluded). Requires the
 `[isaac]` extra and a CUDA-capable RTX-class GPU.
+
+### `MobileTabletopEnv` (B-13)
+
+```python
+from gauntlet.env import MobileTabletopEnv
+
+env = MobileTabletopEnv()
+# Action: [dx, dy, dz, drx, dry, drz, gripper, base_vx, base_vy, base_omega_z]
+```
+
+Composition wrapper around `TabletopEnv` adding a kinematic SE(2) base.
+The first 7 action slots are the inner pick twist; the trailing 3 slots
+are integrated kinematically (`base_pose <- base_pose + (vx, vy,
+omega) * BASE_DT`). Observation is every key the inner env publishes
+plus `pose: Box(shape=(3,))`, the integrated `(x, y, theta)`. Success
+is `nav_done AND picked` — base XY within `NAV_RADIUS` of a fixed
+base-frame target table AND the inner env reporting a successful
+grasp. Phase-1 scope: the wrapper does NOT forward perturbations to
+the inner env (`AXIS_NAMES` is empty); the freejoint-mounted-arm and
+collision rebake are deferred. Registered as `tabletop-mobile`.
 
 ### Env registry
 
@@ -196,7 +232,7 @@ RNG `Suite.cells()` seeds from `suite.seed`. See
 
 ```python
 from gauntlet.policy import (
-    Policy, ResettablePolicy, Action, Observation,
+    Policy, ResettablePolicy, SamplablePolicy, Action, Observation,
     RandomPolicy, ScriptedPolicy, DEFAULT_PICK_AND_PLACE_TRAJECTORY,
     HuggingFacePolicy, LeRobotPolicy,
     PolicySpecError, resolve_policy_factory,
@@ -206,7 +242,18 @@ from gauntlet.policy import (
 `Policy` is the minimal `runtime_checkable` Protocol: `act(obs) ->
 action`. `ResettablePolicy` adds `reset(rng)` — the Runner calls it at
 the start of every episode when present so stochastic policies re-seed
-deterministically.
+deterministically. `SamplablePolicy` (B-18) adds
+`act_n(obs, n=8) -> Sequence[Action]`: the runner draws `n`
+independent actions at a handful of trajectory steps to compute the
+mode-collapse metric stored on `Episode.action_variance`.
+Implementations MUST keep `act_n` side-effect free on per-episode
+state (snapshot + restore the RNG / chunk-queue cursor) so the
+measured rollout's actions remain identical to an unmeasured rollout
+with the same `Episode.seed` — preserving the determinism that B-08
+CRN paired-compare and B-39 bisect rely on. Greedy / open-loop
+policies (Scripted, OpenVLA-greedy) deliberately do not implement
+this Protocol; the runner keys off `isinstance` and writes
+`Episode.action_variance=None`.
 
 ### `RandomPolicy`
 
@@ -668,15 +715,42 @@ parser, exported for notebook callers. `OverrideError` is a
 from gauntlet.monitor import (
     PerEpisodeDrift, DriftReport,
     ActionEntropyStats, action_entropy,
+    ConformalFailureDetector,
     StateAutoencoder, train_ae, score_drift,  # require [monitor] extra
 )
 ```
 
 Torch-free symbols (`PerEpisodeDrift`, `DriftReport`,
-`action_entropy`, `ActionEntropyStats`) are eagerly re-exported.
-Torch-backed symbols (`StateAutoencoder`, `train_ae`, `score_drift`)
-are lazy — accessing them on a torch-free install raises a clean
-`ImportError` with the install hint.
+`action_entropy`, `ActionEntropyStats`, `ConformalFailureDetector`)
+are eagerly re-exported. Torch-backed symbols (`StateAutoencoder`,
+`train_ae`, `score_drift`) are lazy — accessing them on a torch-free
+install raises a clean `ImportError` with the install hint.
+
+### `ConformalFailureDetector` (B-01)
+
+```python
+from gauntlet.monitor import ConformalFailureDetector
+
+# Calibrate on a held-out set of *successful* episodes from the same
+# (policy, env) pair. Episodes must come from a SamplablePolicy run
+# so Episode.action_variance is populated.
+det = ConformalFailureDetector.fit(calibration_episodes, alpha=0.05)
+score, alarm = det.score(candidate_episode)
+det.to_dict()                  # JSON-serialisable round-trip artefact
+```
+
+Split-conformal failure-prediction detector keyed off
+`Episode.action_variance` (the B-18 mode-collapse signal). Computes
+the calibration-quantile threshold under the FIPER-style finite-
+sample correction (`ceil((n + 1) * (1 - alpha)) / n`-quantile of the
+calibration scores). At score time returns a per-episode
+`(failure_score, failure_alarm)` pair: the score is the candidate's
+`action_variance` divided by the threshold (>1 ⟹ more uncertain than
+calibration); the alarm is `score > 1.0`. Pure numpy — no torch, no
+scipy. Asymmetric by design: greedy policies leave
+`Episode.action_variance` as `None` and the detector skips them
+rather than fabricating a 0.0 signal. See `docs/backlog.md` B-01 for
+the FIPER / FAIL-Detect references.
 
 ### `train_ae(trajectory_dir, *, out_dir, reference_suite, latent_dim=8, epochs=50, batch_size=256, lr=1e-3, seed=0)`
 
@@ -746,12 +820,25 @@ See `docs/phase2-rfc-010-ros2-integration.md`.
 from gauntlet.realsim import (
     Scene, CameraFrame, CameraIntrinsics, Pose,
     SCENE_SCHEMA_VERSION, MANIFEST_FILENAME,
+    IMAGE_MAGIC_BYTES, POSE_BOTTOM_ROW_TOLERANCE,
     ingest_frames, save_scene, load_scene,
     IngestionError, SceneIOError,
     RealSimRenderer, RendererFactory, RendererRegistryError,
     register_renderer, get_renderer, list_renderers,
 )
 ```
+
+`IMAGE_MAGIC_BYTES` is the `dict[str, bytes]` mapping from
+human-readable container name (`"png"`, `"jpeg"`, `"ppm-binary"`,
+`"ppm-ascii"`) to the magic-byte prefix the ingest pipeline checks
+before accepting a frame — magic-byte sniffing rather than Pillow /
+imageio import on the hot path. `POSE_BOTTOM_ROW_TOLERANCE` is the
+absolute tolerance the schema validator applies to the bottom row of
+each `Pose` 4x4 matrix (`[0, 0, 0, 1]` to within this much) before
+rejecting a non-rigid transform. `RendererFactory` is the
+`Callable[[], RealSimRenderer]` type alias — the value
+`register_renderer(name, factory)` accepts and `get_renderer(name)`
+returns.
 
 ### `ingest_frames(frames_dir, calib_path, *, source=None) -> Scene`
 
