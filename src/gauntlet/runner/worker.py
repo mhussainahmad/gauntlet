@@ -47,10 +47,12 @@ way to extract a per-spawn-unique scalar.
 from __future__ import annotations
 
 import time
+import warnings
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, TypedDict
+from typing import Any, Final, Literal, TypedDict
 
 import numpy as np
 from numpy.typing import NDArray
@@ -71,6 +73,8 @@ TrajectoryFormat = Literal["npz", "parquet", "both"]
 
 __all__ = [
     "CONSISTENCY_STRIDE",
+    "DEFAULT_CONTROL_DT_FALLBACK_S",
+    "INFERENCE_DELAY_JITTER_AXIS",
     "TrajectoryFormat",
     "VideoConfig",
     "WorkItem",
@@ -78,6 +82,7 @@ __all__ = [
     "execute_one",
     "extract_env_seed",
     "pool_initializer",
+    "resolve_inference_delay_steps",
     "run_work_item",
     "trajectory_path_for",
     "write_trajectory_npz",
@@ -93,6 +98,22 @@ CONSISTENCY_STRIDE: int = 5
 # Default N (action chunks per measured step) — matches the B-18 spec's
 # "sample N action chunks per state" wording.
 _CONSISTENCY_N: int = 8
+
+# B-38 — name of the runner-side stale-action axis. Matches the entry in
+# :data:`gauntlet.env.perturbation.AXIS_NAMES`. The worker pops this
+# axis out of :attr:`WorkItem.perturbation_values` BEFORE calling
+# :meth:`GauntletEnv.set_perturbation` (no backend's ``AXIS_NAMES``
+# ClassVar contains it — staleness is a control-loop property, not an
+# env property). Hoisted to module scope so tests can reference the
+# exact constant.
+INFERENCE_DELAY_JITTER_AXIS: Final[str] = "inference_delay_jitter"
+
+# B-38 — fallback control_dt in seconds when the env does not publish
+# a ``control_dt`` property. 50 ms / 20 Hz matches the canonical
+# tabletop control rate; backends without the property will trigger a
+# one-time :class:`UserWarning` so users see the imprecision without
+# the run aborting. Hoisted to module scope so tests can pin it.
+DEFAULT_CONTROL_DT_FALLBACK_S: Final[float] = 0.050
 
 
 # ----------------------------------------------------------------------------
@@ -309,6 +330,62 @@ def pool_initializer(args: WorkerInitArgs) -> None:
 # ----------------------------------------------------------------------------
 
 
+def resolve_inference_delay_steps(
+    delay_ms: float,
+    env: GauntletEnv,
+) -> int:
+    """Convert a B-38 millisecond axis value to an integer FIFO depth.
+
+    The :func:`gauntlet.env.perturbation.inference_delay_jitter` axis
+    publishes a millisecond magnitude; the worker's stale-action FIFO
+    needs an integer step count. The conversion is
+    ``floor(delay_ms / control_dt_ms)`` — partial steps round down so
+    a 49 ms delay on a 50 ms control loop is honestly reported as
+    "0 steps of staleness" rather than rounded up to a fictitious
+    one-step lag.
+
+    The env's ``control_dt`` is read off a public property when
+    present (added on
+    :class:`gauntlet.env.tabletop.TabletopEnv` in B-38). Backends that
+    do not expose the property — e.g. a state-only PyBullet first cut,
+    a fake test env — fall back to the documented constant
+    :data:`DEFAULT_CONTROL_DT_FALLBACK_S` (50 ms / 20 Hz, matching the
+    canonical tabletop control rate) and emit a one-time
+    :class:`UserWarning` so the user sees the imprecision without the
+    run aborting.
+
+    Args:
+        delay_ms: Millisecond magnitude from the axis value. Must be
+            non-negative; negative values raise ``ValueError`` (the
+            categorical sampler enumerates a closed list of legal
+            values, so a negative leak indicates a YAML bug).
+        env: The env instance, queried for ``control_dt`` (seconds).
+
+    Returns:
+        Non-negative integer FIFO depth. ``0`` means "no staleness"
+        and the worker takes the byte-identical no-jitter codepath.
+    """
+    if delay_ms < 0:
+        raise ValueError(f"inference_delay_jitter: delay_ms must be >= 0; got {delay_ms!r}")
+    control_dt_s = getattr(env, "control_dt", None)
+    if control_dt_s is None:
+        warnings.warn(
+            f"inference_delay_jitter: env {type(env).__name__} does not expose "
+            f"control_dt; falling back to {DEFAULT_CONTROL_DT_FALLBACK_S * 1000.0:.0f} ms "
+            "(20 Hz). Add a control_dt property to the env for accurate FIFO depth.",
+            UserWarning,
+            stacklevel=2,
+        )
+        control_dt_s = DEFAULT_CONTROL_DT_FALLBACK_S
+    control_dt_ms = float(control_dt_s) * 1000.0
+    if control_dt_ms <= 0.0:
+        raise ValueError(
+            f"inference_delay_jitter: env {type(env).__name__} reported "
+            f"control_dt={control_dt_s!r}; must be positive."
+        )
+    return int(float(delay_ms) // control_dt_ms)
+
+
 def extract_env_seed(seq: np.random.SeedSequence) -> int:
     """Derive a stable uint32 env seed from a :class:`SeedSequence` node.
 
@@ -460,9 +537,45 @@ def execute_one(
     is *absent* (rather than ``False``) when the budget was met or no
     budget was configured. The user wants to see every offender, not
     have the run die halfway and hide the rest.
+
+    Inference-delay-jitter contract (B-38, runner-owned):
+    When ``item.perturbation_values["inference_delay_jitter"]`` is set
+    to a positive millisecond magnitude, the worker pops it BEFORE the
+    ``env.set_perturbation`` loop (no backend's ``AXIS_NAMES`` contains
+    it — staleness is a control-loop property, not an env property),
+    converts it to an integer FIFO depth via
+    :func:`resolve_inference_delay_steps` (using the env's
+    ``control_dt`` property, falling back to 50 ms with a
+    :class:`UserWarning`), and runs a stale-action FIFO of that depth
+    around every ``env.step`` call. The first ``delay_steps`` env
+    steps receive ``np.zeros_like(action)`` (a no-op); subsequent
+    steps receive the action that ``policy.act`` produced
+    ``delay_steps`` steps ago. The synthetic delay is **deliberately
+    not counted** toward the B-37 latency buffer — only ``policy.act``
+    is bracketed by ``perf_counter``, so a fast policy with a 500 ms
+    jitter axis still reports its true compute cost. ``delay_steps ==
+    0`` (the categorical "no-jitter" baseline) takes the byte-
+    identical pre-B-38 codepath.
+
+    Anti-feature wording (mirrors the backlog): a literal ``time.sleep``
+    in the rollout would slow the test suite by minutes-per-episode for
+    sub-second budgets without faithfully simulating the staleness
+    failure mode. This implementation is a stale-action proxy, not a
+    wall-time delay.
     """
     env.restore_baseline()
+    # B-38 — pop the runner-side stale-action axis BEFORE handing the
+    # rest to ``env.set_perturbation``. No backend's ``AXIS_NAMES``
+    # ClassVar contains ``inference_delay_jitter`` (staleness is a
+    # control-loop property, not an env property), so leaking the axis
+    # into the env loop would raise ``ValueError: unknown perturbation
+    # axis``. The float value survives in ``item.perturbation_values``
+    # via ``Episode.perturbation_config`` (built from the same dict
+    # below), so replay reconstructs the staleness deterministically.
+    inference_delay_ms = item.perturbation_values.get(INFERENCE_DELAY_JITTER_AXIS, 0.0)
     for name, value in item.perturbation_values.items():
+        if name == INFERENCE_DELAY_JITTER_AXIS:
+            continue
         env.set_perturbation(name, value)
 
     policy = policy_factory()
@@ -472,6 +585,21 @@ def execute_one(
     obs, _ = env.reset(seed=env_seed)
     if isinstance(policy, ResettablePolicy):
         policy.reset(policy_rng)
+
+    # B-38 — resolve the millisecond axis value to an integer FIFO depth
+    # NOW (after reset, but before the first ``policy.act``) so the
+    # worker can warmup the stale-action buffer. ``inference_delay_steps
+    # == 0`` is the byte-identical no-jitter codepath: ``delay_buffer``
+    # stays ``None`` and the action delivered to ``env.step`` is the
+    # fresh one straight out of ``policy.act``. Sized to ``maxlen ==
+    # delay_steps + 1`` so after appending the fresh action, the
+    # leftmost slot holds the action computed exactly ``delay_steps``
+    # steps ago — matching the docstring's "step k gets the action
+    # computed at k - delay_steps" contract.
+    inference_delay_steps = resolve_inference_delay_steps(inference_delay_ms, env)
+    delay_buffer: deque[NDArray[np.float64]] | None = None
+    if inference_delay_steps > 0:
+        delay_buffer = deque(maxlen=inference_delay_steps + 1)
 
     # Per-step buffers. We allocate only when asked — a ``None``
     # trajectory_dir keeps rollout memory usage identical to Phase 1.
@@ -586,6 +714,16 @@ def execute_one(
         action = policy.act(obs)
         _t1 = time.perf_counter()
         inference_latency_buffer.append((_t1 - _t0) * 1000.0)
+        # B-38 — the trajectory / consistency / video buffers below
+        # capture the FRESH action straight off ``policy.act`` (i.e.
+        # what the policy *intended* this step). The action delivered
+        # to ``env.step`` may be stale (one of the buffered prior
+        # actions, or an all-zero no-op during warmup) when
+        # ``inference_delay_steps > 0``; that staleness is the entire
+        # point of the axis. Recording the intended action keeps the
+        # NPZ / Parquet schema honest about policy compute output —
+        # downstream replay re-derives the delivered action by
+        # rerunning the FIFO from ``Episode.perturbation_config``.
         if record_trajectory:
             # Capture the obs that was fed into ``policy.act`` and the
             # action produced for it. Arrays are defensively copied so a
@@ -598,7 +736,20 @@ def execute_one(
             # Defensive copy so a subsequent env.step that recycles the
             # render buffer cannot mutate what we will encode later.
             frame_buffer.append(np.asarray(obs["image"], dtype=np.uint8).copy())
-        obs, reward, terminated, truncated, info = env.step(action)
+        # B-38 — stale-action FIFO. ``delay_buffer is None`` means
+        # ``inference_delay_steps == 0`` (the byte-identical no-jitter
+        # path). For non-zero delay: push the fresh action and read the
+        # leftmost slot if the warmup window has elapsed; otherwise
+        # send a zero action (``np.zeros_like``) — documented as the
+        # "first ``delay_steps`` env steps send a no-op" branch.
+        delivered_action = action
+        if delay_buffer is not None:
+            delay_buffer.append(np.asarray(action, dtype=np.float64).copy())
+            if step_count < inference_delay_steps:
+                delivered_action = np.zeros_like(action)
+            else:
+                delivered_action = delay_buffer[0]
+        obs, reward, terminated, truncated, info = env.step(delivered_action)
         if record_trajectory:
             # Per-step reward / terminated / truncated. Ignored by the
             # NPZ writer (schema unchanged), surfaced as columns by

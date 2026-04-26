@@ -694,6 +694,23 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         """Return the active object-swap registry (B-06)."""
         return self._object_swap_classes
 
+    @property
+    def control_dt(self) -> float:
+        """Wall-clock seconds per control step (B-38).
+
+        The MuJoCo integrator timestep ``opt.timestep`` advances by
+        ``n_substeps`` ticks per :meth:`step` call, so the control-loop
+        period is the product. Exposed as a public read-only property
+        so the B-38 :func:`gauntlet.env.perturbation.inference_delay_jitter`
+        runner can convert a millisecond axis value to an integer step
+        count without reaching into the env's MuJoCo internals (mirrors
+        the same value already published via the B-02
+        ``info["behavior_control_dt"]`` per-step key, but available
+        before the first ``step()`` so the worker can size the FIFO
+        before delivering step 0).
+        """
+        return float(self._model.opt.timestep) * float(self._n_substeps)
+
     def set_camera_extrinsics_list(
         self,
         entries: tuple[tuple[float, float, float, float, float, float], ...],

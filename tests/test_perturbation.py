@@ -76,16 +76,31 @@ _APPLY_VALUE: dict[str, float] = {
     # ColorShiftWrapper handles dispatch instead. Tests that exercise
     # backend-direct ``set_perturbation`` filter this name out.
     "color_shift_synthetic": 0.0,
+    # B-38 — inference_delay_jitter is a *runner-owned* axis: the
+    # staleness FIFO lives in the worker, not the env. The inner
+    # backend env does NOT implement it (no entry in
+    # ``TabletopEnv.AXIS_NAMES``). Tests that exercise backend-direct
+    # ``set_perturbation`` filter this name out.
+    "inference_delay_jitter": 0.0,
 }
 
-# B-31 / B-05 / B-43 — axes whose dispatch lives outside the inner
-# backend env. Filtered out of any test that drives
-# ``TabletopEnv.set_perturbation`` directly (the env legitimately
-# rejects them).
+# Axes whose dispatch lives outside the inner backend env. Filtered out
+# of any test that drives ``TabletopEnv.set_perturbation`` directly
+# (the env legitimately rejects them):
+# * B-31 ``image_attack`` — handled by ``ImageAttackWrapper``.
+# * B-05 ``instruction_paraphrase`` — handled by ``InstructionWrapper``.
+# * B-43 ``color_shift_synthetic`` — handled by ``ColorShiftWrapper``.
+# * B-38 ``inference_delay_jitter`` — handled by the runner's worker FIFO.
 _BACKEND_DIRECT_AXES: tuple[str, ...] = tuple(
     name
     for name in AXIS_NAMES
-    if name not in {"image_attack", "instruction_paraphrase", "color_shift_synthetic"}
+    if name
+    not in {
+        "image_attack",
+        "instruction_paraphrase",
+        "color_shift_synthetic",
+        "inference_delay_jitter",
+    }
 )
 
 
@@ -124,6 +139,10 @@ class TestAxisNamesRegistry:
             "object_swap",
             "camera_extrinsics",
             "color_shift_synthetic",
+            # B-38 — runner-owned stale-action axis (worker FIFO; see
+            # gauntlet.runner.worker.execute_one). Backend AXIS_NAMES
+            # ClassVars deliberately do NOT contain it.
+            "inference_delay_jitter",
         )
 
     def test_axis_names_is_tuple(self) -> None:
