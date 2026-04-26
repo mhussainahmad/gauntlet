@@ -1729,6 +1729,27 @@ def aggregate(
             help="Render fleet_report.html alongside the JSON. Defaults to ON.",
         ),
     ] = True,
+    cluster_output: Annotated[
+        Path | None,
+        typer.Option(
+            "--cluster-output",
+            help=(
+                "Path to write the fleet failure-mode clustering JSON (T19). "
+                "Defaults to '<out>/fleet_clustering.json' when --out is supplied."
+            ),
+        ),
+    ] = None,
+    max_clusters: Annotated[
+        int,
+        typer.Option(
+            "--max-clusters",
+            help=(
+                "Hard cap on the number of fleet failure-mode clusters returned. "
+                "Buckets above the cap are merged via single-linkage agglomeration."
+            ),
+            min=1,
+        ),
+    ] = 8,
 ) -> None:
     """Aggregate every report.json under DIR into a fleet meta-report."""
     if not directory.is_dir():
@@ -1739,6 +1760,11 @@ def aggregate(
     from gauntlet.aggregate import (
         aggregate_directory,
         write_fleet_html,
+    )
+    from gauntlet.aggregate.cli import (
+        build_cluster_payload,
+        format_cluster_summary,
+        write_cluster_json,
     )
 
     try:
@@ -1759,9 +1785,28 @@ def aggregate(
     if html:
         write_fleet_html(fleet, fleet_html_path)
 
+    # T19: fleet-wide failure-mode clustering. Always run — the
+    # clustering pipeline is cheap (O(n_buckets^2) over the merged
+    # signature space, never the run count) and the result is useful
+    # alongside the meta-report. The artefact path defaults to the
+    # ``--out`` directory; a user who wants to land it elsewhere
+    # passes ``--cluster-output``.
+    cluster_path = cluster_output if cluster_output is not None else out / "fleet_clustering.json"
+    try:
+        cluster_result, cluster_payload = build_cluster_payload(
+            directory,
+            max_clusters=max_clusters,
+        )
+    except FileNotFoundError as exc:
+        raise _fail(str(exc)) from exc
+    except ValueError as exc:
+        raise _fail(str(exc)) from exc
+    write_cluster_json(cluster_payload, cluster_path)
+
     _echo_err(f"[ok]Wrote[/] {_fmt_path(fleet_json_path)}")
     if html:
         _echo_err(f"[ok]Wrote[/] {_fmt_path(fleet_html_path)}")
+    _echo_err(f"[ok]Wrote[/] {_fmt_path(cluster_path)}")
     _echo_err(
         f"  fleet: {fleet.n_runs} runs / {fleet.n_total_episodes} episodes "
         f"(mean success: {_fmt_success_rate(fleet.mean_success_rate)})"
@@ -1772,6 +1817,7 @@ def aggregate(
         f"  persistent failure clusters: [{cluster_style}]{n_clusters}[/] "
         f"(threshold >={persistence_threshold:.2f})"
     )
+    _echo_err(format_cluster_summary(cluster_result))
 
 
 # ──────────────────────────────────────────────────────────────────────
