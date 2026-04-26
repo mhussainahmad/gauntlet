@@ -34,6 +34,7 @@ from pydantic import ValidationError
 from rich.console import Console
 from rich.theme import Theme
 
+from gauntlet import __version__ as _GAUNTLET_VERSION
 from gauntlet.diff import (
     PairingError,
     compute_paired_cells,
@@ -106,12 +107,56 @@ class _SinkFactory(Protocol):
 __all__ = ["app"]
 
 
+_APP_HELP_EPILOG = (
+    "API reference: docs/api.md. "
+    "Conceptual model: GAUNTLET_SPEC.md. "
+    "Extension points (custom env / policy / sink / CLI plugin / sampler): "
+    "docs/extension-points.md."
+)
+
+
 app = typer.Typer(
     name="gauntlet",
     help="Evaluation harness for learned robot policies.",
+    epilog=_APP_HELP_EPILOG,
     no_args_is_help=True,
     add_completion=False,
 )
+
+
+def _version_callback(value: bool) -> None:
+    """Print the installed gauntlet version and exit (eager Typer callback).
+
+    Wired as ``--version`` on the top-level :func:`_root_callback` so the
+    flag short-circuits before subcommand resolution; passing ``--version``
+    alongside a subcommand still prints the version and exits without
+    running the command.
+    """
+    if value:
+        typer.echo(_GAUNTLET_VERSION)
+        raise typer.Exit()
+
+
+@app.callback()
+def _root_callback(
+    version: Annotated[
+        bool,
+        typer.Option(
+            "--version",
+            help="Print the gauntlet version and exit.",
+            callback=_version_callback,
+            is_eager=True,
+        ),
+    ] = False,
+) -> None:
+    """Top-level entry point — owns the eager ``--version`` flag.
+
+    The callback exists purely to host ``--version``; it has no other
+    behaviour, so subcommands continue to dispatch unchanged. ``version``
+    is consumed by :func:`_version_callback` (eager) and is otherwise
+    discarded — silenced via the unused-arg cast below for mypy --strict.
+    """
+    del version  # captured + handled by the eager callback above.
 
 
 # ──────────────────────────────────────────────────────────────────────
