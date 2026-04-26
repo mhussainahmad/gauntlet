@@ -12,11 +12,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import cast
 
-from gauntlet.env.base import CameraSpec, GauntletEnv
+from gauntlet.env.base import CameraSpec, GauntletEnv, SubtaskMilestone
 from gauntlet.env.mobile import MobileTabletopEnv
 from gauntlet.env.perturbation import AXIS_NAMES, PerturbationAxis, axis_for
 from gauntlet.env.registry import register_env
 from gauntlet.env.tabletop import N_DISTRACTOR_SLOTS, TabletopEnv
+from gauntlet.env.tabletop_stack import TabletopStackEnv
 
 # TabletopEnv satisfies GauntletEnv structurally (runtime isinstance check
 # in tests/test_env.py), but mypy treats ``type[TabletopEnv]`` and
@@ -33,6 +34,14 @@ register_env(
     "tabletop-mobile",
     cast(Callable[..., GauntletEnv], MobileTabletopEnv),
 )
+# B-09 stub — long-horizon 3-cube stacking env. Same widening cast as
+# tabletop / tabletop-mobile; the env additionally satisfies the
+# :class:`SubtaskMilestone` Protocol so the runner / report layer can
+# read per-subtask credit off ``info["subtask_completion"]``.
+register_env(
+    "tabletop-stack",
+    cast(Callable[..., GauntletEnv], TabletopStackEnv),
+)
 
 __all__ = [
     "AXIS_NAMES",
@@ -41,6 +50,8 @@ __all__ = [
     "GauntletEnv",
     "MobileTabletopEnv",
     "PerturbationAxis",
+    "SubtaskMilestone",
     "TabletopEnv",
+    "TabletopStackEnv",
     "axis_for",
 ]
