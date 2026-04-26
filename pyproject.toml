@@ -248,6 +248,42 @@ tabletop-pybullet = "gauntlet.env.pybullet.tabletop_pybullet:PyBulletTabletopEnv
 tabletop-genesis = "gauntlet.env.genesis.tabletop_genesis:GenesisTabletopEnv"
 tabletop-isaac = "gauntlet.env.isaac.tabletop_isaac:IsaacSimTabletopEnv"
 
+# Polish-task extension-point groups (parallel to gauntlet.policies and
+# gauntlet.envs above). See ``docs/extension-points.md`` for the full
+# recipe. Built-in identity-collision precedent applies — gauntlet's own
+# dogfooded entries below load the same class object the built-in
+# tables already hold, so ``warn_on_collision`` (identity-based) never
+# warns. Heavy / dep-bound built-ins (WandbSink, MlflowSink, the
+# adversarial sampler) are intentionally NOT dogfooded here: they need
+# optional extras at construction time and the dogfood smoke test must
+# work on a default-extras-only venv.
+[project.entry-points."gauntlet.axes"]
+# Two torch-free, dep-free axes are dogfooded so the discovery path is
+# exercised at import time. Identity collision means built-ins win —
+# the resolver in :func:`gauntlet.env.perturbation.axes.axis_for` keeps
+# returning the canonical built-in factory.
+lighting_intensity = "gauntlet.env.perturbation.axes:lighting_intensity"
+distractor_count = "gauntlet.env.perturbation.axes:distractor_count"
+
+[project.entry-points."gauntlet.samplers"]
+# Cartesian is the cheapest, dep-free sampler — perfect for dogfooding
+# the discovery path. LHS / Sobol / Adversarial are intentionally NOT
+# listed: LHS / Sobol can be added later (zero-arg constructible), but
+# Adversarial requires a pilot Report at construction time and is not
+# zero-arg constructible per the plugin contract.
+cartesian = "gauntlet.suite.sampling:CartesianSampler"
+
+# gauntlet.sinks: deliberately empty. The two built-in sinks
+# (WandbSink, MlflowSink) require optional extras (`pip install
+# 'gauntlet[wandb]'` / `pip install 'gauntlet[mlflow]'`) at
+# construction time; dogfooding them through the entry-point group
+# would break the dogfood smoke test on the default-extras-only venv.
+
+# gauntlet.cli: deliberately empty. There is no first-party `ext`
+# command to dogfood — the namespace exists purely so third-party
+# distributions can land commands under `gauntlet ext <name>` without
+# a fork.
+
 [project.urls]
 Homepage = "https://github.com/gauntlet-eval/gauntlet"
 Issues = "https://github.com/gauntlet-eval/gauntlet/issues"

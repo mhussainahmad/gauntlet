@@ -24,10 +24,10 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, TypeAlias, cast
+from typing import TYPE_CHECKING, Annotated, Protocol, TypeAlias, cast
 
 import typer
 from pydantic import ValidationError
@@ -55,6 +55,53 @@ from gauntlet.suite.schema import Suite
 
 if TYPE_CHECKING:
     from gauntlet.runner.sinks import EpisodeSink
+
+
+# ``config`` is the shape :func:`_build_episode_sinks` actually passes:
+# ``policy_spec`` (str) and ``seed_override`` (int | None). Wider than
+# the values mlflow / wandb both accept internally, but narrower than
+# ``object`` — enough for mypy --strict without forcing every plugin to
+# widen its constructor signature.
+_SinkConfigValue: TypeAlias = str | int | float | bool | None
+
+
+class _ClickMain(Protocol):
+    """Subset of :meth:`click.BaseCommand.main` we need.
+
+    The Typer ↔ Click bridge in :func:`_install_click_plugin` only ever
+    invokes ``click_cmd.main(args=..., standalone_mode=False)``; this
+    Protocol documents the call shape so mypy --strict (with
+    ``disallow_any_explicit``) can type-check the cast at the call site
+    without importing click at module scope just for typing.
+    """
+
+    def __call__(self, *, args: list[str], standalone_mode: bool) -> object:
+        """Invoke the click command with the given argv."""
+        ...
+
+
+class _SinkFactory(Protocol):
+    """Concrete constructor signature shared by every plugin sink.
+
+    Matches the built-in :class:`gauntlet.runner.sinks.WandbSink` /
+    :class:`gauntlet.runner.sinks.MlflowSink` ``__init__``: keyword-only
+    ``run_name`` / ``suite_name`` / ``config``. Plugin sinks discovered
+    through the ``gauntlet.sinks`` ``[project.entry-points]`` group MUST
+    accept this exact signature; the cast at the call site documents
+    the contract so mypy --strict (with ``disallow_any_explicit``) can
+    type-check the construction without leaking ``Any`` into the CLI.
+    """
+
+    def __call__(
+        self,
+        *,
+        run_name: str,
+        suite_name: str,
+        config: Mapping[str, _SinkConfigValue] | None,
+    ) -> EpisodeSink:
+        """Construct one sink instance."""
+        ...
+
 
 __all__ = ["app"]
 
@@ -351,25 +398,36 @@ def _build_episode_sinks(
     *,
     wandb: bool,
     mlflow: bool,
+    plugin_sinks: list[str] | None,
     suite_name: str,
     policy_spec: str,
     seed_override: int | None,
 ) -> list[EpisodeSink]:
-    """Instantiate the user-requested mirror sinks (B-27).
+    """Instantiate the user-requested mirror sinks (B-27 + ``gauntlet.sinks``).
 
-    Both flags default ``False`` upstream — when neither is set this
+    The two built-in flags default ``False`` upstream and ``plugin_sinks``
+    defaults to ``None`` — when none of the three is requested this
     returns ``[]`` and the function never imports
     :mod:`gauntlet.runner.sinks` (so no chance of a stray wandb /
-    mlflow import on the default code path).
+    mlflow / plugin-sink import on the default code path).
+
+    Plugin sinks are loaded from the ``gauntlet.sinks``
+    ``[project.entry-points]`` group via
+    :func:`gauntlet.plugins.discover_sink_plugins`; an unknown name
+    raises a clean CLI error listing the registered plugin names.
+    Each plugin sink is instantiated with the same kwargs the built-in
+    :class:`WandbSink` / :class:`MlflowSink` accept
+    (``run_name`` / ``suite_name`` / ``config``).
 
     PRODUCT.md anti-feature warning: opting in to ``--wandb`` (or
-    ``--mlflow`` with a remote ``MLFLOW_TRACKING_URI``) exfiltrates
-    per-Episode results to the chosen backend. The CLI helptext on
-    each flag spells this out; this function logs a stderr breadcrumb
-    on instantiation so the user sees the destination before any
-    rollouts complete.
+    ``--mlflow`` with a remote ``MLFLOW_TRACKING_URI``, or any
+    third-party sink that round-trips off the machine) exfiltrates
+    per-Episode results. The CLI helptext on each flag spells this out;
+    this function logs a stderr breadcrumb on instantiation so the user
+    sees the destination before any rollouts complete.
     """
-    if not wandb and not mlflow:
+    plugin_sinks = plugin_sinks or []
+    if not wandb and not mlflow and not plugin_sinks:
         return []
 
     # Lazy import — keeps the default code path free of any sinks
@@ -402,6 +460,42 @@ def _build_episode_sinks(
             "(local ./mlruns by default; remote when "
             "MLFLOW_TRACKING_URI is set to an HTTP(S) endpoint)"
         )
+    if plugin_sinks:
+        # Lazy import — keeps the default code path free of the
+        # ``importlib.metadata`` cost on the no-sink fast path.
+        from gauntlet.plugins import discover_sink_plugins
+
+        registry = discover_sink_plugins()
+        for sink_name in plugin_sinks:
+            sink_cls = registry.get(sink_name)
+            if sink_cls is None:
+                available = sorted(registry)
+                raise _fail(
+                    f"--sink {sink_name!r}: unknown plugin sink; installed plugins: {available}"
+                )
+            # ``sink_cls`` is typed as ``type[EpisodeSink]`` (a Protocol);
+            # mypy --strict refuses to call a Protocol type directly even
+            # though the discovery contract guarantees the loaded object
+            # is a real class with the standard (run_name, suite_name,
+            # config) constructor. Cast to the concrete _SinkFactory
+            # Protocol defined at module scope to satisfy the type-
+            # checker without weakening the EpisodeSink Protocol
+            # consumers (Runner, downstream loops) key off.
+            sink_factory = cast("_SinkFactory", sink_cls)
+            try:
+                sinks.append(
+                    sink_factory(
+                        run_name=run_name,
+                        suite_name=suite_name,
+                        config=config,
+                    )
+                )
+            except ImportError as exc:
+                raise _fail(str(exc)) from exc
+            _echo_err(
+                f"[warn]warning:[/] --sink {sink_name!r} mirrors episodes to a "
+                "third-party sink (the plugin author owns the destination)"
+            )
     return sinks
 
 
@@ -736,6 +830,24 @@ def run(
             ),
         ),
     ] = False,
+    sink: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--sink",
+            help=(
+                "Mirror per-episode results to a third-party sink "
+                "registered under the ``gauntlet.sinks`` "
+                "``[project.entry-points]`` group. Repeatable: pass "
+                "``--sink first --sink second`` to fan out. Plugin sinks "
+                "are instantiated with the same (run_name, suite_name, "
+                "config) kwargs as the built-in --wandb / --mlflow paths "
+                "and the plugin author owns the destination — opting in "
+                "directly contradicts PRODUCT.md's local-first / "
+                "no-telemetry contract whenever the sink writes off-"
+                "machine. See docs/extension-points.md."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Execute a suite and write episodes / report artefacts to ``--out``."""
     if not suite_path.is_file():
@@ -827,14 +939,15 @@ def run(
     sinks = _build_episode_sinks(
         wandb=wandb,
         mlflow=mlflow,
+        plugin_sinks=sink,
         suite_name=suite.name,
         policy_spec=policy,
         seed_override=seed_override,
     )
-    for sink in sinks:
+    for episode_sink in sinks:
         for ep in episodes:
-            sink.log_episode(ep)
-        sink.close()
+            episode_sink.log_episode(ep)
+        episode_sink.close()
 
     try:
         report = build_report(episodes, suite_env=suite.env, sampling=suite.sampling)
@@ -3239,6 +3352,116 @@ def suite_plan(
         "episode counts (GAUNTLET_SPEC.md §1, 'failures over averages'). "
         "Treat each cell's number as a floor, never a ceiling.",
     )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# `ext` sub-app — third-party CLI plugins under ``gauntlet ext <name>``.
+# ──────────────────────────────────────────────────────────────────────
+#
+# Plugin commands registered under the ``gauntlet.cli``
+# ``[project.entry-points]`` group are mounted here so the first-party
+# command surface stays clean and a plugin cannot silently shadow a
+# built-in. The sub-app is constructed unconditionally (so ``gauntlet
+# ext --help`` always works); plugin registration happens once at module
+# import time inside :func:`_register_cli_plugins`.
+
+ext_app = typer.Typer(
+    name="ext",
+    help=(
+        "Third-party CLI extensions registered under the "
+        "'gauntlet.cli' entry-point group. See docs/extension-points.md "
+        "for the publishing recipe."
+    ),
+    no_args_is_help=True,
+    add_completion=False,
+)
+app.add_typer(ext_app, name="ext")
+
+
+def _install_click_plugin(parent: typer.Typer, click_cmd: object, name: str) -> None:
+    """Mount a Click command/group under ``parent`` as a Typer command.
+
+    Typer's :meth:`add_typer` only accepts other Typer instances, so a
+    bare :class:`click.Command` / :class:`click.Group` plugin is wrapped
+    in a thin Typer ``command`` whose body forwards remaining argv to
+    the click command's ``main`` (with ``standalone_mode=False`` so
+    Click does not ``sys.exit`` past Typer's error handling). The
+    wrapper opts into ``ignore_unknown_options`` /
+    ``allow_extra_args`` so the click command's own option parser sees
+    the user's flags unchanged.
+    """
+    # Lazy import — we only need the click types when a plugin actually
+    # ships a Click object, and the import path is light anyway (Typer
+    # imports click at module load).
+    import click
+
+    # ``click.Command`` covers both ``Command`` (leaf) and ``Group``
+    # (multi). We avoid ``click.BaseCommand`` because Click 9.x removes
+    # it; ``Command`` has been the public root since 8.x.
+    if not isinstance(click_cmd, click.Command):  # defence in depth
+        raise TypeError(
+            f"CLI plugin {name!r}: expected typer.Typer / click.Command / "
+            f"click.Group, got {type(click_cmd).__name__}"
+        )
+    # The instance attributes ``.help`` and ``.main`` aren't reflected
+    # on the class itself in click 8.x, so mypy --strict can't see them
+    # through the ``isinstance`` narrowing. ``getattr`` documents the
+    # intentional duck-typed access (the Typer ↔ Click bridge has no
+    # stricter contract than what click itself ships).
+    help_text_attr = getattr(click_cmd, "help", None)
+    help_text = help_text_attr if isinstance(help_text_attr, str) else ""
+    main_fn = cast("_ClickMain", click_cmd.main)
+
+    @parent.command(
+        name=name,
+        help=help_text,
+        context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
+    )
+    def _proxy(ctx: typer.Context) -> None:
+        main_fn(args=ctx.args, standalone_mode=False)
+
+
+_registered_cli_plugins: set[str] = set()
+
+
+def _register_cli_plugins() -> None:
+    """Mount every ``gauntlet.cli`` entry-point plugin under :data:`ext_app`.
+
+    Idempotent: each plugin name is registered at most once across
+    repeat calls (the :data:`_registered_cli_plugins` guard set). Tests
+    that inject fake entry points via :func:`unittest.mock.patch` on
+    :func:`importlib.metadata.entry_points` must call
+    :meth:`discover_cli_plugins.cache_clear` and then this function (in
+    that order) to materialise their fakes onto :data:`ext_app`.
+
+    Built-in commands always win on identity collision (warn, do not
+    error — same precedent as policies / envs). Discovery failures and
+    duplicate entry-point names within the group are handled inside
+    :func:`gauntlet.plugins.discover_cli_plugins`; this function only
+    decides how to mount each successfully-loaded object.
+    """
+    # Lazy import — keeps the test fixture's `from gauntlet import cli`
+    # cheap when the test does not exercise plugin discovery.
+    from gauntlet.plugins import discover_cli_plugins
+
+    plugins = discover_cli_plugins()
+    for name, obj in plugins.items():
+        if name in _registered_cli_plugins:
+            continue
+        if isinstance(obj, typer.Typer):
+            ext_app.add_typer(obj, name=name)
+        else:
+            # ``click.BaseCommand`` covers both ``click.Command`` (leaf)
+            # and ``click.Group`` (multi). The duck-typed wrapper
+            # handles both via ``BaseCommand.main``.
+            _install_click_plugin(ext_app, obj, name=name)
+        _registered_cli_plugins.add(name)
+
+
+# Run once at module import so a freshly-installed plugin shows up
+# without any caller having to opt in. The guard set above keeps
+# subsequent calls (from tests, or from a re-import path) safe.
+_register_cli_plugins()
 
 
 # ``python -m gauntlet.cli`` parity with the installed entry point.
