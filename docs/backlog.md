@@ -85,6 +85,7 @@ After those S-class items the medium items become viable in pairs.
 - **Scope:** L
 - **Disjoint with:** New env(s) in `env/`, Episode schema (`subtask_completion`).
 - **Anti-feature?** Subtask milestones are env-specific; either we centralise a milestone Protocol (good) or sprinkle ad-hoc lists everywhere (bad). The Protocol design is the real work.
+- **Partial 2026-04-26**: `tabletop-stack` 3-cube stub env shipped (`gauntlet.env.tabletop_stack.TabletopStackEnv`, registered as `tabletop-stack`) along with the `SubtaskMilestone` Protocol seam (`gauntlet.env.base.SubtaskMilestone`) and an optional, default-`None` `Episode.subtask_completion: list[bool] | None` field. The env publishes `info["subtask_completion"]` per step; runner wiring to forward that into the Episode is deferred. Remaining for full B-09: (a) `tabletop-pour` env, (b) runner-side worker plumbing that reads `info["subtask_completion"]` into the Episode field, (c) report-side per-subtask credit rendering, (d) per-subtask reward decomposition + names registry as the schema-evolution follow-up. Stub env declares `AXIS_NAMES = frozenset()` — perturbation axes for the multi-cube scene are a follow-up too.
 
 ### B-10: Bimanual / multi-arm task family
 - **What:** A `tabletop-bimanual` env (two floating end-effectors, hand-off task) plus the action-space dim doubling.

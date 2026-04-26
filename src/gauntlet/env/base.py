@@ -178,4 +178,92 @@ class GauntletEnv(Protocol):
         ...
 
 
-__all__ = ["Action", "CameraSpec", "GauntletEnv", "Observation"]
+@runtime_checkable
+class SubtaskMilestone(Protocol):
+    """Optional opt-in seam for envs that publish per-subtask credit (B-09).
+
+    Long-horizon envs (skill-chaining: stack, pour, multi-step assembly)
+    can satisfy this Protocol IN ADDITION TO :class:`GauntletEnv` to
+    expose milestone credit beyond the binary
+    ``info["success"]`` flag. The Runner / Report layer reads
+    ``info["subtask_completion"]: list[bool]`` directly off each step's
+    ``info`` dict (length must equal :attr:`n_subtasks`, monotonic
+    non-decreasing — once a subtask flips to ``True`` it stays
+    ``True``); :meth:`is_subtask_done` is the *introspection* hook
+    suite-loaders / scripted-policy authors call when they need to
+    query the per-subtask predicate from outside the rollout loop
+    (e.g. to assert the canned trajectory hits every milestone).
+
+    Why a separate Protocol from :class:`GauntletEnv`
+    -------------------------------------------------
+    The original env Protocol was deliberately kept as the *minimum*
+    surface every backend must support (RFC-005 §3). Forcing every env
+    — including state-only PyBullet, the single-step pick-and-place
+    Tabletop, and the third-party plugin envs — to declare a subtask
+    list would either lie (``n_subtasks=1, subtask_0=success``) or
+    explode the plugin contract. Splitting milestone publication into
+    an *opt-in* Protocol keeps the GauntletEnv surface stable while
+    giving the long-horizon envs a typed, ``isinstance``-checkable
+    way to advertise the extra capability.
+
+    Anti-feature note (deliberately documented)
+    -------------------------------------------
+    Subtask milestones are inherently env-specific — what counts as
+    "stacked" on ``tabletop-stack`` is not the same predicate as
+    "poured" on ``tabletop-pour``. The Protocol is shape-only:
+    backends own the predicates; the schema only fixes the
+    ``list[bool]`` payload and the monotonic-non-decreasing rule.
+    Reports / aggregation that compare across envs must not assume
+    common semantics for matching indices.
+
+    Behavioural contract
+    --------------------
+    ``n_subtasks``
+        Class- or instance-level integer ``>= 1``. Fixed for the env
+        lifetime — a backend MUST NOT vary the count between resets.
+        The runner uses this to size per-cell aggregation buffers
+        before the first ``step()``.
+
+    ``is_subtask_done(idx, obs)``
+        Pure predicate: does the most-recent observation satisfy the
+        ``idx``-th subtask's geometric / state condition? Called by
+        suite-loaders and test scaffolding from outside the rollout
+        loop, so the implementation MUST NOT mutate env state. The
+        live per-step ``info["subtask_completion"]`` list is the
+        canonical source of truth during a rollout (it carries the
+        latched-monotonic semantics); ``is_subtask_done`` is the
+        un-latched predicate.
+
+        ``idx`` MUST be in ``[0, n_subtasks)``; backends raise
+        :class:`IndexError` (or :class:`ValueError`) for out-of-range
+        indices. ``obs`` is the same dict the env returns from
+        :meth:`GauntletEnv.step`; backends key off the standard
+        observation slots they already populate.
+
+    Future-extension caveat
+    -----------------------
+    A full schema migration on :class:`gauntlet.runner.Episode`
+    (subtask names registry, per-subtask reward decomposition, etc.)
+    is deferred to the B-09 follow-up. This Protocol is the seam
+    that follow-up will plug additional fields into without churning
+    the GauntletEnv contract again.
+    """
+
+    n_subtasks: int
+
+    def is_subtask_done(self, idx: int, obs: Observation) -> bool:
+        """Return whether the ``idx``-th subtask's predicate is currently satisfied.
+
+        Pure predicate — implementations MUST NOT mutate env state.
+        See the class docstring for index-range and ``obs`` semantics.
+        """
+        ...
+
+
+__all__ = [
+    "Action",
+    "CameraSpec",
+    "GauntletEnv",
+    "Observation",
+    "SubtaskMilestone",
+]
