@@ -23,6 +23,82 @@ not have to parse stdout.
 | `scripts/bench_suite_loader.py` | `load_suite_from_string` mean + p95 wall over 1-axis x 2-steps, 3-axis x 5-steps, 5-axis x 10-steps synthetic suites. With `--bundled` also parses every `examples/suites/*.yaml` (skip-not-fail per file when the YAML's backend extra is missing). | 20 reps per case |
 | `scripts/bench_report.py` | `build_report` wall on synthetic Episode lists at N=10, 100, 1000, 10000. | drops the N=10000 case |
 
+## Phase 2.5 T12 benchmark suite (`scripts/perf/bench_*.py`)
+
+A second, complementary family of benchmarks lives under
+`scripts/perf/`. The Polish-task family above (`scripts/bench_*.py`)
+deliberately bypasses the Runner to isolate env-primitive regressions;
+the T12 family runs *through* the Runner so the full stack — Runner
+construction, episode dispatch, seed derivation, Episode building —
+is in the measured wall. A regression in one layer surfaces in only
+one of the two families, narrowing a bisect.
+
+| Script | What it measures |
+|--------|------------------|
+| `scripts/perf/bench_rollout.py` | Per-backend rollout throughput via `gauntlet.runner.Runner` driving the `RandomPolicy` baseline against a 1-cell tabletop suite. Reports `episodes_per_sec` plus per-step latency `step_p50_ms` / `step_p95_ms` / `step_p99_ms`. Backends: `mujoco` (always-on), `pybullet` / `genesis` / `isaac` (skip-not-fail when their extra is missing). |
+| `scripts/perf/bench_render.py` | Per-step offscreen-render latency on `TabletopEnv(render_in_obs=True)` at 224x224. Reports `frames_per_sec` plus `render_step_p50_ms` / `render_step_p95_ms` / `render_step_p99_ms`. MuJoCo only (the only always-on render backend per repo conventions); skip-not-fail when the offscreen GL context cannot be created. |
+| `scripts/perf/bench_suite_loader.py` | `load_suite` parse wall on a synthetic `--cells`-cell suite plus the B-40 `compute_suite_provenance_hash` wall (the canonical-payload AST hash that gates the result cache). Reports `load_time_ms` and `ast_hash_time_ms`. |
+| `scripts/perf/bench_runner_scaling.py` | `Runner.run` wall sweep across `--workers 1,2,4,8` (clamped to `os.cpu_count()`) on a 6-cell tabletop suite. Reports the speedup curve plus an Amdahl's-law fit (`amdahl_serial_frac`, `amdahl_parallel_frac`). |
+
+Each T12 script writes a flat JSON sidecar with these contract fields:
+
+* metric-specific keys (per the table above)
+* `version` — `gauntlet.__version__`
+* `timestamp` — ISO 8601 UTC (`YYYY-MM-DDTHH:MM:SSZ`)
+* `git_commit` — `git rev-parse HEAD` (or `null` outside a checkout)
+* `partial` — `true` when `KeyboardInterrupt` cut the run short
+
+The CLI surface is uniform: `--seed` (default `42`), `--output PATH`
+(default `benchmarks/<name>.json`), and metric-specific knobs. Every
+script handles `KeyboardInterrupt` by emitting a partial sidecar with
+`partial: true` rather than crashing without output.
+
+```bash
+# Each T12 bench, full sweep:
+python scripts/perf/bench_rollout.py --backend mujoco --episodes 50 \
+    --output benchmarks/rollout.json
+python scripts/perf/bench_render.py --steps 200 \
+    --output benchmarks/render.json
+python scripts/perf/bench_suite_loader.py --cells 1000 \
+    --output benchmarks/suite_loader.json
+python scripts/perf/bench_runner_scaling.py \
+    --output benchmarks/scaling.json
+```
+
+The T12 scripts are smoke-tested by `tests/test_bench_smoke.py`,
+marked `@pytest.mark.slow` so the default pytest run skips them; opt
+in with `pytest -m slow tests/test_bench_smoke.py`. The smoke tests
+invoke each CLI with the smallest viable budget (`--episodes 2`,
+`--steps 5`, `--cells 10`, `--workers 1`) and assert the resulting
+JSON sidecar matches the contract above.
+
+The T12 benchmarks are **not** regression-gated in CI — they are
+reference tooling for users and maintainers, run manually whenever
+`src/gauntlet/runner/`, `src/gauntlet/suite/`, or
+`src/gauntlet/env/tabletop.py` see a non-trivial change. Sidecar
+JSON files land under `benchmarks/` and are gitignored; the scripts
+and this documentation are versioned, the actual numbers are not.
+
+### Reproducibility notes
+
+* **Seed.** Default `--seed 42` everywhere. The runner derives all
+  per-episode seeds from this single value (see
+  `src/gauntlet/runner/runner.py` "Seed derivation"), so a re-run on
+  the same machine class with the same seed produces bit-identical
+  Episodes — and bench wall numbers reproduce within the noise floor
+  documented under "Variance to expect" below.
+* **Network.** No T12 script calls out to the network. All synthetic
+  suites are constructed in-memory; the loader bench stages a tiny
+  YAML to a tmp file under the output's parent directory and removes
+  it on exit.
+* **Host hardware shape.** Wall numbers shift with CPU class, Python
+  build, and (for `bench_render`) the offscreen GL stack. Compare
+  numbers only across runs on the same host. The provenance fields
+  (`version` / `timestamp` / `git_commit`) stamp each sidecar so a
+  downstream consumer can correlate a number with its tree; capture
+  the host CPU / Python / mujoco-wheel triple alongside if you start
+  a numbers spreadsheet.
+
 ## How to run
 
 ```bash

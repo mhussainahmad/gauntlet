@@ -96,7 +96,7 @@ jobs:
         # test shows up as silence rather than its name. Verbose mode
         # prints the test ID before each call so the next regression
         # is one log lookup away from a fix.
-        run: uv run pytest -v -m "not hf and not lerobot and not monitor and not pybullet and not genesis and not ros2 and not isaac and not video and not render"
+        run: uv run pytest -v -m "not hf and not lerobot and not monitor and not pybullet and not genesis and not ros2 and not isaac and not video and not render and not slow"
 
   hf-tests:
     name: hf tests (py${{ matrix.python-version }})

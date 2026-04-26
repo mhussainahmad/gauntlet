@@ -818,6 +818,7 @@ markers = [
     "wandb: tests that require the [wandb] extra (wandb>=0.16) for the optional Weights & Biases mirror sink (B-27)",
     "mlflow: tests that require the [mlflow] extra (mlflow>=2.10) for the optional MLflow mirror sink (B-27)",
     "render: tests that exercise the offscreen mujoco GL renderer and need a working EGL/OSMesa stack; deselected by default CI runners where mujoco.Renderer aborts at the C level (no DISPLAY, no GPU)",
+    "slow: tests deselected from the default pytest run because they spawn subprocesses or do real work that takes several seconds; opt in with `-m slow`. Used by tests/test_bench_smoke.py to exercise the Phase 2.5 T12 scripts/perf/bench_*.py CLIs end-to-end on tiny budgets",
 ]
 
 [tool.coverage.run]
