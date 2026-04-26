@@ -17,7 +17,6 @@ Suggested ordering for the next continuous-polish loop (smallest, highest-rigour
 5. **B-37** Inference-latency / wall-clock budget tracking — S, fills the `runner/` gap VLA-Perf flagged.
 6. **B-38** Inference-delay jitter perturbation axis — S, builds on B-37; tests RTC-style real-time chunking.
 7. **B-39** Cross-checkpoint regression bisection (`gauntlet bisect`) — M, git-bisect for policy regressions.
-8. **B-44** Worst-case continuous-perturbation search (Eva-VLA-style) — M, complements but does not duplicate B-07.
 
 After those S-class items the medium items become viable in pairs.
 

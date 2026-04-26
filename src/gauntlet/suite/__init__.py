@@ -29,6 +29,7 @@ from gauntlet.suite.schema import AxisSpec as AxisSpec
 from gauntlet.suite.schema import SamplingMode as SamplingMode
 from gauntlet.suite.schema import Suite as Suite
 from gauntlet.suite.schema import SuiteCell as SuiteCell
+from gauntlet.suite.schema import WorstCaseConfig as WorstCaseConfig
 
 __all__ = [
     "BUILTIN_BACKEND_IMPORTS",
@@ -39,6 +40,7 @@ __all__ = [
     "SamplingMode",
     "Suite",
     "SuiteCell",
+    "WorstCaseConfig",
     "lint_suite",
     "load_suite",
     "load_suite_from_string",
