@@ -29,6 +29,12 @@ from gauntlet.report.schema import FailureCluster as FailureCluster
 from gauntlet.report.schema import Heatmap2D as Heatmap2D
 from gauntlet.report.schema import Report as Report
 from gauntlet.report.schema import SensitivityIndex as SensitivityIndex
+from gauntlet.report.trajectory_taxonomy import TaxonomyError as TaxonomyError
+from gauntlet.report.trajectory_taxonomy import TaxonomyResult as TaxonomyResult
+from gauntlet.report.trajectory_taxonomy import TrajectoryCluster as TrajectoryCluster
+from gauntlet.report.trajectory_taxonomy import (
+    cluster_failed_trajectories as cluster_failed_trajectories,
+)
 
 __all__ = [
     "AbstentionMetrics",
@@ -38,7 +44,11 @@ __all__ = [
     "Heatmap2D",
     "Report",
     "SensitivityIndex",
+    "TaxonomyError",
+    "TaxonomyResult",
+    "TrajectoryCluster",
     "build_report",
+    "cluster_failed_trajectories",
     "compute_abstention_metrics",
     "render_html",
     "write_html",
