@@ -24,10 +24,10 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, TypeAlias, cast
+from typing import TYPE_CHECKING, Annotated, Protocol, TypeAlias, cast
 
 import typer
 from pydantic import ValidationError
@@ -55,6 +55,38 @@ from gauntlet.suite.schema import Suite
 
 if TYPE_CHECKING:
     from gauntlet.runner.sinks import EpisodeSink
+
+
+# ``config`` is the shape :func:`_build_episode_sinks` actually passes:
+# ``policy_spec`` (str) and ``seed_override`` (int | None). Wider than
+# the values mlflow / wandb both accept internally, but narrower than
+# ``object`` — enough for mypy --strict without forcing every plugin to
+# widen its constructor signature.
+_SinkConfigValue: TypeAlias = str | int | float | bool | None
+
+
+class _SinkFactory(Protocol):
+    """Concrete constructor signature shared by every plugin sink.
+
+    Matches the built-in :class:`gauntlet.runner.sinks.WandbSink` /
+    :class:`gauntlet.runner.sinks.MlflowSink` ``__init__``: keyword-only
+    ``run_name`` / ``suite_name`` / ``config``. Plugin sinks discovered
+    through the ``gauntlet.sinks`` ``[project.entry-points]`` group MUST
+    accept this exact signature; the cast at the call site documents
+    the contract so mypy --strict (with ``disallow_any_explicit``) can
+    type-check the construction without leaking ``Any`` into the CLI.
+    """
+
+    def __call__(
+        self,
+        *,
+        run_name: str,
+        suite_name: str,
+        config: Mapping[str, _SinkConfigValue] | None,
+    ) -> EpisodeSink:
+        """Construct one sink instance."""
+        ...
+
 
 __all__ = ["app"]
 
@@ -351,25 +383,36 @@ def _build_episode_sinks(
     *,
     wandb: bool,
     mlflow: bool,
+    plugin_sinks: list[str] | None,
     suite_name: str,
     policy_spec: str,
     seed_override: int | None,
 ) -> list[EpisodeSink]:
-    """Instantiate the user-requested mirror sinks (B-27).
+    """Instantiate the user-requested mirror sinks (B-27 + ``gauntlet.sinks``).
 
-    Both flags default ``False`` upstream — when neither is set this
+    The two built-in flags default ``False`` upstream and ``plugin_sinks``
+    defaults to ``None`` — when none of the three is requested this
     returns ``[]`` and the function never imports
     :mod:`gauntlet.runner.sinks` (so no chance of a stray wandb /
-    mlflow import on the default code path).
+    mlflow / plugin-sink import on the default code path).
+
+    Plugin sinks are loaded from the ``gauntlet.sinks``
+    ``[project.entry-points]`` group via
+    :func:`gauntlet.plugins.discover_sink_plugins`; an unknown name
+    raises a clean CLI error listing the registered plugin names.
+    Each plugin sink is instantiated with the same kwargs the built-in
+    :class:`WandbSink` / :class:`MlflowSink` accept
+    (``run_name`` / ``suite_name`` / ``config``).
 
     PRODUCT.md anti-feature warning: opting in to ``--wandb`` (or
-    ``--mlflow`` with a remote ``MLFLOW_TRACKING_URI``) exfiltrates
-    per-Episode results to the chosen backend. The CLI helptext on
-    each flag spells this out; this function logs a stderr breadcrumb
-    on instantiation so the user sees the destination before any
-    rollouts complete.
+    ``--mlflow`` with a remote ``MLFLOW_TRACKING_URI``, or any
+    third-party sink that round-trips off the machine) exfiltrates
+    per-Episode results. The CLI helptext on each flag spells this out;
+    this function logs a stderr breadcrumb on instantiation so the user
+    sees the destination before any rollouts complete.
     """
-    if not wandb and not mlflow:
+    plugin_sinks = plugin_sinks or []
+    if not wandb and not mlflow and not plugin_sinks:
         return []
 
     # Lazy import — keeps the default code path free of any sinks
@@ -402,6 +445,42 @@ def _build_episode_sinks(
             "(local ./mlruns by default; remote when "
             "MLFLOW_TRACKING_URI is set to an HTTP(S) endpoint)"
         )
+    if plugin_sinks:
+        # Lazy import — keeps the default code path free of the
+        # ``importlib.metadata`` cost on the no-sink fast path.
+        from gauntlet.plugins import discover_sink_plugins
+
+        registry = discover_sink_plugins()
+        for sink_name in plugin_sinks:
+            sink_cls = registry.get(sink_name)
+            if sink_cls is None:
+                available = sorted(registry)
+                raise _fail(
+                    f"--sink {sink_name!r}: unknown plugin sink; installed plugins: {available}"
+                )
+            # ``sink_cls`` is typed as ``type[EpisodeSink]`` (a Protocol);
+            # mypy --strict refuses to call a Protocol type directly even
+            # though the discovery contract guarantees the loaded object
+            # is a real class with the standard (run_name, suite_name,
+            # config) constructor. Cast to the concrete _SinkFactory
+            # Protocol defined at module scope to satisfy the type-
+            # checker without weakening the EpisodeSink Protocol
+            # consumers (Runner, downstream loops) key off.
+            sink_factory = cast("_SinkFactory", sink_cls)
+            try:
+                sinks.append(
+                    sink_factory(
+                        run_name=run_name,
+                        suite_name=suite_name,
+                        config=config,
+                    )
+                )
+            except ImportError as exc:
+                raise _fail(str(exc)) from exc
+            _echo_err(
+                f"[warn]warning:[/] --sink {sink_name!r} mirrors episodes to a "
+                "third-party sink (the plugin author owns the destination)"
+            )
     return sinks
 
 
@@ -736,6 +815,24 @@ def run(
             ),
         ),
     ] = False,
+    sink: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--sink",
+            help=(
+                "Mirror per-episode results to a third-party sink "
+                "registered under the ``gauntlet.sinks`` "
+                "``[project.entry-points]`` group. Repeatable: pass "
+                "``--sink first --sink second`` to fan out. Plugin sinks "
+                "are instantiated with the same (run_name, suite_name, "
+                "config) kwargs as the built-in --wandb / --mlflow paths "
+                "and the plugin author owns the destination — opting in "
+                "directly contradicts PRODUCT.md's local-first / "
+                "no-telemetry contract whenever the sink writes off-"
+                "machine. See docs/extension-points.md."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Execute a suite and write episodes / report artefacts to ``--out``."""
     if not suite_path.is_file():
@@ -827,14 +924,15 @@ def run(
     sinks = _build_episode_sinks(
         wandb=wandb,
         mlflow=mlflow,
+        plugin_sinks=sink,
         suite_name=suite.name,
         policy_spec=policy,
         seed_override=seed_override,
     )
-    for sink in sinks:
+    for episode_sink in sinks:
         for ep in episodes:
-            sink.log_episode(ep)
-        sink.close()
+            episode_sink.log_episode(ep)
+        episode_sink.close()
 
     try:
         report = build_report(episodes, suite_env=suite.env, sampling=suite.sampling)
