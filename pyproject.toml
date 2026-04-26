@@ -714,6 +714,10 @@ module = [
     "gauntlet.env.base",
     "gauntlet.env.registry",
     "gauntlet.env.tabletop",
+    # B-09 stub — long-horizon stacking env carrying the same
+    # gymnasium ``spaces.Space[Any]`` Protocol fields and
+    # ``dict[str, Any]`` info-dict surface as ``gauntlet.env.tabletop``.
+    "gauntlet.env.tabletop_stack",
     # ``Callable[..., AxisSampler]`` factory ParamSpec (perturbation registry).
     "gauntlet.env.perturbation.base",
     # B-31 — wraps any GauntletEnv; carries the same gymnasium
