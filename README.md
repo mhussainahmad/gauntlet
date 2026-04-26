@@ -425,6 +425,44 @@ uv run mypy
 uv run pytest
 ```
 
+### Property tests
+
+The `tests/test_property_*.py` and `tests/test_fuzz_*.py` files use
+[Hypothesis](https://hypothesis.readthedocs.io) to fuzz invariants
+that hand-rolled tests would only sample. They are tagged with the
+`hypothesis_property` pytest marker so a focused run picks them up
+without running the full suite:
+
+```bash
+# Run only the property/fuzz tests.
+uv run pytest -m hypothesis_property
+
+# Faster CI profile (max_examples=50 instead of the 200 default).
+GAUNTLET_HYPOTHESIS_PROFILE=ci uv run pytest -m hypothesis_property
+```
+
+The covered invariants include:
+
+* **Perturbation samplers** (`test_property_perturbation.py`,
+  `test_property_axis_bounds.py`) — every emitted axis value lies
+  inside the declared `[low, high]` envelope; same rng seed produces
+  the same value.
+* **Suite YAML round-trip** (`test_fuzz_suite_roundtrip.py`,
+  `test_property_suite_loader.py`) — `Suite -> YAML -> Suite` is the
+  identity for cartesian / LHS / Sobol suites; insertion order is
+  preserved.
+* **Action clipping** (`test_property_action_clipping.py`,
+  `test_fuzz_action_space.py`) — finite-but-extreme action vectors
+  produce per-step mocap deltas bounded by `MAX_LINEAR_STEP`. NaN/Inf
+  inputs are pinned via `pytest.xfail` as a spec for future hardening.
+* **Reset ordering** (`test_property_reset_after_step_ordering.py`)
+  — `env.reset(S) -> step* -> env.reset(S)` produces bit-equal
+  starting obs regardless of the intervening actions.
+* **Observation NaN/Inf detection**
+  (`test_property_observation_validation.py`) — spec-only via
+  `pytest.xfail`; pins the gap that `Episode.observation_invalid`
+  does not yet exist.
+
 ## Project layout
 
 ```
