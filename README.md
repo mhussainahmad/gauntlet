@@ -15,6 +15,39 @@ See [`GAUNTLET_SPEC.md`](./GAUNTLET_SPEC.md) for the full design.
 
 ---
 
+## See a real report before installing
+
+A public reference benchmark lives at
+**<https://gauntlet-eval.github.io/gauntlet/>** — two policies on the
+bundled smoke suite, regenerated on every release, with the
+`gauntlet compare` and `gauntlet diff` deltas surfaced. Open the
+baseline / regressed `report.html` to see what the failure-cluster-first
+layout actually looks like.
+
+To regenerate it locally:
+
+```bash
+python scripts/generate_reference_benchmark.py --out ./benchmarks/local/
+open ./benchmarks/local/index.html
+```
+
+## Install
+
+```bash
+pip install gauntlet              # core (MuJoCo only, torch-free)
+pip install 'gauntlet[hf]'        # + OpenVLA / HuggingFace adapter
+pip install 'gauntlet[lerobot]'   # + SmolVLA / π0 / diffusion adapters
+pip install 'gauntlet[pybullet]'  # + PyBullet backend
+pip install 'gauntlet[genesis]'   # + Genesis backend
+pip install 'gauntlet[isaac]'     # + Isaac Sim backend (CUDA required)
+pip install 'gauntlet[monitor]'   # + runtime drift detector (torch)
+pip install 'gauntlet[ros2]'      # + ROS 2 publish / record (rclpy via system pkg)
+```
+
+`uv` users: `uv add gauntlet` (same extras). Stand-alone CLI:
+`uv tool install gauntlet` then `gauntlet --help`. Requires Python
+≥3.11.
+
 ## Status
 
 Phase 1 (MVP) and Phase 2 (real-policy adapters + runtime
@@ -34,8 +67,16 @@ self-contained web dashboard, and the real-to-sim scene-ingestion
 input pipeline are all live. The real-to-sim *renderer* itself is
 deferred — `RealSimRenderer` lands as a `typing.Protocol` so a
 gaussian-splatting (or other) renderer plugin can slot in without
-touching the schema. The public surface is stabilising but is not
-yet committed to semver.
+touching the schema.
+
+`0.2.0` is the first PyPI release: `pip install gauntlet`. From this
+release onward, the documented public surface follows
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html) — the
+full contract (which symbols are public, the on-disk schemas, the
+CLI flags, and the deprecation policy) is in
+[`docs/stability.md`](./docs/stability.md). Pin
+`gauntlet>=0.2,<0.3` in your `pyproject.toml` and CI will not break
+on a patch release.
 
 ## Backends
 
@@ -176,8 +217,24 @@ for the algorithm.
 - Install the HF extras: `uv sync --extra hf` (pulls torch / transformers / pillow; core installs stay torch-free).
 - See [`examples/evaluate_openvla.py`](./examples/evaluate_openvla.py) for the ≤20-line OpenVLA-7B factory.
 - Image-conditioned policies need a rendered frame — construct `TabletopEnv(render_in_obs=True)` so `obs["image"]` is emitted.
-- SmolVLA: `uv sync --extra lerobot`; see [`examples/evaluate_smolvla.py`](./examples/evaluate_smolvla.py). For the PyBullet-backed equivalent, `uv sync --extra lerobot --extra pybullet` and run [`examples/evaluate_smolvla_pybullet.py`](./examples/evaluate_smolvla_pybullet.py).
-- SmolVLA-base is pretrained on SO-100 (6-D joint) whereas TabletopEnv is 7-D EE-twist+gripper — zero-shot success is ~0% by embodiment mismatch; fine-tune on TabletopEnv-compatible data for meaningful evaluation.
+- **SmolVLA — read the warning first.** `lerobot/smolvla_base` is
+  pretrained on the SO-100 / SO-101 follower arm with **6-D
+  joint-position** actions; TabletopEnv is a **7-D EE-twist + gripper**
+  env. Zero-shot success on the smoke suite is **~0% by embodiment
+  mismatch — this is NOT a Gauntlet bug.** The example exists so users
+  who already have a TabletopEnv-compatible fine-tune know how to wire
+  the adapter (≤20 lines). For a first run that demonstrates the
+  harness end-to-end on a policy that solves the env, use
+  [the reference benchmark](#see-a-real-report-before-installing)
+  instead.
+- With a fine-tune in hand: `uv sync --extra lerobot`;
+  see [`examples/evaluate_smolvla.py`](./examples/evaluate_smolvla.py)
+  (pass `--action-remap` / override `camera_keys` if your fine-tune
+  changed them). For the PyBullet backend,
+  `uv sync --extra lerobot --extra pybullet` and run
+  [`examples/evaluate_smolvla_pybullet.py`](./examples/evaluate_smolvla_pybullet.py).
+  Set `GAUNTLET_SUPPRESS_SMOLVLA_WARNING=1` to silence the runtime
+  banner once you've confirmed the embodiment fits.
 
 ### Runtime drift detection
 

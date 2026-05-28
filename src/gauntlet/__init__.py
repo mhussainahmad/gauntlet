@@ -48,7 +48,7 @@ from __future__ import annotations
 
 from gauntlet.env.gym_registration import register_envs
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 # Register the four shipped backends with gymnasium's global registry on
 # package import — the standard gymnasium-ecosystem convention. Heavy

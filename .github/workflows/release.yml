@@ -1,0 +1,152 @@
+name: Release
+
+# Builds wheel + sdist and publishes to PyPI on a version tag.
+#
+# Trusted Publishing via PyPI OIDC (no API token in the repo):
+# https://docs.pypi.org/trusted-publishers/
+#
+# Setup (one-time, on pypi.org):
+#   - Project name: gauntlet
+#   - Owner: gauntlet-eval
+#   - Repository name: gauntlet
+#   - Workflow filename: release.yml
+#   - Environment name: pypi
+#
+# Trigger:
+#   git tag v0.2.0 && git push origin v0.2.0
+#
+# A GitHub Release with the same tag is also created, and the
+# wheel + sdist are attached.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build only (do not publish to PyPI)"
+        type: boolean
+        default: true
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build sdist + wheel
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Verify tag matches package version
+        id: version
+        run: |
+          set -eu
+          PKG_VERSION=$(uv run --no-project python -c "import tomllib,sys;print(tomllib.loads(open('pyproject.toml','rb').read().decode())['project']['version'])")
+          echo "version=${PKG_VERSION}" >> "$GITHUB_OUTPUT"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            TAG_VERSION="${GITHUB_REF_NAME#v}"
+            if [ "${TAG_VERSION}" != "${PKG_VERSION}" ]; then
+              echo "::error::Tag ${GITHUB_REF_NAME} does not match pyproject.toml version ${PKG_VERSION}" >&2
+              exit 1
+            fi
+          fi
+
+      - name: Build distributions
+        run: uv build --sdist --wheel --out-dir dist/
+
+      - name: Verify distributions with twine
+        run: |
+          uv tool install twine
+          uv tool run twine check dist/*
+
+      - name: Upload distributions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == false)
+    environment:
+      name: pypi
+      url: https://pypi.org/project/gauntlet/
+    permissions:
+      id-token: write  # OIDC trusted publishing
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          skip-existing: false
+          verbose: true
+
+  github-release:
+    name: GitHub Release
+    needs: [build, publish-pypi]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Extract CHANGELOG section for this release
+        id: changelog
+        run: |
+          set -eu
+          VERSION="${{ needs.build.outputs.version }}"
+          # Pull the section between `## [VERSION]` and the next `## [` heading.
+          awk -v v="${VERSION}" '
+            $0 ~ "^## \\[" v "\\]" { found=1; print; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "Release ${VERSION}." > release-notes.md
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body_path: release-notes.md
+          files: dist/*
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}

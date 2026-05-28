@@ -37,6 +37,14 @@ results/
 # the scripts and the docs are checked in, the actual numbers are not.
 benchmarks/*.json
 
+# Reference-benchmark artefacts. The script
+# (scripts/generate_reference_benchmark.py) is checked in; the
+# regenerable outputs (HTML reports, per-cell diffs, GH Pages bundle)
+# are not — they are published to GitHub Pages by the benchmark.yml
+# workflow on every push / release.
+benchmarks/v*/
+benchmarks/local/
+
 # Drift-detector artefacts (trajectory dumps, AE weights).
 # Test runs produce these under tmp paths but also land in ad-hoc local
 # directories when users follow the quickstart; never commit them.
@@ -52,3 +60,13 @@ benchmarks/*.json
 *.vector.db
 .swarm/
 .mcp.json
+
+# Per-developer tooling sandboxes co-located with the repo. The repo
+# does not depend on any of these; they belong in the user's
+# global ~/.config/git/ignore but are listed here so a fresh clone
+# from a workstation that uses them produces a clean ``git status``.
+.a5c/
+.obsidian/
+my-wiki/
+.code-review-graph/
+.remember/

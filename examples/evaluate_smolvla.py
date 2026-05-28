@@ -60,12 +60,45 @@ def _build_env_factory() -> Callable[[], TabletopEnv]:
     return partial(TabletopEnv, render_in_obs=True, render_size=(512, 512))
 
 
+_ZERO_SHOT_WARNING: str = """
+╔══════════════════════════════════════════════════════════════════════════╗
+║ ZERO-SHOT EMBODIMENT MISMATCH WARNING                                    ║
+║                                                                          ║
+║ lerobot/smolvla_base is pretrained on the SO-100 / SO-101 follower arm   ║
+║ with 6-D joint-position actions. Gauntlet's TabletopEnv is a 7-D         ║
+║ EE-twist + gripper env. Expect zero-shot success ≈ 0% — this is an       ║
+║ embodiment mismatch, NOT a Gauntlet bug.                                 ║
+║                                                                          ║
+║ For a first run that demonstrates the harness end-to-end on a policy     ║
+║ that actually solves the env, run instead:                               ║
+║                                                                          ║
+║     python scripts/generate_reference_benchmark.py                       ║
+║                                                                          ║
+║ Use this script when you have a SmolVLA fine-tune on                     ║
+║ TabletopEnv-compatible data. See README §"SmolVLA" for the fine-tuning   ║
+║ pointers and the action-remap argument.                                  ║
+║                                                                          ║
+║ Set GAUNTLET_SUPPRESS_SMOLVLA_WARNING=1 to silence this banner.          ║
+╚══════════════════════════════════════════════════════════════════════════╝
+"""
+
+
+def _print_zero_shot_warning() -> None:
+    import os
+    import sys
+
+    if os.environ.get("GAUNTLET_SUPPRESS_SMOLVLA_WARNING") == "1":
+        return
+    print(_ZERO_SHOT_WARNING, file=sys.stderr)
+
+
 def main(
     *,
     suite_path: Path = _DEFAULT_SUITE,
     out_dir: Path = _DEFAULT_OUT,
     n_workers: int = 1,
 ) -> None:
+    _print_zero_shot_warning()
     out_dir.mkdir(parents=True, exist_ok=True)
     suite: Suite = load_suite(suite_path)
     runner = Runner(n_workers=n_workers, env_factory=_build_env_factory())

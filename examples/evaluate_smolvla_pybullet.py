@@ -64,12 +64,25 @@ def _build_env_factory() -> Callable[[], object]:
     return partial(PyBulletTabletopEnv, render_in_obs=True, render_size=(512, 512))
 
 
+def _print_zero_shot_warning() -> None:
+    import os
+    import sys
+
+    if os.environ.get("GAUNTLET_SUPPRESS_SMOLVLA_WARNING") == "1":
+        return
+    # Reuse the MuJoCo banner — same embodiment mismatch.
+    from examples.evaluate_smolvla import _ZERO_SHOT_WARNING
+
+    print(_ZERO_SHOT_WARNING, file=sys.stderr)
+
+
 def main(
     *,
     suite_path: Path = _DEFAULT_SUITE,
     out_dir: Path = _DEFAULT_OUT,
     n_workers: int = 1,
 ) -> None:
+    _print_zero_shot_warning()
     out_dir.mkdir(parents=True, exist_ok=True)
     suite: Suite = load_suite(suite_path)
     runner = Runner(n_workers=n_workers, env_factory=_build_env_factory())

@@ -1,6 +1,6 @@
 [project]
 name = "gauntlet"
-version = "0.1.0"
+version = "0.2.0"
 description = "An evaluation harness for learned robot policies."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -10,7 +10,7 @@ authors = [
 ]
 keywords = ["robotics", "evaluation", "policy", "mujoco", "regression-testing"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
@@ -300,6 +300,9 @@ cartesian = "gauntlet.suite.sampling:CartesianSampler"
 
 [project.urls]
 Homepage = "https://github.com/gauntlet-eval/gauntlet"
+Repository = "https://github.com/gauntlet-eval/gauntlet"
+Documentation = "https://github.com/gauntlet-eval/gauntlet/blob/main/README.md"
+Changelog = "https://github.com/gauntlet-eval/gauntlet/blob/main/CHANGELOG.md"
 Issues = "https://github.com/gauntlet-eval/gauntlet/issues"
 
 [dependency-groups]
@@ -464,6 +467,10 @@ omniverse-kit = { index = "nvidia" }
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
+# Untracked tooling directories live next to the project (Obsidian
+# wiki, local agent state); they are intentionally outside the
+# project lint scope.
+extend-exclude = ["my-wiki", ".obsidian", ".a5c", ".remember", ".code-review-graph"]
 
 [tool.ruff.lint]
 select = [
@@ -481,6 +488,10 @@ ignore = []
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["B011"]
+# The reference-benchmark script embeds a self-contained HTML/CSS
+# landing page with intentionally-Unicode greek (sigma σ in the noise
+# label) and long inline CSS lines that read more clearly unwrapped.
+"scripts/generate_reference_benchmark.py" = ["E501", "RUF001", "RUF002"]
 # The monitor torch modules put ``try: import torch`` at module scope
 # to raise the install-hint before any downstream import runs. That
 # forces ``from gauntlet.monitor.{ae,train,score}`` imports of the
