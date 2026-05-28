@@ -93,4 +93,4 @@ tooling) is partially shipped — see "Phase 3 (partial)" below.
 - Provisional: `gauntlet.realsim` (Phase 3 renderer protocol);
   `gauntlet.bisect`; the multi-camera `CameraSpec` API.
 
-[0.2.0]: https://github.com/gauntlet-eval/gauntlet/releases/tag/v0.2.0
+[0.2.0]: https://github.com/mhussainahmad/gauntlet/releases/tag/v0.2.0

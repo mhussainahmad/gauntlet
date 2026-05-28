@@ -321,7 +321,7 @@ def _write_landing_page(out: Path, summary: dict[str, object]) -> None:
 
           <h2>Reproduce locally</h2>
           <pre><code>pip install gauntlet
-git clone https://github.com/gauntlet-eval/gauntlet
+git clone https://github.com/mhussainahmad/gauntlet
 cd gauntlet
 python scripts/generate_reference_benchmark.py --out ./benchmarks/v{gauntlet_version}/</code></pre>
 

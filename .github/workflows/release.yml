@@ -7,7 +7,7 @@ name: Release
 #
 # Setup (one-time, on pypi.org):
 #   - Project name: gauntlet
-#   - Owner: gauntlet-eval
+#   - Owner: mhussainahmad
 #   - Repository name: gauntlet
 #   - Workflow filename: release.yml
 #   - Environment name: pypi

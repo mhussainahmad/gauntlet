@@ -5,7 +5,7 @@ name: Reference benchmark
 # delta between them — and publish it to GitHub Pages so an external
 # evaluator can see a real `report.html` before installing anything.
 #
-# Hosted at: https://gauntlet-eval.github.io/gauntlet/
+# Hosted at: https://mhussainahmad.github.io/gauntlet/
 #
 # Setup (one-time, in repo settings → Pages):
 #   Source: GitHub Actions
@@ -81,7 +81,7 @@ jobs:
             <ul>
               <li><a href="./v${VERSION}/">v${VERSION}</a> &mdash; current</li>
             </ul>
-            <p><a href="https://github.com/gauntlet-eval/gauntlet">Source on GitHub</a></p>
+            <p><a href="https://github.com/mhussainahmad/gauntlet">Source on GitHub</a></p>
           </body>
           </html>
           EOF

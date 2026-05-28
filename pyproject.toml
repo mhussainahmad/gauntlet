@@ -299,11 +299,11 @@ cartesian = "gauntlet.suite.sampling:CartesianSampler"
 # a fork.
 
 [project.urls]
-Homepage = "https://github.com/gauntlet-eval/gauntlet"
-Repository = "https://github.com/gauntlet-eval/gauntlet"
-Documentation = "https://github.com/gauntlet-eval/gauntlet/blob/main/README.md"
-Changelog = "https://github.com/gauntlet-eval/gauntlet/blob/main/CHANGELOG.md"
-Issues = "https://github.com/gauntlet-eval/gauntlet/issues"
+Homepage = "https://github.com/mhussainahmad/gauntlet"
+Repository = "https://github.com/mhussainahmad/gauntlet"
+Documentation = "https://github.com/mhussainahmad/gauntlet/blob/main/README.md"
+Changelog = "https://github.com/mhussainahmad/gauntlet/blob/main/CHANGELOG.md"
+Issues = "https://github.com/mhussainahmad/gauntlet/issues"
 
 [dependency-groups]
 dev = [

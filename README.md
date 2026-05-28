@@ -18,7 +18,7 @@ See [`GAUNTLET_SPEC.md`](./GAUNTLET_SPEC.md) for the full design.
 ## See a real report before installing
 
 A public reference benchmark lives at
-**<https://gauntlet-eval.github.io/gauntlet/>** — two policies on the
+**<https://mhussainahmad.github.io/gauntlet/>** — two policies on the
 bundled smoke suite, regenerated on every release, with the
 `gauntlet compare` and `gauntlet diff` deltas surfaced. Open the
 baseline / regressed `report.html` to see what the failure-cluster-first
