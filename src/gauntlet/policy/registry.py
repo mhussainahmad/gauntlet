@@ -31,6 +31,8 @@ classes are treated as zero-arg factories, matching the existing
 from __future__ import annotations
 
 import importlib
+import os
+import sys
 from collections.abc import Callable
 from functools import partial
 from typing import cast
@@ -98,6 +100,14 @@ def _resolve_module_attr(spec: str) -> Callable[[], Policy]:
         raise PolicySpecError(
             f"policy spec {spec!r}: both module path and attribute name must be non-empty"
         )
+    # The ``gauntlet`` console script, unlike ``python -m``, does not put
+    # the working directory on ``sys.path``, so ``--policy my_policy:make``
+    # could not find ``./my_policy.py``. Append (not prepend) so a local
+    # file can never shadow an installed package. Spawned Runner workers
+    # inherit the parent's ``sys.path``, so they resolve it too.
+    cwd = os.getcwd()
+    if cwd not in sys.path:
+        sys.path.append(cwd)
     try:
         module = importlib.import_module(module_path)
     except ImportError as exc:

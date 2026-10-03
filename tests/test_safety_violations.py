@@ -125,6 +125,23 @@ def test_tabletop_step_info_publishes_safety_keys() -> None:
         env.close()
 
 
+def test_tabletop_resting_contacts_are_not_collisions() -> None:
+    """Contacts already present at reset (cube on table) must not count.
+
+    Regression: the contact-count baseline used to start at 0, so the
+    first step reported every resting contact as a new collision and
+    every episode — including clean successes — came out "unsafe".
+    """
+    env = TabletopEnv(max_steps=4)
+    try:
+        env.reset(seed=5)
+        assert env._data.ncon > 0, "precondition: cube rests on the table"
+        _, _, _, _, info_step = env.step(np.zeros(7, dtype=np.float64))
+        assert info_step["safety_n_collisions_delta"] == 0
+    finally:
+        env.close()
+
+
 def test_tabletop_episode_carries_safety_counts() -> None:
     """End-to-end: a MuJoCo rollout produces non-None safety counts.
 

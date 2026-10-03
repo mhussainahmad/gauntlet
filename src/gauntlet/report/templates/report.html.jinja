@@ -323,10 +323,10 @@ Data-embed conventions:
           <th class="num">Failure rate</th>
           <th class="num">Lift (×)</th>
           {% if any_cluster_energy %}<th class="num">Energy / peak τ</th>{% endif %}
-          {% if any_cluster_action_var %}<th class="num">Action var (B-18)</th>{% endif %}
+          {% if any_cluster_action_var %}<th class="num">Action var</th>{% endif %}
           {% if any_cluster_safety %}<th class="num">Collisions / jnt excursions</th>{% endif %}
-          {% if any_cluster_behavior_traj %}<th class="num">Time / path / jerk (B-02)</th>{% endif %}
-          {% if any_cluster_behavior_contact %}<th class="num">Near coll. / peak force (B-02)</th>{% endif %}
+          {% if any_cluster_behavior_traj %}<th class="num">Time / path / jerk</th>{% endif %}
+          {% if any_cluster_behavior_contact %}<th class="num">Near coll. / peak force</th>{% endif %}
           {% if any_cluster_inference_latency %}<th class="num">Latency p50 / p99 / max (ms)</th>{% endif %}
           {% if any_cluster_inference_budget %}<th class="num">Budget violations</th>{% endif %}
           {% if any_cluster_video %}<th>Failed-rollout videos</th>{% endif %}
@@ -806,13 +806,14 @@ Data-embed conventions:
     (data.per_axis || []).forEach(function (axis) {
       const canvas = document.getElementById('axis-' + axis.name);
       if (!canvas) return;
-      // Keys are strings in JSON mode; sort numerically.
+      // Keys are the Python float reprs ("0.0", "100.0"); sort them
+      // numerically but index with the original string — round-tripping
+      // through parseFloat/String turns "0.0" into "0" and misses.
       const keys = Object.keys(axis.rates)
-        .map(function (k) { return parseFloat(k); })
-        .sort(function (a, b) { return a - b; });
-      const labels = keys.map(function (k) { return String(k); });
-      const rates = keys.map(function (k) { return axis.rates[String(k)]; });
-      const counts = keys.map(function (k) { return axis.counts[String(k)]; });
+        .sort(function (a, b) { return parseFloat(a) - parseFloat(b); });
+      const labels = keys.map(function (k) { return String(parseFloat(k)); });
+      const rates = keys.map(function (k) { return axis.rates[k]; });
+      const counts = keys.map(function (k) { return axis.counts[k]; });
       // B-03: Wilson 95% CI per axis bucket. Optional — older
       // report.json files written before B-03 lack these dicts; the
       // tooltip falls back to no-CI in that case.
@@ -839,7 +840,7 @@ Data-embed conventions:
               callbacks: {
                 label: function (ctx) {
                   const i = ctx.dataIndex;
-                  const k = String(keys[i]);
+                  const k = keys[i];
                   const lo = ciLow[k];
                   const hi = ciHigh[k];
                   const base = 'rate=' + rates[i].toFixed(2) + '  n=' + counts[i];

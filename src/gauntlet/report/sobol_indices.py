@@ -7,10 +7,19 @@ perturbation grid ``X = (X_0, ..., X_{d-1})``:
 
 * **First-order**  ``S_i = Var_X[E[Y | X_i]] / Var(Y)``. Read as "the
   fraction of the outcome variance explained by axis ``i`` alone".
-* **Total-order**  ``S_T_i = 1 - Var_X[E[Y | X_~i]] / Var(Y)``. Read as
-  "the fraction of variance that disappears when ``i`` is held fixed";
-  always ``>= S_i`` and the gap is the share of variance carried by
-  interactions involving axis ``i``.
+* **Total-order**  ``S_T_i = (Var_X[E[Y | X]] - Var_X[E[Y | X_~i]]) / Var(Y)``.
+  Read as "the share of variance that disappears when ``i`` is held
+  fixed"; ``>= S_i`` on a full grid, and the gap is the share carried
+  by interactions involving axis ``i``.
+
+Rollouts are stochastic: episodes in the same cell differ by seed, so
+part of ``Var(Y)`` is within-cell noise no axis can explain. The
+textbook deterministic-model form ``1 - Var_X[E[Y | X_~i]] / Var(Y)``
+would credit that noise to *every* axis, so an axis with no effect at
+all reads ~0.5 on a noisy policy. Subtracting from the between-cell
+variance ``Var_X[E[Y | X]]`` instead of from ``Var(Y)`` removes it.
+With one episode per cell (the usual Sobol-sampled shape) the two
+forms coincide.
 
 Conditional means are weighted by the population that actually landed
 in each bucket, not by the number of distinct bucket values — matters
@@ -128,6 +137,15 @@ def compute_sobol_indices(
     overall = float(y.mean())
     var_y = float(y.var())
 
+    # Between-cell variance: what the full perturbation config explains.
+    # Everything above it in ``var_y`` is within-cell seed noise.
+    cell_groups: dict[tuple[tuple[str, float], ...], list[int]] = defaultdict(lambda: [0, 0])
+    for ep in episodes:
+        key = tuple(sorted((k, float(v)) for k, v in ep.perturbation_config.items()))
+        cell_groups[key][0] += 1
+        cell_groups[key][1] += 1 if ep.success else 0
+    var_cells = _conditional_variance(((n, k) for n, k in cell_groups.values()), overall)
+
     out: dict[str, tuple[float | None, float | None]] = {}
     for axis in axis_names:
         # Group by this axis only (first-order) and by all-other-axes
@@ -173,9 +191,9 @@ def compute_sobol_indices(
             overall,
         )
         s_i = var_first / var_y
-        s_t = 1.0 - var_others / var_y
+        s_t = (var_cells - var_others) / var_y
         # Clamp tiny negative drift to zero; clamp total-order to [0, 1]
-        # so a one-cell-per-others bucket (where ``var_others == var_y``
+        # so an axis with no effect (``var_others == var_cells``
         # exactly) reads as ``0.0``, not ``-0.0`` or ``1e-17``.
         out[axis] = (max(0.0, min(1.0, s_i)), max(0.0, min(1.0, s_t)))
 
