@@ -8,7 +8,7 @@ Open candidates for future work, sourced from the 2024–2026 robot-policy-evalu
 
 - v0.2.0 PyPI release plumbing (`release.yml`, OIDC trusted publishing, sdist+wheel attached to GH Release).
 - Public-API freeze + semver commit (`docs/stability.md`).
-- Reference benchmark on GitHub Pages (`benchmark.yml`, `scripts/generate_reference_benchmark.py`).
+- Reference benchmark attached to each GitHub Release (`benchmark.yml`, `scripts/generate_reference_benchmark.py`).
 - SmolVLA zero-shot footgun: runtime warning banner before any 3 GB weights download.
 - 19 flaky `inference_latency_ms_*` byte-identity tests retired via the new `gauntlet.runner.episode_deterministic_dump` helper + `NONDETERMINISTIC_EPISODE_FIELDS`.
 - OSS hygiene: `CONTRIBUTING.md`, `SECURITY.md`, `.github/CODEOWNERS`, issue templates, PR template.

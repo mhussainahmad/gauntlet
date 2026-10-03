@@ -1,14 +1,11 @@
 name: Reference benchmark
 
-# Regenerate the public reference benchmark — two policies on the
-# bundled smoke suite, plus the `gauntlet compare` / `gauntlet diff`
-# delta between them — and publish it to GitHub Pages so an external
-# evaluator can see a real `report.html` before installing anything.
-#
-# Hosted at: https://mhussainahmad.github.io/gauntlet/
-#
-# Setup (one-time, in repo settings → Pages):
-#   Source: GitHub Actions
+# Regenerate the reference benchmark — two policies on the bundled
+# smoke suite, plus the `gauntlet compare` / `gauntlet diff` delta
+# between them. Every run uploads it as a workflow artefact; on a
+# release tag it is also attached to that tag's GitHub Release as
+# ``reference-benchmark.zip`` so an evaluator can open a real
+# ``report.html`` before installing anything.
 
 on:
   push:
@@ -18,18 +15,17 @@ on:
       - "examples/suites/tabletop-smoke.yaml"
       - "src/gauntlet/**"
       - ".github/workflows/benchmark.yml"
-  release:
-    types: [published]
+    # Release tags: the zip is attached to the GitHub Release that
+    # release.yml creates for the same tag.
+    tags: ["v*.*.*"]
   workflow_dispatch:
 
 concurrency:
-  group: pages
+  group: reference-benchmark
   cancel-in-progress: false
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write  # attach the zip to the release
 
 jobs:
   build:
@@ -56,42 +52,6 @@ jobs:
       - name: Generate reference benchmark
         run: uv run python scripts/generate_reference_benchmark.py --clean
 
-      - name: Compose Pages site root
-        run: |
-          set -eu
-          mkdir -p pages/v0.2.0
-          cp -r benchmarks/v0.2.0/. pages/v0.2.0/
-          VERSION=$(uv run python -c "import gauntlet;print(gauntlet.__version__)")
-          cat > pages/index.html <<EOF
-          <!doctype html>
-          <html lang="en">
-          <head>
-            <meta charset="utf-8" />
-            <title>Gauntlet — reference benchmarks</title>
-            <style>
-              body { font-family: -apple-system, system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; color: #111; }
-              a { color: #0b65c2; }
-              .lede { color: #555; }
-              code { background: #f3f3f3; padding: 0.1rem 0.3rem; border-radius: 3px; }
-            </style>
-          </head>
-          <body>
-            <h1>Gauntlet — reference benchmarks</h1>
-            <p class="lede">Public benchmark artefacts regenerated on every release. Each version page links to its baseline / regressed reports + the structured delta.</p>
-            <ul>
-              <li><a href="./v${VERSION}/">v${VERSION}</a> &mdash; current</li>
-            </ul>
-            <p><a href="https://github.com/mhussainahmad/gauntlet">Source on GitHub</a></p>
-          </body>
-          </html>
-          EOF
-
-      - uses: actions/configure-pages@v5
-
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: pages
-
       - name: Upload benchmark artefact (for the run page)
         uses: actions/upload-artifact@v4
         with:
@@ -99,14 +59,18 @@ jobs:
           path: benchmarks/
           retention-days: 30
 
-  deploy:
-    name: Publish to GitHub Pages
-    needs: build
-    runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request'
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Attach benchmark to the release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -eu
+          (cd benchmarks && zip -qr ../reference-benchmark.zip .)
+          # release.yml creates the release after publishing to PyPI;
+          # wait for it rather than racing it.
+          for _ in $(seq 1 60); do
+            gh release view "$TAG" >/dev/null 2>&1 && break
+            sleep 30
+          done
+          gh release upload "$TAG" reference-benchmark.zip --clobber

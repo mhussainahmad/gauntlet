@@ -1,10 +1,10 @@
 """Generate the public reference benchmark artefacts.
 
 Runs two policies on the same Suite, writes their reports, and emits the
-structured regression delta between them. The bundled output is what we
-publish to GitHub Pages so an external buyer can see — before installing
-anything — what a Gauntlet report actually looks like and how a
-regression surfaces.
+structured regression delta between them. The bundled output is attached
+to each GitHub Release (``reference-benchmark.zip``) so an external buyer
+can see — before installing anything — what a Gauntlet report actually
+looks like and how a regression surfaces.
 
 Two policies:
 

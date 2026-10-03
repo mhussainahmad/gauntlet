@@ -40,8 +40,8 @@ benchmarks/*.json
 # Reference-benchmark artefacts. The script
 # (scripts/generate_reference_benchmark.py) is checked in; the
 # regenerable outputs (HTML reports, per-cell diffs, GH Pages bundle)
-# are not — they are published to GitHub Pages by the benchmark.yml
-# workflow on every push / release.
+# are not — the benchmark.yml workflow attaches them to each GitHub
+# Release as reference-benchmark.zip.
 benchmarks/v*/
 benchmarks/local/
 
