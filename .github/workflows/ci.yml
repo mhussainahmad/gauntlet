@@ -96,7 +96,11 @@ jobs:
         # test shows up as silence rather than its name. Verbose mode
         # prints the test ID before each call so the next regression
         # is one log lookup away from a fix.
-        run: uv run pytest -v -m "not hf and not lerobot and not monitor and not pybullet and not genesis and not ros2 and not isaac and not video and not render and not slow"
+        # ``--no-cov``: pytest-cov's atexit hooks in spawn-pool workers
+        # wedge pool shutdown on the hosted runner (coverage is not
+        # consumed in CI). ``faulthandler_timeout`` dumps every thread's
+        # stack if a single test stalls, so a future hang is diagnosable.
+        run: uv run pytest -v --no-cov -o faulthandler_timeout=180 -m "not hf and not lerobot and not monitor and not pybullet and not genesis and not ros2 and not isaac and not video and not render and not slow"
 
   hf-tests:
     name: hf tests (py${{ matrix.python-version }})
@@ -276,6 +280,9 @@ jobs:
       - name: Set up Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}
 
+      - name: Install Mesa EGL (software offscreen GL for genesis)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libegl1 libegl-mesa0 libgl1 libgles2 libosmesa6
+
       - name: Sync dependencies (genesis extra + genesis-dev group)
         run: >-
           uv sync
@@ -285,8 +292,9 @@ jobs:
           --reinstall-package gauntlet
 
       - name: Run genesis-marked tests
-        # Rendering tests need an EGL context the hosted runner lacks.
-        run: uv run pytest -m "genesis and not render" -q
+        env:
+          PYOPENGL_PLATFORM: egl
+        run: uv run pytest -m genesis -q
 
   ros2-tests:
     name: ros2-tests (rclpy mocked, py${{ matrix.python-version }})
