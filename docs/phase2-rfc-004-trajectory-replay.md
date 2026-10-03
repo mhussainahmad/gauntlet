@@ -1,8 +1,7 @@
 # Phase 2 RFC-004: Trajectory Replay
 
 Status: draft
-Owner: architect (phase-2/trajectory-replay)
-Branched from: `main` @ `832551f`
+Branch: `phase-2/trajectory-replay`
 Related spec: `GAUNTLET_SPEC.md` §4 (Episode schema), §6 (reproducibility is
 non-negotiable), §7 Phase 2 ("Trajectory replay tool — take a failed
 episode, let a developer modify one variable and re-simulate.")

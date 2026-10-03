@@ -6,6 +6,45 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project commits to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 from `0.2.0` onward (see `docs/stability.md`).
 
+## [0.2.1] — 2026-10-03
+
+### Fixed
+- HTML report: per-axis bar charts dropped every bucket whose value is
+  a whole number (`0`, `100`, `4`, ...). The chart looked keys up as
+  `"0"` while `report.json` stores `"0.0"`.
+- MuJoCo tabletop: contacts already present at reset (the cube resting
+  on the table) were counted as collisions on the first step, so every
+  episode reported `n_collisions >= 4` and every success was tagged
+  unsafe (`success_safe_rate == 0`). Near-collision counts and peak
+  contact force had the same problem (the cube's weight on the table
+  showed up as ~500 near-collisions per episode). All three now skip
+  geom pairs that were already touching at reset.
+- MuJoCo tabletop: distractors enabled by `distractor_count` were
+  visible but never collided. The env flipped `geom_contype` at
+  runtime, but MuJoCo's broadphase filters on the compiled
+  `body_contype` / `body_conaffinity` masks first. The body masks are
+  now updated with the geom's.
+- Sobol total-order indices credited within-cell seed noise to every
+  axis, so an axis with no effect read about 0.5 on a stochastic
+  policy. They are now computed from the between-cell variance. Results
+  are unchanged when each cell holds one episode.
+- `--policy module:attr` now finds a module in the working directory
+  when run through the `gauntlet` console script (it previously only
+  worked under `python -m gauntlet.cli`).
+
+### Added
+- `examples/suites/tabletop-field-conditions.yaml` and
+  `docs/field-robustness.md`: a worked baseline-vs-regressed example
+  over control latency, placement variance, clutter and lighting.
+  The reference benchmark attached to each release now includes it.
+- `docs/guide.md`: the long-form feature documentation that used to
+  live in the README.
+
+### Changed
+- README rewritten as a short front page; design notes moved to
+  `docs/design/`.
+- Internal backlog ids removed from report column headers.
+
 ## [0.2.0] — 2026-05-28
 
 First public release on PyPI. Phase 1 (MVP) and Phase 2 (real-policy

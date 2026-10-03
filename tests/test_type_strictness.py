@@ -3,7 +3,7 @@
 Spawns ``python -m mypy --strict src/gauntlet`` in a subprocess and
 asserts a clean exit. The project-wide ``[tool.mypy]`` block in
 ``pyproject.toml`` enables ``disallow_any_explicit = true`` (Phase 2.5
-T15, PR #45) with two narrowly scoped per-module override buckets —
+T15) with two narrowly scoped per-module override buckets —
 pydantic schema modules (where the v2 mypy plugin synthesises
 ``__mypy-replace(**kwargs: Any)``) and FFI seam modules (mujoco /
 gymnasium / torch / lerobot / pybullet / genesis / isaacsim / rclpy /

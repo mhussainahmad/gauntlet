@@ -11,7 +11,7 @@ Why coverage-style instead of diff-against-generator
 ----------------------------------------------------
 The original Phase 2.5 plan called for a generator + diff pattern
 (``scripts/gen_api_docs.py`` + ``diff -q`` against the checked-in
-``docs/api.md``). PR #44 deliberately chose hand-curated prose with
+``docs/api.md``). The API-docs pass deliberately chose hand-curated prose with
 RFC cross-links and runnable examples, and the polish-loop PRs since
 have only added more curated context. A generator would either
 destroy this voice (boilerplate lists with no anti-feature framing)

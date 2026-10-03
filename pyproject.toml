@@ -1,12 +1,12 @@
 [project]
 name = "gauntlet-robotics"
-version = "0.2.0"
+version = "0.2.1"
 description = "An evaluation harness for learned robot policies."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [
-    { name = "Gauntlet contributors" },
+    { name = "Muhammad Hussain Ahmad" },
 ]
 keywords = ["robotics", "evaluation", "policy", "mujoco", "regression-testing"]
 classifiers = [

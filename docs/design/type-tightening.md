@@ -2,7 +2,7 @@
 
 Status: shipped (this branch — Phase 2.5 follow-up — adds the
 project-wide `disallow_any_explicit` ratchet via per-module overrides,
-on top of the manual purge that PR #30 landed)
+on top of the earlier manual `Any` purge)
 Owner: phase-2.5/type-tightening branch
 Phase: 2.5 Task 15
 
@@ -199,7 +199,7 @@ every commit.
 ## 8. Post-purge audit result
 
 Running the §2 invocation after the purge (against the rebased branch
-which now includes the `polish/gauntlet-diff` PR #29):
+which now includes the `gauntlet diff` change):
 
 ```
 $ uv run mypy --warn-return-any --disallow-any-explicit src/gauntlet
@@ -207,14 +207,14 @@ $ uv run mypy --warn-return-any --disallow-any-explicit src/gauntlet
 Found 145 errors in 31 files (checked 61 source files)
 ```
 
-The pre-PR baseline (against `aa56142`, the commit before
-PR #29 merged) was 145 across 33 files (58 checked). PR #29
+The pre-PR baseline (before the `gauntlet diff` change merged)
+was 145 across 33 files (58 checked). The `gauntlet diff` change
 added 4 new leaks (all in `src/gauntlet/diff/diff.py`) and shifted
 `cli.py` line numbers by +1 without changing its leak count. This PR
 purged 4 leaks in pure-Python helpers, so:
 
 ```
-145 (post-rebase) = 145 (baseline) + 4 (PR #29 diff/) − 4 (this PR)
+145 (post-rebase) = 145 (baseline) + 4 (diff/) − 4 (this PR)
 ```
 
 The remaining 145 are all documented as either §3a (pydantic
@@ -244,12 +244,12 @@ synthetic) or §3b (FFI seam):
 | 12 single-leak files | 12 | mix of §3a / §3b |
 
 Zero `Any` leaks remain in the pure-Python core helper code that this
-task targets. Excluding the sibling-owned `cli.py` and `diff/`
-(out of scope per §6) the in-scope-and-purgeable count is **0**.
+task targets. Excluding `cli.py` and `diff/` (out of scope per §6),
+the in-scope-and-purgeable count is **0**.
 
 ## 9. Phase 2.5 follow-up (this branch — `phase-2.5/type-tightening`)
 
-PR #30 deferred enabling `disallow_any_explicit = true` because the
+The first purge deferred enabling `disallow_any_explicit = true` because the
 pydantic synthetic-method blocker (§3a) made the global flag noisy.
 This pass goes further by adopting **per-module overrides** —
 mypy 1.x supports `disallow_any_explicit` inside
@@ -272,9 +272,9 @@ helpers (`_read_json`, `_episodes_from_dicts`, `_write_json`,
 `_episodes_to_dicts`, `_build_compare`, `replay` payload) to the same
 recursive `_JsonValue` `TypeAlias` already used by
 `gauntlet.{aggregate,report,dashboard}.html` /
-`gauntlet.dashboard.build`. PR #30 had treated `cli.py` as
-sibling-owned and out of scope; that PR has merged, so `cli.py` is
-now in scope.
+`gauntlet.dashboard.build`. The first purge had treated `cli.py` as
+out of scope while it was changing on another branch; that branch
+has merged, so `cli.py` is now in scope.
 
 `gauntlet.dashboard.build` and `gauntlet.realsim.pipeline` were
 considered for tightening but ended up in the FFI carve-out instead:

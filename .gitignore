@@ -44,6 +44,8 @@ benchmarks/*.json
 # Release as reference-benchmark.zip.
 benchmarks/v*/
 benchmarks/local/
+benchmarks/smoke/
+benchmarks/field-conditions/
 
 # Drift-detector artefacts (trajectory dumps, AE weights).
 # Test runs produce these under tmp paths but also land in ad-hoc local

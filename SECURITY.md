@@ -91,7 +91,7 @@ suites):
 
 - Run in a process namespace / container with no network access and
   a temp-dir-only output root.
-- Pin `gauntlet>=0.2,<0.3` and update on every patch release.
+- Pin `gauntlet-robotics>=0.2,<0.3` and update on every patch release.
 - Treat the `policy:` spec as code — `module.path:attr` resolves
   via `importlib`, and the resolved factory runs in your process.
 - The HTML report ships with Chart.js loaded from a CDN. Self-host

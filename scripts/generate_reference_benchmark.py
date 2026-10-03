@@ -17,7 +17,7 @@ Two policies:
   checkpoint — the control law is unchanged but its observed-state
   estimate is dirtier.
 
-Outputs under ``<out>/`` (default ``benchmarks/v0.2.0/``):
+Outputs under ``<out>/`` (default ``benchmarks/v<version>/``):
 
 * ``baseline/`` — report from the good policy.
 * ``regressed/`` — report from the noisy policy.
@@ -40,11 +40,12 @@ from typing import Final, cast
 import numpy as np
 from numpy.typing import NDArray
 
+from gauntlet import __version__
 from gauntlet.policy.base import Action, Observation
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parent.parent
 _DEFAULT_SUITE: Final[Path] = _REPO_ROOT / "examples" / "suites" / "tabletop-smoke.yaml"
-_DEFAULT_OUT: Final[Path] = _REPO_ROOT / "benchmarks" / "v0.2.0"
+_DEFAULT_OUT: Final[Path] = _REPO_ROOT / "benchmarks" / f"v{__version__}"
 
 
 # ---------------------------------------------------------------------------

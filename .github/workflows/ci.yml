@@ -24,8 +24,7 @@ jobs:
     # Pin every ``uv`` invocation in this job to the matrix python so
     # ``uv run`` does not fall back to the runner's system python and
     # silently recreate ``.venv`` from scratch (wiping the synced
-    # packages). See PR #37 for the prior CI hotfix; this is the next
-    # orthogonal failure mode that surfaced on py3.12 jobs.
+    # packages). This failure mode surfaced on the py3.12 jobs.
     #
     # Thread caps (OMP/MKL/OPENBLAS=1) prevent BLAS / OpenMP from
     # spinning up nproc=4 worker threads inside each test process.

@@ -1,8 +1,8 @@
 name: Reference benchmark
 
 # Regenerate the reference benchmark — two policies on the bundled
-# smoke suite, plus the `gauntlet compare` / `gauntlet diff` delta
-# between them. Every run uploads it as a workflow artefact; on a
+# smoke and field-conditions suites, plus the `gauntlet compare` /
+# `gauntlet diff` delta between them. Every run uploads it as a workflow artefact; on a
 # release tag it is also attached to that tag's GitHub Release as
 # ``reference-benchmark.zip`` so an evaluator can open a real
 # ``report.html`` before installing anything.
@@ -13,6 +13,7 @@ on:
     paths:
       - "scripts/generate_reference_benchmark.py"
       - "examples/suites/tabletop-smoke.yaml"
+      - "examples/suites/tabletop-field-conditions.yaml"
       - "src/gauntlet/**"
       - ".github/workflows/benchmark.yml"
     # Release tags: the zip is attached to the GitHub Release that
@@ -50,7 +51,13 @@ jobs:
         run: uv sync --frozen
 
       - name: Generate reference benchmark
-        run: uv run python scripts/generate_reference_benchmark.py --clean
+        run: |
+          set -eu
+          uv run python scripts/generate_reference_benchmark.py \
+            --out benchmarks/smoke --clean
+          uv run python scripts/generate_reference_benchmark.py \
+            --suite examples/suites/tabletop-field-conditions.yaml \
+            --out benchmarks/field-conditions --clean
 
       - name: Upload benchmark artefact (for the run page)
         uses: actions/upload-artifact@v4

@@ -4,7 +4,7 @@ From `0.2.0` onward, Gauntlet commits to **[Semantic
 Versioning 2.0.0](https://semver.org/spec/v2.0.0.html)** on its public
 surface.
 
-> A user pinning `gauntlet>=0.2,<0.3` in `pyproject.toml` will never
+> A user pinning `gauntlet-robotics>=0.2,<0.3` in `pyproject.toml` will never
 > have a passing CI break because Gauntlet renamed a public symbol,
 > changed a CLI flag, or changed the on-disk schema. Breakages happen
 > only on a minor (`0.x.0`) bump while we are pre-1.0, and only on a
