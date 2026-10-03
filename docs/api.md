@@ -58,7 +58,7 @@ the queue.
 `CameraSpec(name, pose, size)` is a `NamedTuple` describing one render
 camera. `pose = (x, y, z, rx, ry, rz)` is metres + MuJoCo-XYZ Euler
 radians. `size = (H, W)`. See
-`docs/polish-exploration-multi-camera.md` for the full contract.
+`docs/design/multi-camera.md` for the full contract.
 
 `AXIS_NAMES` is the canonical ordered tuple of every scalar
 perturbation axis name the harness understands (the original seven
@@ -229,8 +229,8 @@ from gauntlet.suite.sobol import SobolSampler, sobol_unit_cube, MAX_DIMS
 LHS uses McKay 1979 stratification; Sobol uses Joe-Kuo 6.21201
 direction numbers (21-dimension cap). Both are deterministic given the
 RNG `Suite.cells()` seeds from `suite.seed`. See
-`docs/polish-exploration-lhs-sampling.md` and
-`docs/polish-exploration-sobol-sampler.md`.
+`docs/design/lhs-sampling.md` and
+`docs/design/sobol-sampler.md`.
 
 ### `lint_suite(suite) -> list[LintFinding]` (B-25)
 
@@ -1154,7 +1154,7 @@ dict so one broken plugin does not take the harness down.
 `warn_on_collision` flags identity-mismatched name collisions between
 built-ins and plugins. The built-in registries (`gauntlet.policy.registry`,
 `gauntlet.env.registry`) enforce built-in-wins precedence one layer
-up. See `docs/polish-exploration-plugin-system.md` and
+up. See `docs/design/plugin-system.md` and
 `docs/plugin-development.md`.
 
 ---

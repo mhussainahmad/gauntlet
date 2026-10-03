@@ -1,4 +1,4 @@
-# Polish exploration: incremental rollout caching
+# Design note: incremental rollout caching
 
 Status: exploration / pre-implementation
 Owner: polish/incremental-cache branch

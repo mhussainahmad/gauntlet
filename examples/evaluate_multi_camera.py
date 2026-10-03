@@ -2,7 +2,7 @@
 
 This script exists as the reference wiring for the opt-in multi-camera
 observation surface introduced in
-``docs/polish-exploration-multi-camera.md``. It demonstrates the
+``docs/design/multi-camera.md``. It demonstrates the
 canonical three-camera layout (wrist + side + top) used by SmolVLA-
 style multi-view policies.
 

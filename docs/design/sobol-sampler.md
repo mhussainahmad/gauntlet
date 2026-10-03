@@ -1,8 +1,8 @@
-# Polish exploration — Sobol perturbation sampler (finish LHS deferral)
+# Design note — Sobol perturbation sampler (finish LHS deferral)
 
 Status: implementation. Lands `Suite.sampling: sobol` as a working
 sampler, replacing the `NotImplementedError` placeholder shipped in
-[the LHS PR](polish-exploration-lhs-sampling.md).
+[the LHS PR](lhs-sampling.md).
 
 ## Why this matters
 

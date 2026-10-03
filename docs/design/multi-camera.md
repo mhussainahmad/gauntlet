@@ -1,4 +1,4 @@
-# Polish exploration: multi-camera observation support
+# Design note: multi-camera observation support
 
 Status: exploration / pre-implementation
 Owner: polish/multi-camera-obs branch
@@ -129,9 +129,9 @@ through `np.asarray(v, dtype=np.float64)`. A nested
 ("float() argument must be a string or a real number, not 'dict'")
 on the first trajectory append. This is intentional and acceptable:
 
-* The runner is owned by a sibling agent (sibling branch
-  `polish/incremental-cache`), so we cannot extend its iteration
-  logic in this PR.
+* The runner was changing concurrently on the
+  `polish/incremental-cache` branch, so extending its iteration
+  logic is kept out of this PR.
 * The single-camera path through `obs["image"]` (uint8, gets cast
   to float64) keeps working when `record_trajectory=True`. Multi-
   camera users who need full per-step trajectories should record

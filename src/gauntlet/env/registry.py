@@ -4,7 +4,7 @@ See ``docs/phase2-rfc-005-pybullet-adapter.md`` §3.4 and §3.5 for the
 historical rationale (first-party backends register from their own
 subpackage ``__init__.py``). Phase 3 (plugin-system polish task) layered
 ``[project.entry-points]`` discovery on top — see
-``docs/polish-exploration-plugin-system.md`` and :mod:`gauntlet.plugins`.
+``docs/design/plugin-system.md`` and :mod:`gauntlet.plugins`.
 
 Resolution order for :func:`resolve_env_factory` (the new public
 resolver that callers should prefer over the bare

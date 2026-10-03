@@ -245,7 +245,7 @@ realsim-gsplat = [
 gauntlet = "gauntlet.cli:app"
 
 # Plugin discovery groups (Polish "plugin system" task).
-# See docs/polish-exploration-plugin-system.md for the full design.
+# See docs/design/plugin-system.md for the full design.
 #
 # Gauntlet eats its own dogfood here: the four built-in policy adapters
 # and four built-in env backends register themselves as entry points
@@ -485,10 +485,6 @@ omniverse-kit = { index = "nvidia" }
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
-# Untracked tooling directories live next to the project (Obsidian
-# wiki, local agent state); they are intentionally outside the
-# project lint scope.
-extend-exclude = ["my-wiki", ".obsidian", ".a5c", ".remember", ".code-review-graph"]
 
 [tool.ruff.lint]
 select = [
@@ -547,7 +543,7 @@ disallow_any_generics = true
 # trips this rule because the pydantic v2 ``dataclass_transform`` plugin
 # synthesises a ``__mypy-replace`` method whose ``**kwargs: Any`` is
 # what mypy actually flags (no literal ``Any`` in our source —
-# repro in ``docs/polish-exploration-type-tightening.md`` §3a); and
+# repro in ``docs/design/type-tightening.md`` §3a); and
 # (b) the FFI seams already documented under the ``ignore_missing_imports``
 # overrides further down (mujoco / gymnasium / torch / transformers /
 # pybullet / genesis / isaacsim / rclpy / imageio / lerobot). Any
@@ -712,7 +708,7 @@ ignore_missing_imports = true
 #    ``[explicit-any]`` because the pydantic v2 mypy plugin synthesises
 #    a ``__mypy-replace`` method whose ``**kwargs: Any`` is the literal
 #    ``Any`` mypy reports. Repro + full classification in
-#    ``docs/polish-exploration-type-tightening.md`` §3a. Listing each
+#    ``docs/design/type-tightening.md`` §3a. Listing each
 #    schema module explicitly here makes the carve-out visible at
 #    review time; a *new* ``Any`` literal authored by a developer in
 #    one of these modules still slips through (the downside is small —
@@ -740,7 +736,7 @@ disallow_any_explicit = false
 #    plugin loading / ``yaml.safe_load``. Per spec §6, ``Any`` is
 #    permitted at the FFI boundary; each module already carries a
 #    docstring or in-file comment explaining the carve-out. Full
-#    classification in ``docs/polish-exploration-type-tightening.md``
+#    classification in ``docs/design/type-tightening.md``
 #    §3b.
 [[tool.mypy.overrides]]
 module = [

@@ -1109,7 +1109,7 @@ def _validate_pybullet_camera_specs(specs: tuple[CameraSpec, ...]) -> None:
 
     Mirrors the MuJoCo backend's contract verbatim — same message
     formats, same checks. See
-    ``docs/polish-exploration-multi-camera.md`` §2.
+    ``docs/design/multi-camera.md`` §2.
     """
     seen: set[str] = set()
     for spec in specs:

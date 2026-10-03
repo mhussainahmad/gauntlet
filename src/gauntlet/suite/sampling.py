@@ -1,6 +1,6 @@
 """Sampler protocol + concrete strategies for :class:`Suite.cells`.
 
-See ``docs/polish-exploration-lhs-sampling.md`` for the design rationale.
+See ``docs/design/lhs-sampling.md`` for the design rationale.
 This module is the dispatch layer behind :attr:`Suite.sampling`:
 
 * ``"cartesian"`` (default) — :class:`CartesianSampler`, the existing
@@ -9,7 +9,7 @@ This module is the dispatch layer behind :attr:`Suite.sampling`:
 * ``"latin_hypercube"`` — :class:`LatinHypercubeSampler` (added in a
   follow-up step in this same task series).
 * ``"sobol"`` — :class:`SobolSampler` (Joe-Kuo 6.21201
-  low-discrepancy sequence; see ``docs/polish-exploration-sobol-sampler.md``).
+  low-discrepancy sequence; see ``docs/design/sobol-sampler.md``).
 * ``"adversarial"`` — :class:`AdversarialSampler` (B-07) — Thompson-
   sampling bandit over the perturbation hypercube, conditioned on a
   pilot run's :class:`gauntlet.report.schema.Report`. Biases coverage

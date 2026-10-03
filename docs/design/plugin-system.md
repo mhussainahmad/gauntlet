@@ -1,4 +1,4 @@
-# Polish exploration: plugin system for third-party policies + envs
+# Design note: plugin system for third-party policies + envs
 
 Status: exploration / pre-implementation
 Owner: phase-3/plugin-system branch

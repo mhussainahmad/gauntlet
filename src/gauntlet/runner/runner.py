@@ -175,7 +175,7 @@ class Runner:
                 Default ``False`` — every episode gets an MP4.
             cache_dir: Optional directory for the file-per-Episode
                 rollout cache (see :class:`gauntlet.runner.cache.EpisodeCache`
-                and ``docs/polish-exploration-incremental-cache.md``).
+                and ``docs/design/incremental-cache.md``).
                 When ``None`` (the default) no cache is constructed, no
                 cache lookups happen, and the hot path is byte-identical
                 to pre-PR behaviour. When set, the Runner computes a
@@ -250,7 +250,7 @@ class Runner:
             raise ValueError(f"video_fps must be a positive int; got {video_fps!r}.")
         # Cache requires an explicit max_steps because the cache key
         # depends on it and GauntletEnv does not expose a public getter.
-        # See ``docs/polish-exploration-incremental-cache.md`` §2.
+        # See ``docs/design/incremental-cache.md`` §2.
         if cache_dir is not None and max_steps is None:
             raise ValueError(
                 "cache_dir is set but max_steps is None; the cache key depends on "

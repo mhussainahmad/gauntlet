@@ -25,7 +25,7 @@ A fourth shape — a bare word that is neither ``"random"`` nor
 always win on collision (see :mod:`gauntlet.plugins`). Plugin-resolved
 classes are treated as zero-arg factories, matching the existing
 ``module.path:attr`` contract. See
-``docs/polish-exploration-plugin-system.md`` for the full design.
+``docs/design/plugin-system.md`` for the full design.
 """
 
 from __future__ import annotations

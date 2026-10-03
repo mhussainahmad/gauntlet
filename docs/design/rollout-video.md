@@ -1,4 +1,4 @@
-# Polish exploration: rollout MP4 video recording
+# Design note: rollout MP4 video recording
 
 Status: exploration / pre-implementation
 Owner: polish/rollout-video-recording branch

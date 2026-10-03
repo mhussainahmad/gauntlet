@@ -1,6 +1,6 @@
 """Tests for the opt-in multi-camera observation surface.
 
-See ``docs/polish-exploration-multi-camera.md`` for the design.
+See ``docs/design/multi-camera.md`` for the design.
 
 These tests must run in the default pytest job (no backend marker), so
 they live alongside ``tests/test_env.py``. The single-camera default

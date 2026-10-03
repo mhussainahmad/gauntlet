@@ -2,14 +2,12 @@
 
 - **Status**: Draft
 - **Phase**: 2, Task 10 (`GAUNTLET_SPEC.md` §7: "ROS 2 integration for running on real robots with logging.")
-- **Author**: integration agent
 - **Date**: 2026-04-24
 - **Supersedes**: n/a
 - **References**:
   - `docs/phase2-rfc-003-drift-detector.md` — closest precedent for a non-simulator subpackage with an extras-gated heavy dep + lazy import guard + torch-free public schema.
   - `docs/phase2-rfc-004-trajectory-replay.md` — second precedent for an integration / cross-cutting subpackage that reuses Runner outputs without modifying the Runner.
   - `docs/phase2-rfc-007-genesis-adapter.md` — extras / dev-group / pytest-marker / CI-job pattern, including a heavy dep that is awkward to install via PyPI alone.
-  - `docs/phase2-exploration-task10-ros2-integration.md` — the measurement / install-landscape pass that constrains the scope decisions below.
 
 ---
 
@@ -366,7 +364,7 @@ Notably the job does NOT install ROS 2 — `tests/ros2/conftest.py` seeds `sys.m
 
 ## 11. Open questions
 
-Each has a default in parentheses so the implementation agent is not blocked.
+Each has a default in parentheses so implementation is not blocked.
 
 - **Default topic name for the publisher.** (`/gauntlet/episodes`. Documented in `--topic`'s help text. Users override per-fleet.)
 - **Recorder output format.** JSON-lines vs rosbag2 vs NPZ. (**Default: JSON-lines**. Matches the rest of the codebase's serialisation conventions; no rosbag2 dep; trivially parseable. A future RFC may add `--format rosbag2`.)
@@ -390,7 +388,7 @@ Each has a default in parentheses so the implementation agent is not blocked.
 
 Each row → one commit named `Phase 2 Task 10 step N: <subject>`. Each leaves `ruff check`, `ruff format --check`, `mypy --strict`, the narrow `pytest -m "not hf and not lerobot and not monitor and not pybullet and not genesis and not ros2" -q` pass, and (where applicable) `pytest tests/ros2/ -q` pass.
 
-1. Exploration doc (`docs/phase2-exploration-task10-ros2-integration.md`). **Landed.**
+1. Measurement pass (backend API survey and install landscape). **Done.**
 2. RFC (this document).
 3. `pyproject.toml`: add `ros2 = []` extra, `ros2-dev` dev group, `ros2` pytest marker, `[[tool.mypy.overrides]]` for `rclpy.*` / `std_msgs.*` / `sensor_msgs.*` / `geometry_msgs.*`, and `[tool.ruff.lint.per-file-ignores]` E402 for `src/gauntlet/ros2/publisher.py` + `recorder.py`.
 4. `src/gauntlet/ros2/schema.py` (rclpy-free) + `src/gauntlet/ros2/__init__.py` with eager schema re-exports + lazy `__getattr__` for the publisher / recorder. Tests in `tests/ros2/test_schema.py` — no `ros2` marker, runs in default job.

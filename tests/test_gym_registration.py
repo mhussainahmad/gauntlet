@@ -1,6 +1,6 @@
 """Tests for the gymnasium registration shim.
 
-See ``docs/polish-exploration-gymnasium-registration.md`` for the full
+See ``docs/design/gymnasium-registration.md`` for the full
 rationale. This module covers:
 
 * ``gym.make("gauntlet/Tabletop-v0")`` constructs a real

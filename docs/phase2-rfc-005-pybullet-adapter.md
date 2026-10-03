@@ -2,14 +2,12 @@
 
 - **Status**: Draft
 - **Phase**: 2, Task 5 (`GAUNTLET_SPEC.md` §7: "Additional simulators: Isaac Sim, Genesis, PyBullet adapters.")
-- **Author**: architect agent
 - **Date**: 2026-04-22
 - **Supersedes**: n/a
 - **References**:
   - `docs/phase2-rfc-001-huggingface-policy.md` (`[hf]` extras-group pattern, torch-free core rule, lazy-import-with-install-hint template).
   - `docs/phase2-rfc-002-lerobot-smolvla.md` (one extra per capability; independent version pins).
   - `docs/phase2-rfc-003-drift-detector.md` (`[monitor]` extra precedent; "core-import stays cheap" invariant).
-  - `docs/phase2-exploration-task5-pybullet-env-registry.md` (public-surface inventory of `TabletopEnv` this RFC builds on).
 
 ---
 

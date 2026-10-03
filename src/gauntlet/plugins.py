@@ -1,6 +1,6 @@
 """Entry-point discovery for third-party gauntlet extensions.
 
-See ``docs/polish-exploration-plugin-system.md`` and
+See ``docs/design/plugin-system.md`` and
 ``docs/extension-points.md`` for the full design; quick recap:
 
 * Six ``[project.entry-points]`` groups are read:

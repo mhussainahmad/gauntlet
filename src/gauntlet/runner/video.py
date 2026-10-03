@@ -29,7 +29,7 @@ Backwards-compat / library choice
 ``imageio[ffmpeg]>=2.34,<3`` is the dependency. The ``[ffmpeg]`` extra
 pulls ``imageio-ffmpeg``, which bundles a static ffmpeg binary — no
 system ffmpeg install required. See the partner
-``docs/polish-exploration-rollout-video.md`` for the av/OpenCV/manual-
+``docs/design/rollout-video.md`` for the av/OpenCV/manual-
 ffmpeg trade-off analysis.
 """
 

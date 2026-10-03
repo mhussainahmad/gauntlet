@@ -1,6 +1,6 @@
 """Sobol low-discrepancy sequence sampler — Joe-Kuo 6.21201.
 
-See ``docs/polish-exploration-sobol-sampler.md`` for the design note
+See ``docs/design/sobol-sampler.md`` for the design note
 and the rationale for the embedded direction-number table.
 
 Algorithm (Bratley-Fox 1988 + Joe-Kuo 2008 direction numbers):

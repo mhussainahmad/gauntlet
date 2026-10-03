@@ -2,14 +2,12 @@
 
 - **Status**: Draft
 - **Phase**: 2, Task 8 (closes the image-rendering non-goal from RFC-007 §2 / §6 / §9).
-- **Author**: architect agent
 - **Date**: 2026-04-23
 - **Supersedes**: n/a. Builds on RFC-006 and RFC-007 without amending either.
 - **References**:
   - `docs/phase2-rfc-001-huggingface-policy.md` §5 (MuJoCo `render_in_obs=True` / `render_size` precedent).
   - `docs/phase2-rfc-006-pybullet-rendering.md` (the PyBullet rendering precedent this RFC mirrors section-for-section).
   - `docs/phase2-rfc-007-genesis-adapter.md` §6 / §9 (state-only gap, VISUAL_ONLY_AXES rejection, §9 sketch for this RFC).
-  - `docs/phase2-exploration-task8-genesis-rendering.md` (Rasterizer measurements, private-API survey, texture-swap design space).
 
 ---
 
@@ -422,7 +420,7 @@ observation mode. Matches the post-RFC-006 parity table for
 
 Each bullet → one commit. Sized to the §9 one-task-one-PR cadence.
 
-1. **Exploration doc.** `docs/phase2-exploration-task8-genesis-rendering.md`. **Already shipped on this branch** (`c530a42`).
+1. **Measurement pass.** Backend API survey and option space. **Done.**
 2. **RFC doc.** This file. The commit introducing this RFC.
 3. **Camera + light constants.** Add `_CAM_*` / `_BASELINE_LIGHT_INTENSITY` / `_DEFAULT_RENDER_SIZE` to `env/genesis/tabletop_genesis.py` as module-level constants. Pure additive, no behaviour change. No new tests (constants exercised by later commits).
 4. **`render_in_obs` / `render_size` kwargs + `observation_space`.** Widen `__init__`, validate inputs (same error strings as `TabletopEnv`), add `self._render_in_obs` / `self._render_size` state, extend `observation_space` conditionally. No camera add yet (conditional `self._camera = None`). One test: `GenesisTabletopEnv(render_in_obs=True, render_size=(64, 96)).observation_space["image"].shape == (64, 96, 3)`.
