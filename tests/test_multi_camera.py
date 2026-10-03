@@ -16,6 +16,7 @@ GL is unavailable, mirroring the gating in
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 
 import numpy as np
 import pytest
@@ -40,6 +41,21 @@ def _two_specs() -> list[CameraSpec]:
         CameraSpec(name="wrist", pose=(0.3, -0.3, 0.6, 0.7, 0.0, 0.4), size=(64, 96)),
         CameraSpec(name="top", pose=(0.0, 0.0, 1.0, 0.0, 0.0, 0.0), size=(48, 48)),
     ]
+
+
+@pytest.fixture(autouse=True)
+def _restore_mujoco_gl() -> Iterator[None]:
+    """Undo any ``MUJOCO_GL`` set by :func:`_gl_or_skip` after each test.
+
+    A leaked value is inherited by later spawn-pool workers, which then
+    fail to import mujoco on GL-less hosts and wedge the pool.
+    """
+    before = os.environ.get("MUJOCO_GL")
+    yield
+    if before is None:
+        os.environ.pop("MUJOCO_GL", None)
+    else:
+        os.environ["MUJOCO_GL"] = before
 
 
 def _gl_or_skip() -> None:

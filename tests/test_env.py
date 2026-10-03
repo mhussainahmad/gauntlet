@@ -452,11 +452,16 @@ class TestRenderInObs:
         finally:
             env.close()
 
-    def test_render_in_obs_emits_uint8_image(self) -> None:
+    @pytest.mark.render
+    def test_render_in_obs_emits_uint8_image(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Offscreen rendering needs a GL backend; EGL is the one we target
-        # in CI (osmesa would work too). If neither is available the test
+        # (osmesa would work too). If neither is available the test
         # surfaces a clear skip rather than a cryptic GL crash.
-        os.environ.setdefault("MUJOCO_GL", "egl")
+        # ``monkeypatch`` scopes the env var to this test: a leaked
+        # MUJOCO_GL=egl is inherited by later spawn-pool workers, which
+        # then fail to import mujoco on GL-less hosts and wedge the pool.
+        if "MUJOCO_GL" not in os.environ:
+            monkeypatch.setenv("MUJOCO_GL", "egl")
         try:
             env = TabletopEnv(render_in_obs=True, render_size=(64, 96))
         except Exception as exc:
