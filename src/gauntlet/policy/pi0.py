@@ -42,7 +42,7 @@ _PI0_INSTALL_HINT = (
     "Pi0Policy requires the 'pi0' extra. Install with:\n"
     "    uv sync --extra pi0\n"
     "or, for a plain pip env:\n"
-    "    pip install 'gauntlet[pi0]'"
+    "    pip install 'gauntlet-robotics[pi0]'"
 )
 
 # Default lerobot frame layout for π0 — three camera slots + a state

@@ -154,7 +154,7 @@ def _load_frame_image(frame: CameraFrame, scene_root: Path) -> NDArray[np.uint8]
         raise ImportError(
             "NearestFrameRenderer requires Pillow. "
             "It ships with the realsim ingest pipeline; install via "
-            "`pip install gauntlet` or `pip install pillow` to bring it in."
+            "`pip install gauntlet-robotics` or `pip install pillow` to bring it in."
         ) from exc
     with Image.open(image_path) as im:
         return np.asarray(im.convert("RGB"), dtype=np.uint8)

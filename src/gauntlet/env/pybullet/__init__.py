@@ -6,7 +6,7 @@ Loading order:
    :class:`ImportError` (the ``[pybullet]`` extra is not installed),
    re-raise with a clear :class:`ImportError` message carrying the
    ``uv sync --extra pybullet`` /
-   ``pip install 'gauntlet[pybullet]'`` install hints. The Suite loader
+   ``pip install 'gauntlet-robotics[pybullet]'`` install hints. The Suite loader
    catches this and translates it into the same user-facing message
    (see :func:`gauntlet.suite.loader._ensure_backend_registered`).
 2. Import :class:`PyBulletTabletopEnv` from
@@ -38,7 +38,7 @@ except ImportError as exc:
         "Install with:\n"
         "    uv sync --extra pybullet\n"
         "or, for a plain pip env:\n"
-        "    pip install 'gauntlet[pybullet]'"
+        "    pip install 'gauntlet-robotics[pybullet]'"
     ) from exc
 
 from gauntlet.env.base import GauntletEnv

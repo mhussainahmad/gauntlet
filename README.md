@@ -34,18 +34,18 @@ open ./benchmarks/local/index.html
 ## Install
 
 ```bash
-pip install gauntlet              # core (MuJoCo only, torch-free)
-pip install 'gauntlet[hf]'        # + OpenVLA / HuggingFace adapter
-pip install 'gauntlet[lerobot]'   # + SmolVLA / π0 / diffusion adapters
-pip install 'gauntlet[pybullet]'  # + PyBullet backend
-pip install 'gauntlet[genesis]'   # + Genesis backend
-pip install 'gauntlet[isaac]'     # + Isaac Sim backend (CUDA required)
-pip install 'gauntlet[monitor]'   # + runtime drift detector (torch)
-pip install 'gauntlet[ros2]'      # + ROS 2 publish / record (rclpy via system pkg)
+pip install gauntlet-robotics           # core (MuJoCo only, torch-free)
+pip install 'gauntlet-robotics[hf]'        # + OpenVLA / HuggingFace adapter
+pip install 'gauntlet-robotics[lerobot]'   # + SmolVLA / π0 / diffusion adapters
+pip install 'gauntlet-robotics[pybullet]'  # + PyBullet backend
+pip install 'gauntlet-robotics[genesis]'   # + Genesis backend
+pip install 'gauntlet-robotics[isaac]'     # + Isaac Sim backend (CUDA required)
+pip install 'gauntlet-robotics[monitor]'   # + runtime drift detector (torch)
+pip install 'gauntlet-robotics[ros2]'      # + ROS 2 publish / record (rclpy via system pkg)
 ```
 
-`uv` users: `uv add gauntlet` (same extras). Stand-alone CLI:
-`uv tool install gauntlet` then `gauntlet --help`. Requires Python
+`uv` users: `uv add gauntlet-robotics` (same extras). Stand-alone CLI:
+`uv tool install gauntlet-robotics` then `gauntlet --help`. Requires Python
 ≥3.11.
 
 ## Status
@@ -69,7 +69,7 @@ deferred — `RealSimRenderer` lands as a `typing.Protocol` so a
 gaussian-splatting (or other) renderer plugin can slot in without
 touching the schema.
 
-`0.2.0` is the first PyPI release: `pip install gauntlet`. From this
+`0.2.0` is the first PyPI release: `pip install gauntlet-robotics`. From this
 release onward, the documented public surface follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — the
 full contract (which symbols are public, the on-disk schemas, the

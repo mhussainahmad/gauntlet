@@ -93,7 +93,7 @@ jobs:
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == false)
     environment:
       name: pypi
-      url: https://pypi.org/project/gauntlet/
+      url: https://pypi.org/project/gauntlet-robotics/
     permissions:
       id-token: write  # OIDC trusted publishing
     steps:

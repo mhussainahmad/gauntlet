@@ -42,7 +42,7 @@ _GROOT_INSTALL_HINT = (
     "GrootN1Policy requires the 'groot' extra. Install with:\n"
     "    uv sync --extra groot\n"
     "or, for a plain pip env:\n"
-    "    pip install 'gauntlet[groot]'"
+    "    pip install 'gauntlet-robotics[groot]'"
 )
 
 # Default lerobot frame layout for GR00T-N1 — three camera slots + a

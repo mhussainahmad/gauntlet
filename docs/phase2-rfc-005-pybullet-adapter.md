@@ -407,7 +407,7 @@ unknown env 'tabletop-pybullet'; the matching extra is not installed.
 Install with:
     uv sync --extra pybullet
 or, for a plain pip env:
-    pip install 'gauntlet[pybullet]'
+    pip install 'gauntlet-robotics[pybullet]'
 ```
 
 If the import succeeds but the backend still isn't registered, raise the generic `get_env_factory` `ValueError` (with `sorted(registered_envs())` listed).

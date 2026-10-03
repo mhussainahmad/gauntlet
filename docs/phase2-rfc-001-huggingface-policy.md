@@ -45,7 +45,7 @@ Phase 1 ships a `Policy` protocol plus `Random`/`Scripted` reference adapters; ย
 - Matches ยง6 exactly: core stays torch-free, `gauntlet.core` still imports cleanly without torch.
 - One command (`uv sync --extra hf`) to enable; one module (`gauntlet.policy.huggingface`) to blame.
 - Extras compose cleanly with future adapters (`uv sync --extra hf --extra lerobot`).
-- `uv`'s extras resolution is first-class, same ergonomics as `pip install gauntlet[hf]`.
+- `uv`'s extras resolution is first-class, same ergonomics as `pip install gauntlet-robotics[hf]`.
 
 ### `pyproject.toml` diff (fragments)
 
@@ -113,7 +113,7 @@ _HF_INSTALL_HINT = (
     "HuggingFacePolicy requires the 'hf' extra. Install with:\n"
     "    uv sync --extra hf\n"
     "or, for a plain pip env:\n"
-    "    pip install 'gauntlet[hf]'"
+    "    pip install 'gauntlet-robotics[hf]'"
 )
 
 

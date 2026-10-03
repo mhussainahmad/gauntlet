@@ -307,7 +307,7 @@ def _ensure_backend_registered(env_name: str) -> None:
             f"Install with:\n"
             f"    uv sync --extra {extra}\n"
             f"or, for a plain pip env:\n"
-            f"    pip install 'gauntlet[{extra}]'",
+            f"    pip install 'gauntlet-robotics[{extra}]'",
         ) from exc
 
     if env_name not in registered_envs():

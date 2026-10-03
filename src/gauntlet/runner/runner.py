@@ -151,7 +151,7 @@ class Runner:
                 ``render_in_obs=True``); otherwise a clear
                 :class:`ValueError` is raised inside the worker on the
                 first reset. Requires the optional ``[video]`` extra
-                (``pip install "gauntlet[video]"``); the :class:`VideoWriter`
+                (``pip install "gauntlet-robotics[video]"``); the :class:`VideoWriter`
                 lazy-imports ``imageio`` and surfaces a clear ``ImportError``
                 with the install hint if the extra is missing. Default
                 ``False`` keeps in-memory + on-disk behaviour byte-
@@ -331,7 +331,7 @@ class Runner:
                 Parquet file per episode instead of NPZ; ``"both"``
                 writes both side-by-side. Both non-default modes
                 require the ``[parquet]`` extra (``pip install
-                "gauntlet[parquet]"``); a missing extra raises a
+                "gauntlet-robotics[parquet]"``); a missing extra raises a
                 clean :class:`ImportError` from the worker on the
                 first write. Ignored when ``trajectory_dir is
                 None`` (no trajectory writes happen at all).

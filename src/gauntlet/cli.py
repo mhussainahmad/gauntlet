@@ -721,7 +721,7 @@ def run(
                 "behaviour: one np.savez_compressed per episode, no "
                 "pyarrow dependency. 'parquet' writes one Parquet file "
                 "per episode (requires the [parquet] extra: "
-                "`pip install \"gauntlet[parquet]\"`). 'both' writes "
+                "`pip install \"gauntlet-robotics[parquet]\"`). 'both' writes "
                 "both side-by-side. Ignored when --record-trajectories "
                 "is unset."
             ),
@@ -856,7 +856,7 @@ def run(
                 "set. Off by default; opting in directly contradicts "
                 "PRODUCT.md's local-first / no-telemetry contract — only "
                 "use when you already live in W&B. Requires the optional "
-                '[wandb] extra (`pip install "gauntlet[wandb]"`). See '
+                '[wandb] extra (`pip install "gauntlet-robotics[wandb]"`). See '
                 "backlog B-27."
             ),
         ),
@@ -871,7 +871,7 @@ def run(
                 "a remote endpoint, in which case per-episode results "
                 "leave the machine. Off by default. Requires the "
                 "optional [mlflow] extra (`pip install "
-                '"gauntlet[mlflow]"`). See backlog B-27.'
+                '"gauntlet-robotics[mlflow]"`). See backlog B-27.'
             ),
         ),
     ] = False,

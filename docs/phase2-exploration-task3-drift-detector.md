@@ -171,7 +171,7 @@ dependencies = [
 [project.optional-dependencies]
 monitor = ["torch>=2.0,<3", "torchvision>=0.15,<1"]
 ```
-- Users: `pip install gauntlet[monitor]` to enable drift detector.
+- Users: `pip install gauntlet-robotics[monitor]` to enable drift detector.
 - Core import remains clean; lazy import in monitor/__init__.py.
 
 ---

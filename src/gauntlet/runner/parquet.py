@@ -36,7 +36,7 @@ One row per env step. Columns:
   the last step).
 * ``truncated`` — bool, per-step truncation flag.
 
-The ``[parquet]`` extra (``pip install "gauntlet[parquet]"``) is
+The ``[parquet]`` extra (``pip install "gauntlet-robotics[parquet]"``) is
 mandatory; calling :func:`write_parquet` without it raises a clean
 :class:`ImportError` with the install hint.
 """
@@ -122,7 +122,7 @@ def write_parquet(path: Path, trajectory: TrajectoryDict) -> Path:
     pre-B-23 default) never sees pyarrow at import time. The
     ``[parquet]`` extra is mandatory for this call; missing it raises
     a clean :class:`ImportError` with the ``pip install
-    "gauntlet[parquet]"`` hint.
+    "gauntlet-robotics[parquet]"`` hint.
 
     Args:
         path: Output ``.parquet`` path; parent dirs are created if
@@ -139,7 +139,7 @@ def write_parquet(path: Path, trajectory: TrajectoryDict) -> Path:
 
     Raises:
         ImportError: if the ``[parquet]`` extra is missing. Message
-            includes the ``pip install "gauntlet[parquet]"`` hint.
+            includes the ``pip install "gauntlet-robotics[parquet]"`` hint.
     """
     try:
         import pyarrow as pa
@@ -147,7 +147,7 @@ def write_parquet(path: Path, trajectory: TrajectoryDict) -> Path:
     except ImportError as exc:  # pragma: no cover - defensive guard
         raise ImportError(
             "Parquet trajectory dumps require the optional [parquet] extra. "
-            'Install with `pip install "gauntlet[parquet]"` (pulls '
+            'Install with `pip install "gauntlet-robotics[parquet]"` (pulls '
             "pyarrow>=15, ~80 MB wheel)."
         ) from exc
 

@@ -168,7 +168,7 @@ _LEROBOT_INSTALL_HINT = (
     "LeRobotPolicy requires the 'lerobot' extra. Install with:\n"
     "    uv sync --extra lerobot\n"
     "or, for a plain pip env:\n"
-    "    pip install 'gauntlet[lerobot]'"
+    "    pip install 'gauntlet-robotics[lerobot]'"
 )
 
 

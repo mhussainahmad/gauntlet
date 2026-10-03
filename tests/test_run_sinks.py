@@ -136,7 +136,7 @@ def test_wandb_missing_extra_raises_clean_importerror(
     monkeypatch.delitem(sys.modules, "gauntlet.runner.sinks", raising=False)
     from gauntlet.runner.sinks import WandbSink
 
-    with pytest.raises(ImportError, match=r"gauntlet\[wandb\]"):
+    with pytest.raises(ImportError, match=r"gauntlet-robotics\[wandb\]"):
         WandbSink(run_name="run-a", suite_name="tiny")
 
 
@@ -242,5 +242,5 @@ def test_mlflow_missing_extra_raises_clean_importerror(
     monkeypatch.delitem(sys.modules, "gauntlet.runner.sinks", raising=False)
     from gauntlet.runner.sinks import MlflowSink
 
-    with pytest.raises(ImportError, match=r"gauntlet\[mlflow\]"):
+    with pytest.raises(ImportError, match=r"gauntlet-robotics\[mlflow\]"):
         MlflowSink(run_name="run-a", suite_name="tiny")

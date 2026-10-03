@@ -39,7 +39,7 @@ _HF_INSTALL_HINT = (
     "HuggingFacePolicy requires the 'hf' extra. Install with:\n"
     "    uv sync --extra hf\n"
     "or, for a plain pip env:\n"
-    "    pip install 'gauntlet[hf]'"
+    "    pip install 'gauntlet-robotics[hf]'"
 )
 
 # OpenVLA's prompt template — per the published model card and RFC §4.

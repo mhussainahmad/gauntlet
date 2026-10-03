@@ -52,7 +52,7 @@ _MONITOR_INSTALL_HINT = (
     "gauntlet.monitor.{attr} requires the 'monitor' extra. Install with:\n"
     "    uv sync --extra monitor\n"
     "or, for a plain pip env:\n"
-    "    pip install 'gauntlet[monitor]'"
+    "    pip install 'gauntlet-robotics[monitor]'"
 )
 
 

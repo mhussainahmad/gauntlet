@@ -53,12 +53,12 @@ def test_import_error_mentions_pip_install_alternative(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The install-hint covers both `uv sync` and the `pip install
-    'gauntlet[isaac]'` paths so a non-uv user gets useful guidance
+    'gauntlet-robotics[isaac]'` paths so a non-uv user gets useful guidance
     too."""
     _flush_isaac_modules(monkeypatch)
     monkeypatch.setitem(sys.modules, "isaacsim", None)
 
-    with pytest.raises(ImportError, match=r"pip install 'gauntlet\[isaac\]'"):
+    with pytest.raises(ImportError, match=r"pip install 'gauntlet-robotics\[isaac\]'"):
         importlib.import_module("gauntlet.env.isaac")
 
 

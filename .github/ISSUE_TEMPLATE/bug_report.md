@@ -35,7 +35,7 @@ output. Quote error messages verbatim — do not paraphrase. -->
 - Gauntlet version (`python -c "import gauntlet; print(gauntlet.__version__)"`):
 - Python version:
 - OS / distribution:
-- Install method (`pip install gauntlet`, `uv sync`, source checkout):
+- Install method (`pip install gauntlet-robotics`, `uv sync`, source checkout):
 - Which extras are installed (`hf`, `lerobot`, `pybullet`, `genesis`, `isaac`, `monitor`, `ros2`, …):
 
 ## Determinism

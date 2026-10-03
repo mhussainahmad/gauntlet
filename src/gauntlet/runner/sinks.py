@@ -118,7 +118,7 @@ class WandbSink:
         except ImportError as exc:  # pragma: no cover - defensive guard
             raise ImportError(
                 "WandbSink requires the optional [wandb] extra. "
-                'Install with `pip install "gauntlet[wandb]"`. '
+                'Install with `pip install "gauntlet-robotics[wandb]"`. '
                 "WARNING: this sink exfiltrates per-Episode results to "
                 "wandb.ai unless WANDB_BASE_URL is set."
             ) from exc
@@ -185,7 +185,7 @@ class MlflowSink:
         except ImportError as exc:  # pragma: no cover - defensive guard
             raise ImportError(
                 "MlflowSink requires the optional [mlflow] extra. "
-                'Install with `pip install "gauntlet[mlflow]"`. '
+                'Install with `pip install "gauntlet-robotics[mlflow]"`. '
                 "Local-by-default: writes to ./mlruns/ unless "
                 "MLFLOW_TRACKING_URI is set to a remote endpoint, in "
                 "which case per-Episode results leave the machine."

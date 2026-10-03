@@ -15,7 +15,7 @@ it to cover the **two** possible missing dependencies unique to Genesis
    individual sub-dep.
 2. Guard-import :mod:`genesis`. On :class:`ImportError` (the
    ``[genesis]`` extra itself is not installed), re-raise with the
-   same ``uv sync --extra genesis`` / ``pip install 'gauntlet[genesis]'``
+   same ``uv sync --extra genesis`` / ``pip install 'gauntlet-robotics[genesis]'``
    install hints.
 3. Import :class:`GenesisTabletopEnv` from
    :mod:`gauntlet.env.genesis.tabletop_genesis` and call
@@ -51,7 +51,7 @@ except ImportError as exc:
         "install with:\n"
         "    uv sync --extra genesis\n"
         "or, for a plain pip env:\n"
-        "    pip install 'gauntlet[genesis]'"
+        "    pip install 'gauntlet-robotics[genesis]'"
     ) from exc
 
 try:
@@ -62,7 +62,7 @@ except ImportError as exc:
         "Install with:\n"
         "    uv sync --extra genesis\n"
         "or, for a plain pip env:\n"
-        "    pip install 'gauntlet[genesis]'"
+        "    pip install 'gauntlet-robotics[genesis]'"
     ) from exc
 
 from gauntlet.env.base import GauntletEnv

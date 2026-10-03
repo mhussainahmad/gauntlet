@@ -43,7 +43,7 @@ __all__ = ["GaussianSplatRenderer"]
 
 _INSTALL_HINT: str = (
     "GaussianSplatRenderer requires the [realsim-gsplat] extra. Install:\n"
-    "    pip install 'gauntlet[realsim-gsplat]'\n"
+    "    pip install 'gauntlet-robotics[realsim-gsplat]'\n"
     "or, for a uv-managed env:\n"
     "    uv sync --extra realsim-gsplat\n"
     "Note: gsplat depends on CUDA-capable torch. A CPU-only torch build "

@@ -211,7 +211,7 @@ def _dtw_distance(a: NDArray[np.float64], b: NDArray[np.float64]) -> float:
     except ImportError as exc:
         raise TaxonomyError(
             "DTW distance requires the [trajectory-taxonomy] extra. "
-            "Install with: pip install 'gauntlet[trajectory-taxonomy]'"
+            "Install with: pip install 'gauntlet-robotics[trajectory-taxonomy]'"
         ) from exc
     # ``dtw_python``'s ``dtw`` returns a result object whose ``.distance``
     # attribute is the alignment cost. ``dist_method='euclidean'`` matches

@@ -320,7 +320,7 @@ def _write_landing_page(out: Path, summary: dict[str, object]) -> None:
           </ul>
 
           <h2>Reproduce locally</h2>
-          <pre><code>pip install gauntlet
+          <pre><code>pip install gauntlet-robotics
 git clone https://github.com/mhussainahmad/gauntlet
 cd gauntlet
 python scripts/generate_reference_benchmark.py --out ./benchmarks/v{gauntlet_version}/</code></pre>

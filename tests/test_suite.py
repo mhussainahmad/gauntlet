@@ -439,7 +439,7 @@ axes:
         assert "tabletop-pybullet" in msg
         assert "extra is not installed" in msg
         assert "uv sync --extra pybullet" in msg
-        assert "pip install 'gauntlet[pybullet]'" in msg
+        assert "pip install 'gauntlet-robotics[pybullet]'" in msg
 
     def test_subpackage_import_raises_install_hint_when_pybullet_missing(
         self,
@@ -462,7 +462,7 @@ axes:
             importlib.import_module("gauntlet.env.pybullet")
         msg = str(excinfo.value)
         assert "uv sync --extra pybullet" in msg
-        assert "pip install 'gauntlet[pybullet]'" in msg
+        assert "pip install 'gauntlet-robotics[pybullet]'" in msg
 
     def test_schema_rejects_unknown_env_names(self) -> None:
         """Anything outside registered_envs() | BUILTIN_BACKEND_IMPORTS
@@ -558,7 +558,7 @@ axes:
         assert "tabletop-genesis" in msg
         assert "extra is not installed" in msg
         assert "uv sync --extra genesis" in msg
-        assert "pip install 'gauntlet[genesis]'" in msg
+        assert "pip install 'gauntlet-robotics[genesis]'" in msg
 
     def test_subpackage_import_raises_install_hint_when_genesis_missing(
         self,
@@ -582,7 +582,7 @@ axes:
             importlib.import_module("gauntlet.env.genesis")
         msg = str(excinfo.value)
         assert "uv sync --extra genesis" in msg
-        assert "pip install 'gauntlet[genesis]'" in msg
+        assert "pip install 'gauntlet-robotics[genesis]'" in msg
 
     def test_subpackage_import_raises_install_hint_when_torch_missing(
         self,
@@ -607,7 +607,7 @@ axes:
         # the [genesis] extra; torch-first guard says "torch is
         # required by genesis-world".
         assert "uv sync --extra genesis" in msg
-        assert "pip install 'gauntlet[genesis]'" in msg
+        assert "pip install 'gauntlet-robotics[genesis]'" in msg
 
 
 # --------------------------------------------------------------------- loader

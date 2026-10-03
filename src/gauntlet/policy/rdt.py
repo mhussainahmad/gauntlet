@@ -44,7 +44,7 @@ _RDT_INSTALL_HINT = (
     "RdtPolicy requires the 'rdt' extra. Install with:\n"
     "    uv sync --extra rdt\n"
     "or, for a plain pip env:\n"
-    "    pip install 'gauntlet[rdt]'"
+    "    pip install 'gauntlet-robotics[rdt]'"
 )
 
 # RDT's published prompt template — fixed task description slotted into

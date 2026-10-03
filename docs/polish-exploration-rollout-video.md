@@ -214,7 +214,7 @@ collection.
 
 3. *What if `imageio` is not installed but `record_video=True`?*
    `VideoWriter.__init__` (lazy) raises `ImportError` with the exact
-   install hint: `pip install "gauntlet[video]"`. Pinned by a
+   install hint: `pip install "gauntlet-robotics[video]"`. Pinned by a
    marker-gated test.
 
 4. *Multi-worker (`n_workers >= 2`) MP4 path conflict?*

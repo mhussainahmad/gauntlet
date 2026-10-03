@@ -95,7 +95,7 @@ def capture_gauntlet_version() -> str | None:
     test environment never breaks ``Runner.run``.
     """
     try:
-        return version("gauntlet")
+        return version("gauntlet-robotics")
     except PackageNotFoundError:
         return None
 

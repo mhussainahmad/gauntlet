@@ -40,7 +40,7 @@ except ImportError as exc:
         "Install with:\n"
         "    uv sync --extra isaac\n"
         "or, for a plain pip env:\n"
-        "    pip install 'gauntlet[isaac]'\n"
+        "    pip install 'gauntlet-robotics[isaac]'\n"
         "Note: isaacsim requires a CUDA-capable NVIDIA RTX-class GPU "
         "at runtime; the PyPI wheel resolves on CPU-only machines but "
         "the Kit bootstrap inside __init__ will fail without a GPU. "

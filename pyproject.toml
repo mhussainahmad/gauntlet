@@ -1,5 +1,5 @@
 [project]
-name = "gauntlet"
+name = "gauntlet-robotics"
 version = "0.2.0"
 description = "An evaluation harness for learned robot policies."
 readme = "README.md"
@@ -302,7 +302,7 @@ cartesian = "gauntlet.suite.sampling:CartesianSampler"
 
 # gauntlet.sinks: deliberately empty. The two built-in sinks
 # (WandbSink, MlflowSink) require optional extras (`pip install
-# 'gauntlet[wandb]'` / `pip install 'gauntlet[mlflow]'`) at
+# 'gauntlet-robotics[wandb]'` / `pip install 'gauntlet-robotics[mlflow]'`) at
 # construction time; dogfooding them through the entry-point group
 # would break the dogfood smoke test on the default-extras-only venv.
 
@@ -394,6 +394,11 @@ security = [
 [build-system]
 requires = ["uv_build>=0.8.13,<0.9.0"]
 build-backend = "uv_build"
+
+# Distribution is published as ``gauntlet-robotics`` (``gauntlet`` is taken
+# on PyPI); the import package stays ``gauntlet``.
+[tool.uv.build-backend]
+module-name = "gauntlet"
 
 # NVIDIA's index (pypi.nvidia.com) hosts the actual omniverse-kit /
 # isaacsim wheels. The PyPI placeholders for those packages are

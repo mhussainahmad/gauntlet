@@ -265,7 +265,7 @@ In CI, set up a job that:
 
 1. `pip install -e .` your plugin repo (this materialises the entry
    points).
-2. `pip install gauntlet`.
+2. `pip install gauntlet-robotics`.
 3. Runs `python -c "from gauntlet.plugins import discover_policy_plugins; print(discover_policy_plugins())"` and asserts your plugin name appears.
 4. Runs `gauntlet run --suite suites/integration.yaml --policy sb3`
    end-to-end on a tiny test suite.

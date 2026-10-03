@@ -45,7 +45,7 @@ _DT_INSTALL_HINT = (
     "DecisionTransformerPolicy requires the 'dt' extra. Install with:\n"
     "    uv sync --extra dt\n"
     "or, for a plain pip env:\n"
-    "    pip install 'gauntlet[dt]'"
+    "    pip install 'gauntlet-robotics[dt]'"
 )
 
 # Default observation key for the proprioceptive state vector. DT

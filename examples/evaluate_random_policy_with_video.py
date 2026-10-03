@@ -18,7 +18,7 @@ rollout in-browser.
 Requires the optional ``[video]`` extra:
 
     uv sync --extra video
-    # or:  pip install "gauntlet[video]"
+    # or:  pip install "gauntlet-robotics[video]"
 
 The ``[video]`` extra pulls ``imageio[ffmpeg]``, which bundles a
 static ffmpeg binary — no system ffmpeg install required.

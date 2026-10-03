@@ -91,7 +91,7 @@ class VideoWriter:
     ``ImportError`` with the exact install hint when the ``[video]``
     extra is missing:
 
-        ``pip install "gauntlet[video]"``
+        ``pip install "gauntlet-robotics[video]"``
 
     Lifecycle:
 
@@ -155,7 +155,7 @@ class VideoWriter:
 
         Raises:
             ImportError: if the ``[video]`` extra is missing. Message
-                includes the exact ``pip install "gauntlet[video]"``
+                includes the exact ``pip install "gauntlet-robotics[video]"``
                 hint.
             ValueError: if ``frames`` is empty, has an unsupported
                 shape, or contains non-uint8 data.
@@ -165,7 +165,7 @@ class VideoWriter:
         except ImportError as exc:  # pragma: no cover - defensive guard
             raise ImportError(
                 "rollout video recording requires the optional [video] extra. "
-                'Install with `pip install "gauntlet[video]"` (pulls '
+                'Install with `pip install "gauntlet-robotics[video]"` (pulls '
                 "imageio[ffmpeg], which bundles a static ffmpeg binary — no "
                 "system ffmpeg install required)."
             ) from exc

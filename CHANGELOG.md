@@ -37,10 +37,10 @@ tooling) is partially shipped — see "Phase 3 (partial)" below.
 
 #### Phase 2 — real-policy adapters + runtime observability
 - HuggingFace policy adapter (`HuggingFacePolicy`) wrapping OpenVLA-style
-  checkpoints; opt-in via `pip install 'gauntlet[hf]'`.
+  checkpoints; opt-in via `pip install 'gauntlet-robotics[hf]'`.
 - LeRobot policy adapter (`LeRobotPolicy`) wrapping SmolVLA / π0 /
   diffusion-policy checkpoints; opt-in via
-  `pip install 'gauntlet[lerobot]'`.
+  `pip install 'gauntlet-robotics[lerobot]'`.
 - π0, RDT, GR00T, Decision-Transformer policy adapters.
 - PyBullet, Genesis, Isaac Sim backends — all four backends share
   byte-identical action/observation spaces and the canonical seven
@@ -48,7 +48,7 @@ tooling) is partially shipped — see "Phase 3 (partial)" below.
   `--allow-cross-backend`.
 - Runtime drift detector (`gauntlet monitor`) — small observation
   autoencoder + action-std OOD scoring; opt-in via
-  `pip install 'gauntlet[monitor]'`.
+  `pip install 'gauntlet-robotics[monitor]'`.
 - ROS 2 publisher / recorder bridges (`gauntlet ros2 publish/record`).
 - Multi-camera observation support via `CameraSpec`.
 - Conformal-calibrated failure prediction (FIPER + FAIL-Detect signals).
@@ -70,7 +70,8 @@ tooling) is partially shipped — see "Phase 3 (partial)" below.
 - `gauntlet.plugins` entry-point system for third-party policies,
   envs, axes, samplers, sinks, and CLI commands.
 - Gymnasium global-registry registration on package import.
-- `pip install gauntlet` now resolves from PyPI.
+- Published on PyPI as `gauntlet-robotics` (`pip install gauntlet-robotics`);
+  the import package and `gauntlet` CLI command are unchanged.
 
 ### Changed
 - Development Status classifier promoted from `2 - Pre-Alpha` to

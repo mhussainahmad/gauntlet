@@ -116,7 +116,7 @@ _PATCH_SIZE: Final[int] = 8
 _PIL_INSTALL_HINT: Final[str] = (
     "image_attack jpeg_q10 requires the optional Pillow dependency. "
     "Install via `pip install pillow` or any extra that pulls it in "
-    "(e.g. the `[hf]` extra: `pip install gauntlet[hf]`)."
+    "(e.g. the `[hf]` extra: `pip install gauntlet-robotics[hf]`)."
 )
 
 
