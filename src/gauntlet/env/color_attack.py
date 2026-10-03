@@ -52,12 +52,10 @@ patterns). Same input frame, same axis value, bit-identical output.
 
 Integration
 -----------
-Currently a *building block*. The runner does not yet auto-instantiate
-the wrapper when a suite declares a ``color_shift_synthetic`` axis —
-that wiring is left for a follow-up, mirroring B-31 (see
-:mod:`gauntlet.env.image_attack`). Today, callers that want post-render
-color shifts construct ``ColorShiftWrapper(inner_env)`` themselves and
-hand the result to the runner via ``env_factory``.
+The Runner applies the wrapper automatically when a suite declares a
+``color_shift_synthetic`` axis (see :mod:`gauntlet.env.post_render`),
+building registry envs with ``render_in_obs=True``. A shift on an env
+that emits no image raises rather than silently doing nothing.
 """
 
 from __future__ import annotations
@@ -308,7 +306,10 @@ class ColorShiftWrapper:
         # to the inner backend's set. We assign on the instance (shadowing
         # the ClassVar) so the GauntletEnv structural check on the wrapper
         # still passes. Mirrors the ImageAttackWrapper aliasing trick.
-        inner_axes = type(env).AXIS_NAMES
+        # Read the instance attribute, not ``type(env).AXIS_NAMES``: when
+        # wrappers are stacked the inner wrapper's per-instance set is the
+        # real one and its class-level set is empty.
+        inner_axes = frozenset(env.AXIS_NAMES)
         self.AXIS_NAMES = frozenset(inner_axes | {"color_shift_synthetic"})  # type: ignore[misc]
         self._pending_shift_id: int = SHIFT_NONE
 
@@ -406,4 +407,9 @@ class ColorShiftWrapper:
             obs["image"] = images_dict[first].copy()
         elif "image" in obs:
             obs["image"] = apply_color_shift(obs["image"], self._pending_shift_id)
+        else:
+            raise ValueError(
+                "color_shift_synthetic is active but the env emitted no 'image' / "
+                "'images' observation; construct the env with render_in_obs=True"
+            )
         return obs

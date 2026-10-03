@@ -37,14 +37,11 @@ obs.
 
 Integration
 -----------
-Currently a *building block*. The runner does not yet auto-instantiate
-the wrapper when a suite declares an ``instruction_paraphrase`` axis —
-that wiring (extracting the paraphrase list from the YAML via
-:meth:`gauntlet.suite.schema.AxisSpec.paraphrases`, building the
-wrapper, threading the per-cell index through) is a follow-up. Today,
-callers that want language perturbations construct
-``InstructionWrapper(inner_env, paraphrases=("...", "...", ...))``
-themselves and hand the result to the runner via ``env_factory``.
+The Runner applies the wrapper automatically when a suite declares an
+``instruction_paraphrase`` axis (see :mod:`gauntlet.env.post_render`),
+reading the strings from
+:meth:`gauntlet.suite.schema.AxisSpec.paraphrases`; the per-cell axis
+value is the index into that list.
 
 Backward compatibility
 ----------------------
@@ -151,7 +148,10 @@ class InstructionWrapper:
         # to the inner backend's set. Mirrors the ImageAttackWrapper
         # pattern so the GauntletEnv structural check on the wrapper
         # still passes.
-        inner_axes = type(env).AXIS_NAMES
+        # Read the instance attribute, not ``type(env).AXIS_NAMES``: when
+        # wrappers are stacked the inner wrapper's per-instance set is the
+        # real one and its class-level set is empty.
+        inner_axes = frozenset(env.AXIS_NAMES)
         self.AXIS_NAMES = frozenset(inner_axes | {AXIS_NAME})  # type: ignore[misc]
         # Default to index 0 (baseline phrasing). The runner sets the
         # per-cell index via ``set_perturbation`` before each

@@ -41,11 +41,10 @@ so adding the wrapper cannot perturb baselines.
 
 Integration
 -----------
-Currently a *building block*. The runner does not yet auto-instantiate
-the wrapper when a suite declares an ``image_attack`` axis — that wiring
-is left for a follow-up. Today, callers that want post-render attacks
-construct ``ImageAttackWrapper(inner_env)`` themselves and hand the
-result to the runner via ``env_factory``.
+The Runner applies the wrapper automatically when a suite declares an
+``image_attack`` axis (see :mod:`gauntlet.env.post_render`), building
+registry envs with ``render_in_obs=True``. An attack on an env that
+emits no image raises rather than silently doing nothing.
 """
 
 from __future__ import annotations
@@ -255,7 +254,10 @@ class ImageAttackWrapper:
         # inner backend's set. We assign on the instance (shadowing the
         # ClassVar) so the GauntletEnv structural check on the wrapper
         # still passes.
-        inner_axes = type(env).AXIS_NAMES
+        # Read the instance attribute, not ``type(env).AXIS_NAMES``: when
+        # wrappers are stacked the inner wrapper's per-instance set is the
+        # real one and its class-level set is empty.
+        inner_axes = frozenset(env.AXIS_NAMES)
         self.AXIS_NAMES = frozenset(inner_axes | {"image_attack"})  # type: ignore[misc]
         self._pending_attack_id: int = ATTACK_NONE
         # Step counter is incremented inside step() before the per-step
@@ -364,6 +366,11 @@ class ImageAttackWrapper:
             # Single-camera path. Dropout collapses to a no-op (per
             # :func:`apply_image_attack` contract).
             obs["image"] = apply_image_attack(obs["image"], self._pending_attack_id, self._rng)
+        else:
+            raise ValueError(
+                "image_attack is active but the env emitted no 'image' / 'images' "
+                "observation; construct the env with render_in_obs=True"
+            )
         return obs
 
     def _apply_to_multi_camera(

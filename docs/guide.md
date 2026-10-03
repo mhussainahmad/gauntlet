@@ -7,6 +7,7 @@ detection, ROS 2, replay, video, dashboard, real-to-sim, plugins).
 - [Backends](#backends)
 - [Sampling strategies and fleet aggregation](#sampling-strategies-and-fleet-aggregation)
 - [Using a real VLA](#using-a-real-vla)
+- [Sensor and language axes](#sensor-and-language-axes)
 - [Runtime drift detection](#runtime-drift-detection)
 - [ROS 2 integration](#ros-2-integration)
 - [Diffing two runs](#diffing-two-runs)
@@ -138,6 +139,25 @@ for the algorithm.
   [`examples/evaluate_smolvla_pybullet.py`](../examples/evaluate_smolvla_pybullet.py).
   Set `GAUNTLET_SUPPRESS_SMOLVLA_WARNING=1` to silence the runtime
   banner once you've confirmed the embodiment fits.
+
+## Sensor and language axes
+
+Three axes act on what the policy *receives* rather than on the
+simulated scene, and are applied as env wrappers:
+
+| Axis | Values |
+|------|--------|
+| `image_attack` | 0 none, 1 / 2 Gaussian noise (low / high), 3 JPEG q10, 4 8x8 occlusion patch, 5 drop one camera |
+| `color_shift_synthetic` | 0 none, 1 / 2 hue ±30°, 3 / 4 saturation ×0.5 / ×1.5, 5 greyscale |
+| `instruction_paraphrase` | index into the suite's list of instruction strings |
+
+Declare them in a suite like any other axis. The Runner builds registry
+envs with `render_in_obs=True` and wraps them in a fixed order:
+colour shift (closest to the renderer), then image attack, then the
+instruction overlay. A caller-supplied `env_factory` is wrapped as-is;
+if it emits no image while an image axis is active, the first
+observation raises instead of producing a flat sweep. Example:
+[`examples/suites/tabletop-sensor-language.yaml`](../examples/suites/tabletop-sensor-language.yaml).
 
 ## Runtime drift detection
 
