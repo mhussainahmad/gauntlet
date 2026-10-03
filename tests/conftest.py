@@ -25,6 +25,12 @@ from __future__ import annotations
 
 import os
 
+# Typer forces a colour terminal when GITHUB_ACTIONS is set, which splits
+# option names in ``--help`` output with ANSI codes and breaks substring
+# assertions. Typer reads this at import time, so set it before any test
+# module imports ``gauntlet.cli``.
+os.environ.setdefault("_TYPER_FORCE_DISABLE_TERMINAL", "1")
+
 from hypothesis import settings
 
 # Default profile: 200 examples, no deadline. The deadline is unset
