@@ -1,0 +1,25 @@
+# tabletop-push-smoke — planar pushing (env: tabletop-push).
+#
+# Same scene and axes as pick-and-place; the cube can only be moved by
+# contact and must come to rest inside the target. Push fails in ways
+# pick-and-place does not: overshoot, the cube rotating off the pushing
+# face, and stale commands arriving after contact.
+#
+# Grid: 3 * 3 * 2 = 18 cells, 10 episodes each = 180 rollouts.
+#
+#   gauntlet run examples/suites/tabletop-push-smoke.yaml \
+#     --policy scripted-push --out out/push/
+
+name: tabletop-push-smoke
+env: tabletop-push
+seed: 5
+episodes_per_cell: 10
+axes:
+  object_initial_pose_x:
+    low: -0.12
+    high: 0.12
+    steps: 3
+  inference_delay_jitter:
+    values: [0, 100, 200]
+  distractor_count:
+    values: [0, 6]

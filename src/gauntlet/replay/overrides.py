@@ -26,6 +26,8 @@ glue can catch this specific type to format its output cleanly.
 
 from __future__ import annotations
 
+import math
+
 from gauntlet.env.tabletop import N_DISTRACTOR_SLOTS
 from gauntlet.suite.schema import AxisSpec, Suite
 
@@ -88,6 +90,10 @@ def parse_override(spec: str) -> tuple[str, float]:
         raise OverrideError(
             f"override spec {spec!r}: value {raw_value!r} is not a valid float"
         ) from exc
+    if not math.isfinite(value):
+        raise OverrideError(
+            f"override spec {spec!r}: value {raw_value!r} is not a valid float (must be finite)"
+        )
     return axis_name, value
 
 

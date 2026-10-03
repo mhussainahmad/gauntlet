@@ -1,4 +1,4 @@
-"""Open-loop scripted pick-and-place policy."""
+"""Scripted reference policies: open-loop pick-and-place, closed-loop push."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from numpy.typing import NDArray
 
 from gauntlet.policy.base import Action, Observation
 
-__all__ = ["DEFAULT_PICK_AND_PLACE_TRAJECTORY", "ScriptedPolicy"]
+__all__ = ["DEFAULT_PICK_AND_PLACE_TRAJECTORY", "ScriptedPolicy", "ScriptedPushPolicy"]
 
 
 # Canonical 7-DoF pick-and-place stub trajectory:
@@ -97,3 +97,69 @@ class ScriptedPolicy:
         """Rewind to step 0. The RNG is accepted for protocol conformance."""
         del rng  # scripted trajectory is deterministic
         self._step = 0
+
+
+class ScriptedPushPolicy:
+    """Closed-loop pusher for ``env: tabletop-push``.
+
+    Reads ``cube_pos``, ``ee_pos`` and ``target_pos`` and runs a small
+    phase machine, re-evaluated every step:
+
+    1. **align** — if the end-effector is not behind the cube on the
+       cube-to-target line, rise to a safe height and move over the
+       stand-off point behind the cube;
+    2. **descend** — drop to pushing height at the stand-off point;
+    3. **push** — drive along the cube-to-target direction, slowing for
+       the last few centimetres so the cube settles inside the target
+       instead of overshooting.
+
+    If the cube rotates or slips sideways off the pushing face, the
+    alignment test fails and the policy re-approaches. Deterministic;
+    the RNG passed to :meth:`reset` is unused.
+    """
+
+    PUSH_Z: float = 0.445
+    """End-effector height while pushing (cube centre height on the table)."""
+    SAFE_Z: float = 0.53
+    """Height for repositioning moves, clear of the cube."""
+    STANDOFF: float = 0.065
+    """Distance behind the cube centre to start a push from."""
+
+    def __init__(self, *, gain: float = 5.0, max_action: float = 0.5) -> None:
+        self._gain = float(gain)
+        self._max_action = float(max_action)
+
+    def act(self, obs: Observation) -> Action:
+        cube = np.asarray(obs["cube_pos"], dtype=np.float64)
+        ee = np.asarray(obs["ee_pos"], dtype=np.float64)
+        target = np.asarray(obs["target_pos"], dtype=np.float64)
+
+        to_target = target[:2] - cube[:2]
+        dist = float(np.linalg.norm(to_target))
+        direction = to_target / max(dist, 1e-6)
+        rel = ee[:2] - cube[:2]
+        behind = -float(np.dot(rel, direction))
+        lateral = float(np.linalg.norm(rel + behind * direction))
+        standoff_xy = cube[:2] - direction * self.STANDOFF
+
+        cap = self._max_action
+        if ee[2] < 0.46 and behind > 0.035 and lateral < 0.012:
+            # Push: aim just ahead of the cube, capped at the remaining
+            # distance, and slow down near the goal.
+            goal = np.r_[cube[:2] + direction * min(dist, 0.05), self.PUSH_Z]
+            if dist <= 0.06:
+                cap = 0.25
+        elif float(np.linalg.norm(ee[:2] - standoff_xy)) > 0.008:
+            # Align: rise first if low, then travel over the stand-off.
+            goal = np.r_[ee[:2], self.SAFE_Z] if ee[2] < 0.5 else np.r_[standoff_xy, self.SAFE_Z]
+        else:
+            goal = np.r_[standoff_xy, self.PUSH_Z]
+
+        action = np.zeros(7, dtype=np.float64)
+        action[:3] = np.clip((goal - ee) * self._gain, -cap, cap)
+        action[6] = 1.0  # gripper open; ignored by the push env
+        return cast("Action", action)
+
+    def reset(self, rng: np.random.Generator) -> None:
+        """Stateless between steps; nothing to reset."""
+        del rng

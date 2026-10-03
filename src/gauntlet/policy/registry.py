@@ -39,7 +39,7 @@ from typing import cast
 
 from gauntlet.policy.base import Policy
 from gauntlet.policy.random import RandomPolicy
-from gauntlet.policy.scripted import ScriptedPolicy
+from gauntlet.policy.scripted import ScriptedPolicy, ScriptedPushPolicy
 
 __all__ = [
     "POLICY_REGISTRY",
@@ -68,6 +68,7 @@ _DEFAULT_ACTION_DIM = 7
 POLICY_REGISTRY: dict[str, type[Policy]] = {
     "random": cast(type[Policy], RandomPolicy),
     "scripted": cast(type[Policy], ScriptedPolicy),
+    "scripted-push": cast(type[Policy], ScriptedPushPolicy),
 }
 
 
@@ -209,6 +210,8 @@ def resolve_policy_factory(spec: str) -> Callable[[], Policy]:
     if spec == "scripted":
         # The class is itself a zero-arg callable (all kwargs default).
         return ScriptedPolicy
+    if spec == "scripted-push":
+        return ScriptedPushPolicy
     if ":" in spec:
         return _resolve_module_attr(spec)
     # Plugin fallthrough — lazy import to avoid touching importlib.metadata

@@ -17,6 +17,7 @@ from gauntlet.env.mobile import MobileTabletopEnv
 from gauntlet.env.perturbation import AXIS_NAMES, PerturbationAxis, axis_for
 from gauntlet.env.registry import register_env
 from gauntlet.env.tabletop import N_DISTRACTOR_SLOTS, TabletopEnv
+from gauntlet.env.tabletop_push import TabletopPushEnv
 from gauntlet.env.tabletop_stack import TabletopStackEnv
 
 # TabletopEnv satisfies GauntletEnv structurally (runtime isinstance check
@@ -38,6 +39,12 @@ register_env(
 # tabletop / tabletop-mobile; the env additionally satisfies the
 # :class:`SubtaskMilestone` Protocol so the runner / report layer can
 # read per-subtask credit off ``info["subtask_completion"]``.
+# B-45 — planar push variant: same scene and axes, no grasp, colliding
+# end-effector, settled-in-target success.
+register_env(
+    "tabletop-push",
+    cast(Callable[..., GauntletEnv], TabletopPushEnv),
+)
 register_env(
     "tabletop-stack",
     cast(Callable[..., GauntletEnv], TabletopStackEnv),
@@ -52,6 +59,7 @@ __all__ = [
     "PerturbationAxis",
     "SubtaskMilestone",
     "TabletopEnv",
+    "TabletopPushEnv",
     "TabletopStackEnv",
     "axis_for",
 ]
