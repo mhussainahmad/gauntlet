@@ -6,7 +6,7 @@ name: Release
 # https://docs.pypi.org/trusted-publishers/
 #
 # Setup (one-time, on pypi.org):
-#   - Project name: gauntlet
+#   - Project name: gauntlet-robotics
 #   - Owner: mhussainahmad
 #   - Repository name: gauntlet
 #   - Workflow filename: release.yml

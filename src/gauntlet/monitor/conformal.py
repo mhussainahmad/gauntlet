@@ -3,7 +3,7 @@
 Drop-in companion to the AE drift detector that already lives in
 :mod:`gauntlet.monitor`. The detector calibrates a per-policy threshold
 on the :attr:`gauntlet.runner.episode.Episode.action_variance` field
-shipped by B-18 (PR #70) and surfaces, per candidate episode:
+shipped by B-18 and surfaces, per candidate episode:
 
 * :attr:`gauntlet.runner.episode.Episode.failure_score` — the candidate
   episode's ``action_variance`` divided by the calibration quantile.

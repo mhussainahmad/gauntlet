@@ -1,523 +1,146 @@
 # Gauntlet
 
-> An evaluation harness for learned robot policies.
+[![CI](https://github.com/mhussainahmad/gauntlet/actions/workflows/ci.yml/badge.svg)](https://github.com/mhussainahmad/gauntlet/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/gauntlet-robotics.svg)](https://pypi.org/project/gauntlet-robotics/)
+[![Python](https://img.shields.io/pypi/pyversions/gauntlet-robotics.svg)](https://pypi.org/project/gauntlet-robotics/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
-Gauntlet answers a single question for VLA / diffusion / scripted policies:
+**Regression testing and failure analysis for learned robot policies.**
 
-> *"How does this policy fail, and has the latest checkpoint regressed against the last one?"*
+Gauntlet answers one question for VLA, diffusion, and scripted policies:
 
-It wraps any policy behind a uniform adapter, runs it across a parameterized
-suite of MuJoCo perturbations (lighting, camera pose, textures, clutter,
-initial conditions), and produces a structured report that **breaks failures
-down by axis** instead of hiding them in an aggregate mean.
+> *How does this policy fail, and has the new checkpoint regressed against the last one?*
 
-See [`GAUNTLET_SPEC.md`](./GAUNTLET_SPEC.md) for the full design.
+It wraps any policy behind a small adapter, runs it across a seeded grid
+of simulator perturbations (lighting, camera pose, clutter, object pose,
+actuation latency, sensor corruption, instruction paraphrase), and
+writes a report that **breaks failures down by condition** instead of
+averaging them away.
 
----
+![Gauntlet report: failure clusters, per-axis sensitivity and success rates](https://raw.githubusercontent.com/mhussainahmad/gauntlet/main/docs/assets/report-field-conditions.png)
 
-## See a real report before installing
+<sub>Report from the [field-conditions example](./docs/field-robustness.md):
+the baseline is perfect up to 100 ms of control latency and falls to
+47% at 200 ms. Every failure cluster is a latency cluster.</sub>
+
+## Why
+
+A success rate is a mean, and a mean hides the thing you care about.
+Two checkpoints at 80% can fail in completely different places, and a
+fine-tune that gains two points on the clean scene can lose its entire
+safety margin on one axis. Gauntlet makes the per-condition picture the
+default output:
+
+- **Failure clusters first.** Axis combinations whose failure rate is
+  well above baseline, with Wilson CIs, ranked by lift.
+- **Paired comparisons.** `gauntlet compare` / `gauntlet diff` line two
+  runs up cell by cell (common random numbers + McNemar when seeds
+  match) and flag regressions, not just a headline delta.
+- **Sensitivity indices.** Per-axis first- and total-order Sobol
+  indices, corrected for rollout seed noise.
+- **Reproducible.** Every episode is determined by
+  `(suite, cell, seed)`; `gauntlet replay` re-simulates any one
+  bit-for-bit, optionally with one axis nudged.
+
+## See a real report
 
 Every [GitHub Release](https://github.com/mhussainahmad/gauntlet/releases/latest)
-ships a `reference-benchmark.zip` — two policies on the bundled smoke
-suite, with the `gauntlet compare` and `gauntlet diff` deltas surfaced.
-Unzip it and open the baseline / regressed `report.html` to see what the
-failure-cluster-first layout actually looks like.
-
-To regenerate it locally:
-
-```bash
-python scripts/generate_reference_benchmark.py --out ./benchmarks/local/
-open ./benchmarks/local/index.html
-```
+ships `reference-benchmark.zip`: two policies (a closed-loop controller
+and a degraded copy of it) on the smoke suite and the
+[field-conditions suite](./docs/field-robustness.md), with the
+`compare` / `diff` deltas. Unzip and open any `report.html`.
 
 ## Install
 
 ```bash
-pip install gauntlet-robotics           # core (MuJoCo only, torch-free)
-pip install 'gauntlet-robotics[hf]'        # + OpenVLA / HuggingFace adapter
-pip install 'gauntlet-robotics[lerobot]'   # + SmolVLA / π0 / diffusion adapters
-pip install 'gauntlet-robotics[pybullet]'  # + PyBullet backend
-pip install 'gauntlet-robotics[genesis]'   # + Genesis backend
-pip install 'gauntlet-robotics[isaac]'     # + Isaac Sim backend (CUDA required)
-pip install 'gauntlet-robotics[monitor]'   # + runtime drift detector (torch)
-pip install 'gauntlet-robotics[ros2]'      # + ROS 2 publish / record (rclpy via system pkg)
+pip install gauntlet-robotics            # core: MuJoCo, torch-free
+pip install 'gauntlet-robotics[hf]'      # + OpenVLA / HuggingFace adapter
+pip install 'gauntlet-robotics[lerobot]' # + SmolVLA / pi0 / diffusion adapters
 ```
 
-`uv` users: `uv add gauntlet-robotics` (same extras). Stand-alone CLI:
-`uv tool install gauntlet-robotics` then `gauntlet --help`. Requires Python
-≥3.11.
-
-## Status
-
-Phase 1 (MVP) and Phase 2 (real-policy adapters + runtime
-observability) are shipped. Phase 1 covers the tabletop env, the
-seven perturbation axes, the parallel Runner, the breakdown-first
-HTML report, and the core `gauntlet run / report / compare` CLI.
-Phase 2 adds the PyBullet / Genesis / Isaac Sim backends, OpenVLA
-and SmolVLA adapters, runtime drift detection (`monitor`), ROS 2
-publishing + recording, multi-camera observations, structured
-per-axis report diffs (`gauntlet diff`), incremental rollout caching,
-and the entry-point-based plugin system for third-party policies
-and envs.
-
-Phase 3 (fleet-scale tooling) is **partially shipped**: the
-fleet-wide failure-mode aggregator (`gauntlet aggregate`), the
-self-contained web dashboard, and the real-to-sim scene-ingestion
-input pipeline are all live. The real-to-sim *renderer* itself is
-deferred — `RealSimRenderer` lands as a `typing.Protocol` so a
-gaussian-splatting (or other) renderer plugin can slot in without
-touching the schema.
-
-`0.2.0` is the first PyPI release: `pip install gauntlet-robotics`. From this
-release onward, the documented public surface follows
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html) — the
-full contract (which symbols are public, the on-disk schemas, the
-CLI flags, and the deprecation policy) is in
-[`docs/stability.md`](./docs/stability.md). Pin
-`gauntlet>=0.2,<0.3` in your `pyproject.toml` and CI will not break
-on a patch release.
-
-## Backends
-
-Gauntlet ships four simulator backends. The Suite YAML's `env:` key
-is the dispatch: `tabletop` uses MuJoCo (default, ships in the core
-install); `tabletop-pybullet`, `tabletop-genesis`, and
-`tabletop-isaac` each live behind an optional extra.
-
-| `env:` slug          | Simulator | Install                                  | Observations |
-|----------------------|-----------|------------------------------------------|--------------|
-| `tabletop`           | MuJoCo    | `uv sync` (core)                         | State + render-on-demand |
-| `tabletop-pybullet`  | PyBullet  | `uv sync --extra pybullet`               | State + render-on-demand |
-| `tabletop-genesis`   | Genesis   | `uv sync --extra genesis`                | State + render-on-demand |
-| `tabletop-isaac`     | Isaac Sim | `uv sync --extra isaac` (GPU required)   | State-only (rendering follow-up) |
-
-The four backends share action/observation spaces byte-for-byte and
-the canonical 7 perturbation axes. They are **not** numerically
-identical: same policy + same seed on `tabletop` vs `tabletop-pybullet`
-vs `tabletop-genesis` vs `tabletop-isaac` produces semantically similar
-but numerically different trajectories. Running `gauntlet compare`
-across backends measures simulator drift, not policy regression; the
-CLI requires `--allow-cross-backend` to proceed.
-
-The `tabletop-isaac` backend wraps NVIDIA Omniverse Kit and **requires
-a CUDA-capable RTX-class GPU at runtime**. The `[isaac]` extra resolves
-on CPU-only machines but the Kit bootstrap inside `IsaacSimTabletopEnv.__init__`
-fails without a GPU. CI tests use a `sys.modules`-injected fake
-`isaacsim` namespace and do NOT install this extra; live execution
-needs a developer GPU workstation. The state-only first cut declares
-the four cosmetic axes (`lighting_intensity`, `camera_offset_x`,
-`camera_offset_y`, `object_texture`) `VISUAL_ONLY_AXES` so cosmetic-only
-sweeps are rejected at suite-load time on this backend until the
-rendering follow-up RFC lands.
-
-Image observations are available on all three backends via
-`render_in_obs=True` / `render_size=(H, W)` on the env constructor
-(`TabletopEnv`, `PyBulletTabletopEnv`, or `GenesisTabletopEnv`).
-PyBullet uses a headless, deterministic TINY rasteriser; Genesis uses
-its default CPU Rasterizer (pyrender-backed). The emitted `obs["image"]`
-Box has shape / dtype / bounds byte-identical across backends, so VLA
-adapters (OpenVLA, SmolVLA) work on any of them by swapping only the
-env factory. Pixel values explicitly differ (different rasterisers —
-semantic parity only). All seven perturbation axes produce observable
-deltas on the rendered image on every backend; `VISUAL_ONLY_AXES` is
-empty everywhere.
-
-For multi-view policies (SmolVLA, ACT, Diffusion Policy — anything
-that consumes paired wrist + side + overhead frames), pass
-`cameras=[CameraSpec(...), ...]` to `TabletopEnv` or
-`PyBulletTabletopEnv` instead. Each spec lands in
-`obs["images"][name]`; `obs["image"]` stays populated as an alias to
-the first camera so single-view consumers (the runner's video
-recorder, OpenVLA-style adapters) keep working unchanged. The
-single-camera default (`cameras=None`) is byte-identical to the
-phase-1 contract — see
-[`docs/design/multi-camera.md`](./docs/design/multi-camera.md)
-for the full design and
-[`examples/evaluate_multi_camera.py`](./examples/evaluate_multi_camera.py)
-for a worked example.
-
-See [`docs/phase2-rfc-005-pybullet-adapter.md`](./docs/phase2-rfc-005-pybullet-adapter.md)
-for the full PyBullet backend design,
-[`docs/phase2-rfc-006-pybullet-rendering.md`](./docs/phase2-rfc-006-pybullet-rendering.md)
-for PyBullet's image-observation follow-up,
-[`docs/phase2-rfc-007-genesis-adapter.md`](./docs/phase2-rfc-007-genesis-adapter.md)
-for the Genesis backend design,
-[`docs/phase2-rfc-008-genesis-rendering.md`](./docs/phase2-rfc-008-genesis-rendering.md)
-for the Genesis image-observation follow-up, and
-[`docs/phase2-rfc-009-isaac-sim-adapter.md`](./docs/phase2-rfc-009-isaac-sim-adapter.md)
-for the Isaac Sim backend design.
+Other extras: `pybullet`, `genesis`, `isaac` (backends), `monitor`
+(drift detection), `video`, `ros2`. Python ≥ 3.11.
 
 ## Quickstart
 
-Three commands reproduce the end-to-end example against the bundled
-smoke suite (3 lighting intensities x 2 cube textures x 4 episodes = 24
-rollouts; finishes in seconds on a laptop):
-
 ```bash
+git clone https://github.com/mhussainahmad/gauntlet && cd gauntlet
 uv sync
-uv run gauntlet run examples/suites/tabletop-smoke.yaml --policy random --out out/
-open out/report.html  # macOS: open ; Linux: xdg-open ; Windows: start
+
+# 1. One policy, one suite: 24 rollouts, a few seconds.
+uv run gauntlet run examples/suites/tabletop-smoke.yaml --policy random --out out/smoke
+xdg-open out/smoke/report.html        # macOS: open
+
+# 2. Baseline vs. regressed checkpoint on field-style conditions: 2 x 720 rollouts, ~15 s.
+uv run python scripts/generate_reference_benchmark.py \
+  --suite examples/suites/tabletop-field-conditions.yaml --out out/field
+cat out/field/diff.txt
 ```
 
-Artefacts land in `out/`: `episodes.json` (one record per rollout),
-`report.json` (analysed breakdowns), and `report.html` — a self-contained
-report leading with the failure-clusters table, then per-axis bar charts,
-then 2D heatmaps of axis combinations. The smoke suite is intentionally
-tiny; for the canonical 4-axis x 144-cell x 1440-rollout shape, swap the
-YAML path for `examples/suites/tabletop-basic-v1.yaml`. See
-[`GAUNTLET_SPEC.md`](./GAUNTLET_SPEC.md) for the full design and
-[`examples/evaluate_random_policy.py`](./examples/evaluate_random_policy.py)
-for the equivalent invocation via the public Python API. For the
-Genesis backend, `uv sync --extra genesis` then
-[`examples/evaluate_random_policy_genesis.py`](./examples/evaluate_random_policy_genesis.py)
-drives the same smoke suite against `tabletop-genesis`.
+Each run writes `episodes.json` (one record per rollout), `report.json`
+(the analysis) and a self-contained `report.html`.
 
-The Suite YAML's `sampling:` key picks the perturbation grid strategy:
-the default `cartesian` enumerates the full Cartesian product of the
-declared axes (the historical behaviour, byte-identical to every
-existing suite), while `latin_hypercube` and `sobol` each draw
-`n_samples` points without enumerating the full grid. For five axes at
-five steps, cartesian = 3,125 cells; LHS or Sobol at `n_samples: 32`
-covers the same hypercube at ~98x fewer rollouts. The two quasi-random
-samplers trade off differently:
+### Bring your own policy
 
-- `latin_hypercube` (McKay 1979) gives **perfect per-axis marginal
-  stratification** — every axis covers exactly `n_samples` distinct
-  strata. Joint coverage across axis pairs is essentially random.
-- `sobol` (Joe-Kuo 6.21201 direction numbers, `skip=1`) gives
-  **low-discrepancy joint coverage** — Sobol projections onto any
-  axis pair are also quasi-uniform, at the cost of slightly worse
-  per-axis marginal histograms than LHS.
-
-Use Sobol when the failure mode you suspect is a 2-axis (or higher)
-interaction; use LHS when single-axis sweeps are what you need to
-cover. See
-[`examples/suites/tabletop-lhs-smoke.yaml`](./examples/suites/tabletop-lhs-smoke.yaml)
-and [`examples/evaluate_random_policy_lhs.py`](./examples/evaluate_random_policy_lhs.py)
-for an LHS end-to-end demo, and
-[`docs/design/sobol-sampler.md`](./docs/design/sobol-sampler.md)
-for the Sobol design note (discrepancy targets, direction-number
-table, skip rationale).
-
-Once you have multiple runs (different seeds, policy revisions, or
-backends), `gauntlet aggregate <runs-dir> --out fleet/` rolls every
-`report.json` recursively under `<runs-dir>` into a single fleet
-meta-report — `fleet/fleet_report.json` plus a self-contained
-`fleet/fleet_report.html` leading with the persistent failure
-clusters that survive across runs (clusters appearing in at least
-`--persistence-threshold` of the runs, default `0.5`). See
-[`examples/aggregate_runs.py`](./examples/aggregate_runs.py) for the
-equivalent invocation via the Python API and
-[`docs/phase3-rfc-019-fleet-aggregate.md`](./docs/phase3-rfc-019-fleet-aggregate.md)
-for the algorithm.
-
-### Using a real VLA
-
-- Install the HF extras: `uv sync --extra hf` (pulls torch / transformers / pillow; core installs stay torch-free).
-- See [`examples/evaluate_openvla.py`](./examples/evaluate_openvla.py) for the ≤20-line OpenVLA-7B factory.
-- Image-conditioned policies need a rendered frame — construct `TabletopEnv(render_in_obs=True)` so `obs["image"]` is emitted.
-- **SmolVLA — read the warning first.** `lerobot/smolvla_base` is
-  pretrained on the SO-100 / SO-101 follower arm with **6-D
-  joint-position** actions; TabletopEnv is a **7-D EE-twist + gripper**
-  env. Zero-shot success on the smoke suite is **~0% by embodiment
-  mismatch — this is NOT a Gauntlet bug.** The example exists so users
-  who already have a TabletopEnv-compatible fine-tune know how to wire
-  the adapter (≤20 lines). For a first run that demonstrates the
-  harness end-to-end on a policy that solves the env, use
-  [the reference benchmark](#see-a-real-report-before-installing)
-  instead.
-- With a fine-tune in hand: `uv sync --extra lerobot`;
-  see [`examples/evaluate_smolvla.py`](./examples/evaluate_smolvla.py)
-  (pass `--action-remap` / override `camera_keys` if your fine-tune
-  changed them). For the PyBullet backend,
-  `uv sync --extra lerobot --extra pybullet` and run
-  [`examples/evaluate_smolvla_pybullet.py`](./examples/evaluate_smolvla_pybullet.py).
-  Set `GAUNTLET_SUPPRESS_SMOLVLA_WARNING=1` to silence the runtime
-  banner once you've confirmed the embodiment fits.
-
-### Runtime drift detection
-
-Optional Phase 2 add-on (`[monitor]` extra). Given a reference sweep of a
-known-good policy, fit a small observation autoencoder and score a
-candidate sweep's trajectories against it — per-episode reconstruction
-error + per-dim action-std surface OOD rollouts. `gauntlet run
---record-trajectories <dir>` dumps per-episode NPZ sidecars;
-`gauntlet monitor train <dir> --out <ae_dir>` fits the AE; `gauntlet
-monitor score <episodes.json> <dir> --ae <ae_dir> --out drift.json`
-writes the sidecar. The three-step workflow is scripted end-to-end in
-[`examples/evaluate_with_drift.py`](./examples/evaluate_with_drift.py);
-`drift.json` is optional and orthogonal to `report.json`.
-
-### ROS 2 integration
-
-Optional Phase 2 add-on (`[ros2]` extra). Two halves wire gauntlet into a
-ROS 2 graph:
-
-- `gauntlet ros2 publish episodes.json --topic /gauntlet/episodes`
-  serialises each Episode as JSON inside `std_msgs/msg/String` and
-  publishes one message per Episode. Useful for fleet-wide failure-mode
-  aggregation across many real robots running gauntlet evaluations.
-- `gauntlet ros2 record --topic /robot/joint_states --out trajectory.jsonl
-  --duration 30` subscribes to a real robot's topic and dumps each
-  received message to a JSONL file on disk. Useful for the "real robots
-  with logging" half of `GAUNTLET_SPEC.md` §7.
-
-Because `rclpy` is **not** distributed via PyPI in its official form, the
-`[ros2]` extra is empty — `uv sync --extra ros2` is a no-op beyond the
-dev tooling. Install ROS 2 (Humble or Jazzy) via your system package
-manager, e.g. `sudo apt install ros-humble-rclpy`, or run inside the
-official Docker image (`docker run -it osrf/ros:humble-desktop`), then
-source the relevant `setup.bash` before invoking `gauntlet ros2`. The
-`--dry-run` flag on `gauntlet ros2 publish` short-circuits the rclpy
-import so you can preview the JSON payloads without installing ROS 2.
-
-The publisher / recorder API is documented in
-[`docs/phase2-rfc-010-ros2-integration.md`](./docs/phase2-rfc-010-ros2-integration.md);
-see [`examples/publish_episodes_to_ros2.py`](./examples/publish_episodes_to_ros2.py)
-for the equivalent invocation via the public Python API.
-
-### Diffing two runs
-
-`gauntlet compare a.json b.json` answers a binary question (did `b`
-regress against `a` beyond a threshold?). When you're iterating on a
-checkpoint and want a structured, `git diff`-style breakdown of *what*
-moved — per-axis-value rate deltas, per-cell success-rate flips, and the
-failure-cluster set difference — reach for `gauntlet diff`:
-
-```bash
-uv run gauntlet diff out_a/report.json out_b/report.json
-# Or feed episodes.json directly (auto-detected, parity with `compare`):
-uv run gauntlet diff out_a/episodes.json out_b/episodes.json --json | jq
-```
-
-Threshold flags `--cell-flip-threshold` (default `0.10`) and
-`--cluster-intensify-threshold` (default `0.5`) gate the per-cell and
-per-cluster surfacings. Default output is human-readable text on stdout;
-`--json` emits the full `ReportDiff` payload for downstream consumption.
-See [`examples/diff_two_runs.py`](./examples/diff_two_runs.py) for the
-equivalent invocation via the public Python API.
-
-### Debugging failures with replay
-
-Once a run has flagged an episode as failing, `gauntlet replay` re-
-simulates exactly that rollout with the same seed, optionally nudging
-one axis off the original grid:
-
-```bash
-uv run gauntlet replay out/episodes.json \
-  --suite examples/suites/tabletop-smoke.yaml \
-  --policy scripted \
-  --episode-id 3:1 \
-  --override lighting_intensity=1.2 \
-  --out out/replay.json
-```
-
-Zero-override replay is bit-identical to the original episode; any
-deviation points at a real reproducibility bug. See
-[`examples/replay_failure.py`](./examples/replay_failure.py) for the
-equivalent library call.
-
-### Recording rollout videos
-
-Failure analytics are far more actionable when a human can *watch*
-the broken rollout. Opt in to the `[video]` extra to dump one MP4 per
-episode and surface inline `<video>` thumbnails in the failure-
-clusters table of the HTML report:
-
-```bash
-uv sync --extra video
-uv run python examples/evaluate_random_policy_with_video.py --out out
-# Open out/report.html — the failure-clusters table now embeds
-# clickable thumbnails of every failed rollout.
-```
-
-The `[video]` extra pulls `imageio[ffmpeg]`, which bundles a static
-ffmpeg binary — no system ffmpeg install required. Pass
-`--only-failures` to suppress MP4 writes for successful episodes
-(saves disk on long sweeps). The Runner asserts the env was
-constructed with `render_in_obs=True` when `record_video=True`; the
-example wires that automatically.
-
-### Fleet dashboard
-
-Once you've accumulated more than a few `report.json` files
-(different policies, different seeds, nightly runs), eyeballing each
-HTML report individually stops scaling. `gauntlet dashboard build`
-materialises a self-contained static SPA that indexes every
-`report.json` under a directory:
-
-```bash
-gauntlet dashboard build runs/ --out dashboard-out/
-# Open dashboard-out/index.html via file:// — no web server needed.
-```
-
-The Python API is also exposed for notebook / custom-pipeline use:
+A policy is anything with `act(obs) -> action`:
 
 ```python
-from pathlib import Path
-from gauntlet.dashboard import build_dashboard
+# my_policy.py
+import numpy as np
 
-build_dashboard(Path("runs/"), Path("dashboard-out/"))
+class MyPolicy:
+    def __init__(self) -> None:
+        self.model = load_my_checkpoint()          # your code
+
+    def act(self, obs: dict[str, np.ndarray]) -> np.ndarray:
+        # obs: ee_pos, cube_pos, target_pos, ... (+ "image" with render_in_obs=True)
+        return self.model(obs["ee_pos"], obs["cube_pos"])  # 7-D EE twist + gripper
+
+def make_policy() -> MyPolicy:
+    return MyPolicy()
 ```
-
-The output directory contains exactly three files (`index.html`,
-`dashboard.js`, `dashboard.css`); all run data is embedded as an
-inline JSON literal so the SPA opens straight off the filesystem
-without tripping CORS. The dashboard surfaces an index card
-(n_runs / n_episodes / mean ± std success rate), a per-run table
-filterable by env / suite / policy, a time-series chart of success
-rate keyed off `report.json` mtime, and per-axis aggregate bars
-pooled across the matching runs. Sibling `report.html` files (from
-the originating `gauntlet run`) are auto-linked from each row. See
-[`docs/phase3-rfc-020-web-dashboard.md`](./docs/phase3-rfc-020-web-dashboard.md)
-for the full design.
-
-### Real-to-sim scene ingestion
-
-The endgame for `GAUNTLET_SPEC.md` §7 is gaussian-splatting
-reconstruction of customer scenes from real-robot camera dumps
-straight into a renderable eval backend. Shipping the renderer
-itself needs `torch` + CUDA + a multi-gigabyte training pipeline,
-which violates spec §6 — so this release lands the *input pipeline*
-and the *renderer extension point* only. A plugin (or a future
-in-tree RFC) implements an actual renderer against the
-`RealSimRenderer` Protocol without touching the schema or the CLI:
 
 ```bash
-uv run gauntlet realsim ingest <frames-dir> \
-  --calib <calib.json> \
-  --out <scene-dir>
-
-uv run gauntlet realsim info <scene-dir>
+uv run gauntlet run examples/suites/tabletop-basic-v1.yaml \
+  --policy my_policy:make_policy --out out/mine
+uv run gauntlet compare out/last_week/episodes.json out/mine/episodes.json
 ```
 
-`ingest` validates the frames + calibration JSON and writes a
-self-contained scene directory (`manifest.json` + frame copies, or
-symlinks via `--symlink`). The manifest carries `Pose` (4x4
-row-major rigid transforms, NeRFStudio / COLMAP `transforms.json`
-convention), `CameraIntrinsics` (pinhole + optional distortion,
-shared by id), and `CameraFrame` rows. `info` prints a one-screen
-manifest summary. The renderer itself is **deferred** — `RealSimRenderer`
-is a `typing.Protocol`, and `register_renderer` / `get_renderer` are a
-module-local registry for plugin renderers. See
-[`docs/phase3-rfc-021-real-to-sim-stub.md`](./docs/phase3-rfc-021-real-to-sim-stub.md)
-for the full design (pose representation, validation rules, plugin
-seam).
+Third-party packages can also register policies and envs through entry
+points; see [`docs/plugin-development.md`](./docs/plugin-development.md).
 
-### Multi-camera observations
+## What's in the box
 
-Multi-view policies (SmolVLA, ACT, Diffusion Policy — anything that
-consumes paired wrist + side + overhead frames) need more than the
-single `obs["image"]` the legacy `render_in_obs=True` path emits.
-Pass `cameras=[CameraSpec(...), ...]` to `TabletopEnv` or
-`PyBulletTabletopEnv` and each spec lands in `obs["images"][name]`:
+| | |
+|---|---|
+| **Backends** | MuJoCo (core), PyBullet, Genesis, Isaac Sim. Same action/observation spaces and axes; `compare` refuses cross-backend diffs unless asked. |
+| **Perturbation axes** | Lighting, camera offset and full extrinsics, object texture / pose / class swap, distractors, OOD initial state, actuation latency, image corruption, colour shift, instruction paraphrase. |
+| **Sampling** | Cartesian grids, Latin hypercube, Sobol, worst-case search; `gauntlet suite plan` sizes episodes-per-cell for a target effect. |
+| **Policy adapters** | Random, scripted, OpenVLA (HF), SmolVLA / pi0 / diffusion (LeRobot), GR00T, RDT, Decision Transformer. |
+| **Analysis** | Failure clusters, Wilson CIs, paired compare, per-cell diff, Sobol indices, behavioural metrics (time, path length, jerk), safety counters, `gauntlet bisect` across checkpoints. |
+| **Operations** | Rollout caching, MP4 recording, runtime drift detection, ROS 2 publish/record, fleet aggregation, static dashboard, real-to-sim scene ingestion. |
 
-```python
-from gauntlet.env import CameraSpec, TabletopEnv
+Details for each are in the **[user guide](./docs/guide.md)**. Design
+decisions are recorded as RFCs and design notes under [`docs/`](./docs/).
 
-env = TabletopEnv(
-    cameras=[
-        CameraSpec(name="wrist", pose=(0.0, 0.0, 0.4, 0.0, 0.0, 0.0), size=(96, 96)),
-        CameraSpec(name="side",  pose=(0.5, 0.0, 0.3, 0.0, 1.2, 0.0), size=(96, 96)),
-    ],
-)
-obs, _ = env.reset(seed=0)
-wrist = obs["images"]["wrist"]  # shape (96, 96, 3), uint8
-```
+## Stability
 
-`CameraSpec.pose` is `(x, y, z, rx, ry, rz)` in metres + MuJoCo-XYZ
-Euler radians (looks along local `-Z`); `CameraSpec.size` is `(H, W)`.
-The legacy `obs["image"]` key stays populated as an alias to the
-**first** camera's frame so single-view consumers (the runner's video
-recorder, OpenVLA-style adapters) keep working unchanged. The
-single-camera default (`cameras=None`) is byte-identical to the
-phase-1 contract. See
-[`docs/design/multi-camera.md`](./docs/design/multi-camera.md)
-for the full design and
-[`examples/evaluate_multi_camera.py`](./examples/evaluate_multi_camera.py)
-for a worked example.
-
-## Extending gauntlet
-
-Third-party policies and envs plug into gauntlet through Python's
-standard `importlib.metadata` entry-point mechanism — any
-pip-installable package can register itself without modifying
-gauntlet's source. Two groups are read by `gauntlet.plugins`:
-
-| Entry-point group   | Registers                                                               |
-|---------------------|-------------------------------------------------------------------------|
-| `gauntlet.policies` | A class (or zero-arg callable) returning a `gauntlet.policy.base.Policy` |
-| `gauntlet.envs`     | A class returning a `gauntlet.env.base.GauntletEnv`                      |
-
-A plugin author writes the adapter, then declares it in their own
-`pyproject.toml`:
-
-```toml
-[project.entry-points."gauntlet.policies"]
-sb3 = "my_gauntlet_plugin.sb3_adapter:SBAdapter"
-```
-
-After `pip install my-gauntlet-plugin`, `gauntlet run ... --policy sb3`
-resolves through the plugin path. Built-in adapters always win on
-collision; failed entry-point loads are wrapped in a
-`RuntimeWarning` and dropped from the registry — gauntlet itself
-stays operational. See
-[`docs/plugin-development.md`](./docs/plugin-development.md) for the
-full how-to (writing a Policy / Env plugin, constructor-argument
-patterns, testing) and
-[`docs/design/plugin-system.md`](./docs/design/plugin-system.md)
-for the design note (precedence rules, lazy discovery, collision
-handling).
+`0.2.x` is on PyPI as `gauntlet-robotics`. The public API, on-disk
+schemas and CLI flags follow [Semantic Versioning](https://semver.org/);
+the contract is in [`docs/stability.md`](./docs/stability.md). Pin
+`gauntlet-robotics>=0.2,<0.3`.
 
 ## Development
 
 ```bash
-# Sync deps (creates .venv, installs everything in pyproject + dev group).
 uv sync
-
-# Lint, type-check, test.
-uv run ruff check .
-uv run mypy
-uv run pytest
+uv run ruff check . && uv run ruff format --check .
+uv run mypy                 # --strict
+uv run pytest               # ~1,700 torch-free tests; extras run in their own CI jobs
 ```
 
-### Property tests
-
-The `tests/test_property_*.py` and `tests/test_fuzz_*.py` files use
-[Hypothesis](https://hypothesis.readthedocs.io) to fuzz invariants
-that hand-rolled tests would only sample. They are tagged with the
-`hypothesis_property` pytest marker so a focused run picks them up
-without running the full suite:
-
-```bash
-# Run only the property/fuzz tests.
-uv run pytest -m hypothesis_property
-
-# Faster CI profile (max_examples=50 instead of the 200 default).
-GAUNTLET_HYPOTHESIS_PROFILE=ci uv run pytest -m hypothesis_property
-```
-
-The covered invariants include:
-
-* **Perturbation samplers** (`test_property_perturbation.py`,
-  `test_property_axis_bounds.py`) — every emitted axis value lies
-  inside the declared `[low, high]` envelope; same rng seed produces
-  the same value.
-* **Suite YAML round-trip** (`test_fuzz_suite_roundtrip.py`,
-  `test_property_suite_loader.py`) — `Suite -> YAML -> Suite` is the
-  identity for cartesian / LHS / Sobol suites; insertion order is
-  preserved.
-* **Action clipping** (`test_property_action_clipping.py`,
-  `test_fuzz_action_space.py`) — finite-but-extreme action vectors
-  produce per-step mocap deltas bounded by `MAX_LINEAR_STEP`. NaN/Inf
-  inputs are pinned via `pytest.xfail` as a spec for future hardening.
-* **Reset ordering** (`test_property_reset_after_step_ordering.py`)
-  — `env.reset(S) -> step* -> env.reset(S)` produces bit-equal
-  starting obs regardless of the intervening actions.
-* **Observation NaN/Inf detection**
-  (`test_property_observation_validation.py`) — spec-only via
-  `pytest.xfail`; pins the gap that `Episode.observation_invalid`
-  does not yet exist.
+See [`CONTRIBUTING.md`](./CONTRIBUTING.md) and the
+[property-test notes](./docs/guide.md#property-tests).
 
 ## Project layout
 
@@ -542,4 +165,4 @@ src/gauntlet/
 
 ## License
 
-MIT.
+MIT, see [LICENSE](./LICENSE).

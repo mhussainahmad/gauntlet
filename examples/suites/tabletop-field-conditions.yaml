@@ -1,0 +1,45 @@
+# tabletop-field-conditions — robustness sweep framed around outdoor /
+# field deployment rather than a clean lab bench.
+#
+# The tabletop env is still a tabletop; each axis is a proxy for a
+# condition a field robot sees that a lab robot usually does not:
+#
+#   inference_delay_jitter  edge-compute lag on an embedded controller
+#                           (0 / 100 / 200 ms at the env's 50 ms control
+#                           period = acting on 0 / 2 / 4-step-stale
+#                           commands)
+#   object_initial_pose_x   placement variance of the target (plant,
+#                           fruit, part) relative to where the policy
+#                           expects it
+#   distractor_count        clutter in the workspace (debris, residue,
+#                           neighbouring objects)
+#   lighting_intensity      dawn / overcast / midday illumination; only
+#                           moves image-conditioned policies, so a
+#                           state-based policy should be flat on this
+#                           axis (a useful sanity check in the report)
+#
+# Grid: 3 * 3 * 2 * 2 = 36 cells, 20 episodes each = 720 rollouts.
+# Both reference policies together finish in ~15 s on a laptop.
+#
+#   python scripts/generate_reference_benchmark.py \
+#     --suite examples/suites/tabletop-field-conditions.yaml \
+#     --out out/field/
+#
+# See docs/field-robustness.md for a worked baseline-vs-regressed
+# comparison on this suite.
+
+name: tabletop-field-conditions
+env: tabletop
+seed: 7
+episodes_per_cell: 20
+axes:
+  inference_delay_jitter:
+    values: [0, 100, 200]
+  object_initial_pose_x:
+    low: -0.08
+    high: 0.08
+    steps: 3
+  distractor_count:
+    values: [0, 4]
+  lighting_intensity:
+    values: [0.4, 1.4]

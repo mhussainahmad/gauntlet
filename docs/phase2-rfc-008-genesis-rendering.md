@@ -115,7 +115,7 @@ What this RFC does **not** do (§2):
 ### Non-goals
 
 - **CLI / YAML changes.** Pre-existing gap addressed by the
-  `suite.env`-dispatch bug-fix (already landed, commit `619b99a`). No
+  `suite.env`-dispatch bug-fix (already landed). No
   new surface this RFC.
 - **Cross-backend pixel parity.** RFC-007 §7.3 holds. A test asserts
   shape / dtype parity with MuJoCo but explicitly not pixel equality.

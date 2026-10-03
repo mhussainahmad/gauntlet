@@ -61,7 +61,7 @@ class SBAdapter:
 name = "my-gauntlet-plugin"
 version = "0.1.0"
 dependencies = [
-    "gauntlet>=0.1,<1",
+    "gauntlet-robotics>=0.2,<1",
     "stable-baselines3>=2.0,<3",
 ]
 
@@ -229,7 +229,7 @@ opaque string and trusts that the loaded class satisfies the
 * Bump the entry-point name when you make a breaking change:
   `sb3 → sb3-v2` rather than silently swapping the class behind `sb3`.
 * Document supported gauntlet versions in your plugin's README.
-  `gauntlet>=0.1,<1` is the conventional pin against the current
+  `gauntlet-robotics>=0.2,<1` is the conventional pin against the current
   pre-release line.
 
 ## Testing your plugin
