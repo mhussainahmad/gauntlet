@@ -250,7 +250,7 @@ def test_abstention_metrics_is_frozen() -> None:
     import pydantic
 
     try:
-        metrics.aurc = 0.5  # type: ignore[misc]
+        metrics.aurc = 0.5
     except (pydantic.ValidationError, TypeError, AttributeError):
         return
     msg = "expected mutation of frozen model to raise"

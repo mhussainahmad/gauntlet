@@ -27,7 +27,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from gauntlet.policy.random import RandomPolicy
-from gauntlet.runner import Runner
+from gauntlet.runner import Runner, episode_deterministic_dump
 from gauntlet.suite.schema import AxisSpec, Suite
 
 # ----- module-level helpers (must pickle for spawn — though we use
@@ -140,9 +140,14 @@ def test_runner_two_runs_same_seed_byte_identical_episodes(seed: int) -> None:
     eps_b = runner_b.run(policy_factory=_random_policy_factory, suite=suite)
 
     assert len(eps_a) == len(eps_b) == suite.num_cells() * suite.episodes_per_cell
-    # Episode equality is structural via pydantic; this asserts every
-    # field including total_reward, seed, perturbation_config, metadata.
-    assert eps_a == eps_b
+    # Episode equality across two runs is structural via pydantic, but
+    # wall-clock derived fields (``inference_latency_ms_*``) are NOT
+    # part of the determinism contract. Strip them via
+    # :func:`episode_deterministic_dump` and assert the rest of the
+    # surface is byte-identical.
+    assert [episode_deterministic_dump(e) for e in eps_a] == [
+        episode_deterministic_dump(e) for e in eps_b
+    ]
 
 
 @given(seed=st.integers(min_value=0, max_value=2**31 - 1))

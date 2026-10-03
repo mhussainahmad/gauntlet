@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Iterator
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 from unittest.mock import patch
 
 import click
@@ -618,7 +618,7 @@ def test_every_discover_helper_warns_on_duplicate_name() -> None:
             ),
         ):
             result = helper()
-        assert set(result) == {"dup"}
+        assert set(cast("dict[str, object]", result)) == {"dup"}
 
 
 def test_dogfood_axes_discovered_after_install() -> None:

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -296,7 +297,7 @@ axes:
     return suite_yaml
 
 
-def _read_episodes(out_dir: Path) -> list[dict]:
+def _read_episodes(out_dir: Path) -> list[dict[str, Any]]:
     payload = json.loads((out_dir / "episodes.json").read_text())
     assert isinstance(payload, list)
     return payload

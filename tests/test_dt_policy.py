@@ -22,6 +22,10 @@ from gauntlet.policy.base import Observation, Policy, ResettablePolicy
 
 pytestmark = pytest.mark.dt
 
+# The mocked upstream stack still builds real torch tensors, so skip the
+# whole module on the default torch-free install.
+pytest.importorskip("torch")
+
 
 _STATE_DIM = 11
 _ACT_DIM = 3

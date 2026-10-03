@@ -237,42 +237,6 @@ def test_renderer_not_implemented_error_is_exported() -> None:
     assert realsim.RendererNotImplementedError is RendererNotImplementedError
 
 
-# ---------------------------------------------------------------------------
-# Meta-test: no accidental renderer landed.
-# ---------------------------------------------------------------------------
-
-
-def test_no_accidental_renderer_landed() -> None:
-    """Walk :mod:`gauntlet.realsim.__all__` and prove no renderer drifted in.
-
-    The renderer is officially out-of-scope for T18 (see
-    ``docs/realsim.md`` — phased scope). The only public symbol that
-    legitimately *describes* a renderer is the
-    :class:`gauntlet.realsim.RealSimRenderer` Protocol, which is a
-    type-only contract, not a runnable object.
-
-    This test fires if a future contributor accidentally lands a
-    renderer (a class with a working ``render`` method) without going
-    through the explicit follow-up RFC. The check has two prongs:
-
-    1. No public symbol other than the Protocol exposes ``render``.
-    2. The Protocol's ``render`` method is the abstract structural
-       declaration (no concrete behaviour).
-    """
-    for name in realsim.__all__:
-        symbol = getattr(realsim, name)
-        # The Protocol is the one legitimate ``render``-bearing symbol.
-        if name == "RealSimRenderer":
-            continue
-        if hasattr(symbol, "render"):
-            pytest.fail(
-                f"public realsim symbol {name!r} unexpectedly has a 'render' "
-                f"attribute; the renderer is officially deferred (T18 scope). "
-                f"If this is intentional, file a follow-up RFC and remove this "
-                f"guard.",
-            )
-
-
 def test_calling_renderer_seam_directly_raises_renderer_not_implemented() -> None:
     """A direct caller invoking the seam exception gets the right type.
 

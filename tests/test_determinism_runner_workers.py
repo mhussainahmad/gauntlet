@@ -48,7 +48,7 @@ from __future__ import annotations
 from typing import Any
 
 from gauntlet.policy.random import RandomPolicy
-from gauntlet.runner import Runner
+from gauntlet.runner import Runner, episode_deterministic_dump
 from gauntlet.suite.schema import AxisSpec, Suite
 
 # Action dim for the tabletop env; exposed so factories below stay tiny.
@@ -120,13 +120,14 @@ def test_runner_serial_and_parallel_produce_identical_episode_lists() -> None:
 
     assert len(serial) == len(parallel) == n_total
     for es, ep in zip(serial, parallel, strict=True):
-        # ``model_dump()`` includes nested dicts (``perturbation_config``,
-        # ``metadata``) whose key ordering Pydantic preserves. Direct
-        # dict equality is the right granularity — every float in
-        # ``total_reward`` must agree to the bit.
-        assert es.model_dump() == ep.model_dump(), (
+        # ``episode_deterministic_dump`` strips wall-clock-dependent
+        # fields (``inference_latency_ms_*``) and provenance noise so
+        # the determinism contract on every other field stays bit-exact.
+        es_dump = episode_deterministic_dump(es)
+        ep_dump = episode_deterministic_dump(ep)
+        assert es_dump == ep_dump, (
             f"cell={es.cell_index} ep={es.episode_index} diverged across "
-            f"worker counts; serial={es.model_dump()} parallel={ep.model_dump()}"
+            f"worker counts; serial={es_dump} parallel={ep_dump}"
         )
 
 

@@ -119,7 +119,7 @@ def _make_suite(
         seed=1234,
         episodes_per_cell=episodes_per_cell,
         axes={"distractor_count": AxisSpec(values=values)},
-        sampling=sampling,  # type: ignore[arg-type]
+        sampling=sampling,
     )
 
 

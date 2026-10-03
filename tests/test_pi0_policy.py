@@ -25,6 +25,10 @@ from gauntlet.policy.base import Observation, Policy, ResettablePolicy
 
 pytestmark = pytest.mark.pi0
 
+# The mocked upstream stack still builds real torch tensors, so skip the
+# whole module on the default torch-free install.
+pytest.importorskip("torch")
+
 
 def _zeros_image() -> np.ndarray[Any, Any]:
     return np.zeros((224, 224, 3), dtype=np.uint8)
@@ -178,7 +182,7 @@ def test_act_rejects_non_uint8_image(monkeypatch: pytest.MonkeyPatch) -> None:
     from gauntlet.policy.pi0 import Pi0Policy
 
     policy = Pi0Policy()
-    obs = {
+    obs: Observation = {
         "image": np.zeros((224, 224, 3), dtype=np.float32),
         "ee_pos": np.zeros(3, dtype=np.float64),
         "gripper": np.zeros(1, dtype=np.float64),

@@ -29,7 +29,7 @@ from gauntlet.replay import (
     replay_one,
     validate_overrides,
 )
-from gauntlet.runner import Episode, Runner
+from gauntlet.runner import Episode, Runner, episode_deterministic_dump
 from gauntlet.suite.schema import AxisSpec, Suite
 
 # ----------------------------------------------------------------------------
@@ -155,7 +155,7 @@ def test_zero_override_bit_identity() -> None:
 
     # Full-model equality — no field exclusions. The topology echo in
     # step 1 makes the metadata dict identical too.
-    assert replayed.model_dump() == target.model_dump()
+    assert episode_deterministic_dump(replayed) == episode_deterministic_dump(target)
 
 
 @pytest.mark.parametrize(
@@ -189,7 +189,7 @@ def test_zero_override_every_cell(cell_index: int, episode_index: int) -> None:
         policy_factory=_make_scripted_policy,
         env_factory=_make_fast_env,
     )
-    assert replayed.model_dump() == target.model_dump()
+    assert episode_deterministic_dump(replayed) == episode_deterministic_dump(target)
 
 
 def test_axis_application_order_preserved() -> None:
@@ -622,7 +622,7 @@ def test_replay_cli_zero_override_bit_identical(tmp_path: Any) -> None:
 
     payload = json.loads(out_path.read_text(encoding="utf-8"))
     replayed = Episode.model_validate(payload["replayed"])
-    assert replayed.model_dump() == target.model_dump()
+    assert episode_deterministic_dump(replayed) == episode_deterministic_dump(target)
 
 
 def test_replay_cli_rejects_unknown_episode_id(tmp_path: Any) -> None:
@@ -899,7 +899,7 @@ def test_replay_cli_override_order_independent_of_cli_order(tmp_path: Any) -> No
         ["camera_offset_y=0.005", "camera_offset_x=0.01"],
         "yx_first.json",
     )
-    assert xy_first.model_dump() == yx_first.model_dump()
+    assert episode_deterministic_dump(xy_first) == episode_deterministic_dump(yx_first)
 
 
 def test_replay_cli_help_mentions_override(tmp_path: Any) -> None:

@@ -28,7 +28,7 @@ needed by :class:`InstructionWrapper`.
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 import gymnasium as gym
 import numpy as np
@@ -36,6 +36,7 @@ import pytest
 from numpy.typing import NDArray
 from pydantic import ValidationError
 
+from gauntlet.env.base import GauntletEnv
 from gauntlet.env.instruction import (
     AXIS_NAME,
     DEFAULT_INSTRUCTION_KEY,
@@ -206,7 +207,7 @@ class TestSchemaStringValues:
 class TestInstructionWrapperBasics:
     def test_wrapper_axis_names_unions_inner_with_paraphrase(self) -> None:
         env = _FakeInstructionEnv()
-        wrapped = InstructionWrapper(env, _PARAPHRASES)
+        wrapped = InstructionWrapper(cast(GauntletEnv, env), _PARAPHRASES)
         try:
             assert AXIS_NAME in wrapped.AXIS_NAMES
             assert "lighting_intensity" in wrapped.AXIS_NAMES
@@ -215,7 +216,7 @@ class TestInstructionWrapperBasics:
 
     def test_inner_axis_delegates_to_inner_env(self) -> None:
         env = _FakeInstructionEnv()
-        wrapped = InstructionWrapper(env, _PARAPHRASES)
+        wrapped = InstructionWrapper(cast(GauntletEnv, env), _PARAPHRASES)
         try:
             wrapped.set_perturbation("lighting_intensity", 0.42)
             assert env.last_perturbation == ("lighting_intensity", 0.42)
@@ -224,7 +225,7 @@ class TestInstructionWrapperBasics:
 
     def test_paraphrase_axis_intercepted_not_forwarded(self) -> None:
         env = _FakeInstructionEnv()
-        wrapped = InstructionWrapper(env, _PARAPHRASES)
+        wrapped = InstructionWrapper(cast(GauntletEnv, env), _PARAPHRASES)
         try:
             wrapped.set_perturbation(AXIS_NAME, 1.0)
             # Inner env never sees the paraphrase axis — it would have
@@ -237,7 +238,7 @@ class TestInstructionWrapperBasics:
 
     def test_default_index_is_zero(self) -> None:
         env = _FakeInstructionEnv()
-        wrapped = InstructionWrapper(env, _PARAPHRASES)
+        wrapped = InstructionWrapper(cast(GauntletEnv, env), _PARAPHRASES)
         try:
             # No set_perturbation call — wrapper defaults to baseline.
             assert wrapped.current_instruction == _PARAPHRASES[0]
@@ -247,13 +248,13 @@ class TestInstructionWrapperBasics:
     def test_empty_paraphrases_rejected(self) -> None:
         env = _FakeInstructionEnv()
         with pytest.raises(ValueError, match="at least one paraphrase"):
-            InstructionWrapper(env, ())
+            InstructionWrapper(cast(GauntletEnv, env), ())
 
 
 class TestInstructionInjection:
     def test_reset_injects_instruction_at_index_zero(self) -> None:
         env = _FakeInstructionEnv()
-        wrapped = InstructionWrapper(env, _PARAPHRASES)
+        wrapped = InstructionWrapper(cast(GauntletEnv, env), _PARAPHRASES)
         try:
             obs, _ = wrapped.reset(seed=0)
             assert obs[DEFAULT_INSTRUCTION_KEY] == _PARAPHRASES[0]
@@ -262,7 +263,7 @@ class TestInstructionInjection:
 
     def test_step_injects_instruction_after_set_perturbation(self) -> None:
         env = _FakeInstructionEnv()
-        wrapped = InstructionWrapper(env, _PARAPHRASES)
+        wrapped = InstructionWrapper(cast(GauntletEnv, env), _PARAPHRASES)
         try:
             wrapped.set_perturbation(AXIS_NAME, 2.0)
             obs, _ = wrapped.reset(seed=0)
@@ -278,9 +279,9 @@ class TestInstructionInjection:
         # ``reset`` to start a new episode. The injected obs key must
         # follow the index.
         env = _FakeInstructionEnv()
-        wrapped = InstructionWrapper(env, _PARAPHRASES)
+        wrapped = InstructionWrapper(cast(GauntletEnv, env), _PARAPHRASES)
         try:
-            seen: list[str] = []
+            seen: list[object] = []
             for idx in (0, 1, 2, 1, 0):
                 wrapped.set_perturbation(AXIS_NAME, float(idx))
                 obs, _ = wrapped.reset(seed=idx)
@@ -300,7 +301,7 @@ class TestInstructionInjection:
         # nearest legal index. ``round(0.6) == 1`` per Python's banker's
         # rounding behaviour.
         env = _FakeInstructionEnv()
-        wrapped = InstructionWrapper(env, _PARAPHRASES)
+        wrapped = InstructionWrapper(cast(GauntletEnv, env), _PARAPHRASES)
         try:
             wrapped.set_perturbation(AXIS_NAME, 0.6)
             obs, _ = wrapped.reset(seed=0)
@@ -310,7 +311,7 @@ class TestInstructionInjection:
 
     def test_single_paraphrase_collapses_to_baseline(self) -> None:
         env = _FakeInstructionEnv()
-        wrapped = InstructionWrapper(env, ("pick up the red cube",))
+        wrapped = InstructionWrapper(cast(GauntletEnv, env), ("pick up the red cube",))
         try:
             obs, _ = wrapped.reset(seed=0)
             assert obs[DEFAULT_INSTRUCTION_KEY] == "pick up the red cube"
@@ -322,7 +323,7 @@ class TestInstructionInjection:
 
     def test_restore_baseline_resets_to_index_zero(self) -> None:
         env = _FakeInstructionEnv()
-        wrapped = InstructionWrapper(env, _PARAPHRASES)
+        wrapped = InstructionWrapper(cast(GauntletEnv, env), _PARAPHRASES)
         try:
             wrapped.set_perturbation(AXIS_NAME, 2.0)
             assert wrapped.current_instruction == _PARAPHRASES[2]
@@ -337,7 +338,7 @@ class TestInstructionInjection:
 class TestErrorPaths:
     def test_invalid_index_rejected_at_set_perturbation(self) -> None:
         env = _FakeInstructionEnv()
-        wrapped = InstructionWrapper(env, _PARAPHRASES)
+        wrapped = InstructionWrapper(cast(GauntletEnv, env), _PARAPHRASES)
         try:
             with pytest.raises(ValueError, match="out of range"):
                 wrapped.set_perturbation(AXIS_NAME, 99.0)
@@ -348,7 +349,7 @@ class TestErrorPaths:
 
     def test_unknown_axis_rejected_at_wrapper(self) -> None:
         env = _FakeInstructionEnv()
-        wrapped = InstructionWrapper(env, _PARAPHRASES)
+        wrapped = InstructionWrapper(cast(GauntletEnv, env), _PARAPHRASES)
         try:
             with pytest.raises(ValueError, match="unknown perturbation axis"):
                 wrapped.set_perturbation("not_a_real_axis", 0.0)
@@ -357,7 +358,7 @@ class TestErrorPaths:
 
     def test_custom_instruction_key_overrides_default(self) -> None:
         env = _FakeInstructionEnv()
-        wrapped = InstructionWrapper(env, _PARAPHRASES, instruction_key="task")
+        wrapped = InstructionWrapper(cast(GauntletEnv, env), _PARAPHRASES, instruction_key="task")
         try:
             obs, _ = wrapped.reset(seed=0)
             assert obs["task"] == _PARAPHRASES[0]

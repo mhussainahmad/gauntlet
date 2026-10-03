@@ -52,6 +52,16 @@ from gauntlet.realsim.renderer import RendererRegistryError as RendererRegistryE
 from gauntlet.realsim.renderer import get_renderer as get_renderer
 from gauntlet.realsim.renderer import list_renderers as list_renderers
 from gauntlet.realsim.renderer import register_renderer as register_renderer
+
+# Side-effect import: registers ``nearest-frame`` and ``gsplat`` in the
+# module-local renderer registry. Idempotent — see the docstring on
+# :func:`register_renderer`.
+from gauntlet.realsim.renderers import (
+    GaussianSplatRenderer as GaussianSplatRenderer,
+)
+from gauntlet.realsim.renderers import (
+    NearestFrameRenderer as NearestFrameRenderer,
+)
 from gauntlet.realsim.scene_input import INTRINSICS_REQUIRED_KEYS as INTRINSICS_REQUIRED_KEYS
 from gauntlet.realsim.scene_input import RealSceneInput as RealSceneInput
 from gauntlet.realsim.scene_input import RealSceneInputError as RealSceneInputError
@@ -78,7 +88,9 @@ __all__ = [
     "SCENE_SCHEMA_VERSION",
     "CameraFrame",
     "CameraIntrinsics",
+    "GaussianSplatRenderer",
     "IngestionError",
+    "NearestFrameRenderer",
     "Pose",
     "RealSceneInput",
     "RealSceneInputError",

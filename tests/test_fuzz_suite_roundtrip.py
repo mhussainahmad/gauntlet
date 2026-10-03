@@ -119,7 +119,7 @@ def _stochastic_suite(draw: st.DrawFn, mode: str) -> Suite:
         episodes_per_cell=eps,
         seed=seed,
         axes=axes,
-        sampling=mode,  # type: ignore[arg-type]
+        sampling=mode,
         n_samples=n_samples,
     )
 

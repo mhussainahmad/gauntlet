@@ -2,22 +2,45 @@
 
 Open candidates for future work, sourced from the 2024–2026 robot-policy-evaluation literature plus an internal dependency-drift scan as of 2026-04-25. Each item is independent, has a clear paper or open-source precedent, and is sized in one of three buckets (S ≤ 1 day, M ≤ 3 days, L ≤ 1 week of focused work).
 
-> All 36 original items shipped 2026-04-25. New candidates B-37+ added 2026-04-25.
+> All 36 original items shipped 2026-04-25. New candidates B-37 → B-44 added 2026-04-25 and all shipped by 2026-04-26 — see `git log --grep "B-3\|B-4"`. New v0.2.0-cycle candidates B-45+ below.
+
+## v0.2.0 ship-blocker work landed (2026-05-28)
+
+- v0.2.0 PyPI release plumbing (`release.yml`, OIDC trusted publishing, sdist+wheel attached to GH Release).
+- Public-API freeze + semver commit (`docs/stability.md`).
+- Reference benchmark on GitHub Pages (`benchmark.yml`, `scripts/generate_reference_benchmark.py`).
+- SmolVLA zero-shot footgun: runtime warning banner before any 3 GB weights download.
+- 19 flaky `inference_latency_ms_*` byte-identity tests retired via the new `gauntlet.runner.episode_deterministic_dump` helper + `NONDETERMINISTIC_EPISODE_FIELDS`.
+- OSS hygiene: `CONTRIBUTING.md`, `SECURITY.md`, `.github/CODEOWNERS`, issue templates, PR template.
+- Phase 3 renderer story closed: `gauntlet.realsim.renderers.NearestFrameRenderer` (zero-dep baseline) + `GaussianSplatRenderer` plugin scaffold behind `[realsim-gsplat]` + `gauntlet realsim render` / `realsim renderers` CLI.
 
 ## How to use
 
 Pick the next backlog item by topology, not by ID. Items in the same category may share files; items across categories generally don't. Each entry's **Disjoint with** line names the modules it touches and any other backlog items that conflict.
 
-Suggested ordering for the next continuous-polish loop (smallest, highest-rigour-payoff first):
+## Post-v0.2.0 candidates (B-45+)
 
-1. **B-40** Suite-level provenance hash + result cache key — S, extends `runner/provenance.py`, pure DX.
-2. **B-41** Statistical power calculator on `gauntlet suite plan` — S, extends `report/wilson.py` + B-08; tells the user how many samples they actually need.
-3. **B-42** Camera-extrinsics perturbation axis — S, viewpoint is the highest-yield robustness axis per RoboView-Bias.
-4. **B-43** Color / saturation visual-bias axis — S, backend-agnostic post-render, complements B-31.
-5. **B-37** Inference-latency / wall-clock budget tracking — S, fills the `runner/` gap VLA-Perf flagged.
-6. **B-38** Inference-delay jitter perturbation axis — S, builds on B-37; tests RTC-style real-time chunking.
+Carryover items that did not make the v0.2.0 cut. Sized like the rest of the backlog.
 
-After those S-class items the medium items become viable in pairs.
+### B-45: Tabletop push-task variant
+
+- **What:** `TabletopPushEnv` subclass (or env-factory flag on `TabletopEnv`) that disables the grasp mechanism. Success: cube XY pushed into the target zone via planar contacts only — different failure modes than pick-place (overshoot, slip, dead-zone). Register as `env: tabletop-push`. Reuse the seven perturbation axes verbatim.
+- **Why:** Single-task evaluation is the largest gap in the v0.2.0 surface vs published benchmarks (RoboEval, LIBERO, RoboCasa). Push is the canonical second task — same kinematics, qualitatively different failure modes. Two-task coverage starts to tell us whether a policy regression is task-specific or general.
+- **Scope:** M. The MJCF stays unchanged; the change is the `step()` gripper-snap logic + the success criterion + a new env registration.
+- **Disjoint with:** `env/tabletop.py` (subclass), `env/registry.py` (one new entry), `examples/suites/tabletop-push-smoke.yaml`. Conflicts with B-09 (TabletopStackEnv) only in the per-step gripper-snap surface — pull the snap logic out into a helper if both are active.
+- **Anti-feature?** Two near-identical envs encourage copy-paste drift on the perturbation axes. The mitigation is to keep the env a thin subclass / factory flag on `TabletopEnv`, not a fork.
+
+### B-46: gsplat default training loop
+
+- **What:** Implement `GaussianSplatRenderer._fit_gaussians` for the in-tree default — 4096 uniform-init gaussians, Adam against L1 photometric loss on training frames, `max_train_steps` budget. Plus `_rasterise` against the trained model. Today the plugin scaffold ships with `NotImplementedError` and the in-tree subclass extension point is the only path that lands end-to-end.
+- **Why:** Closes the Phase 3 renderer story end-to-end (not just registry-wired). Lets the reference benchmark exercise a real reconstructor.
+- **Scope:** L. Needs a CUDA-equipped CI runner — or `[realsim-gsplat]` tests stay manual until one lands.
+- **Disjoint with:** `realsim/renderers/gsplat.py`. No conflicts.
+- **Anti-feature?** A bare default loop is worse than no default loop — users will benchmark Gauntlet's gsplat output against their own pipelines and conclude the harness is the bottleneck. Land with a loud "smoke-test only" banner and a pointer to the override hook.
+
+## v0.1 candidates (still open — see original section below)
+
+Original B-01 → B-44 inventory remains as historical record. Every numbered item is shipped; this section is preserved so a future maintainer can trace the rationale for each landed feature.
 
 ---
 

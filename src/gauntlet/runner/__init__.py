@@ -20,8 +20,14 @@ Public surface:
 from __future__ import annotations
 
 from gauntlet.runner.determinism import IMAGE_OBS_KEYS as IMAGE_OBS_KEYS
+from gauntlet.runner.determinism import (
+    NONDETERMINISTIC_EPISODE_FIELDS as NONDETERMINISTIC_EPISODE_FIELDS,
+)
 from gauntlet.runner.determinism import STATE_OBS_KEYS as STATE_OBS_KEYS
 from gauntlet.runner.determinism import assert_byte_identical as assert_byte_identical
+from gauntlet.runner.determinism import (
+    episode_deterministic_dump as episode_deterministic_dump,
+)
 from gauntlet.runner.determinism import episode_hash as episode_hash
 from gauntlet.runner.determinism import obs_state_hash as obs_state_hash
 from gauntlet.runner.determinism import rollout_hash as rollout_hash
@@ -45,6 +51,7 @@ from gauntlet.runner.worker import execute_one as execute_one
 
 __all__ = [
     "IMAGE_OBS_KEYS",
+    "NONDETERMINISTIC_EPISODE_FIELDS",
     "STATE_OBS_KEYS",
     "SUITE_PROVENANCE_HASH_VERSION",
     "Episode",
@@ -57,6 +64,7 @@ __all__ = [
     "compute_env_asset_shas",
     "compute_suite_hash",
     "compute_suite_provenance_hash",
+    "episode_deterministic_dump",
     "episode_hash",
     "execute_one",
     "obs_state_hash",

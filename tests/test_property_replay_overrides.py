@@ -117,7 +117,12 @@ def test_empty_value_raises_override_error(name: str) -> None:
 @given(
     name=_AXIS_NAME,
     junk=st.text(min_size=1, max_size=10).filter(
-        lambda s: not _safe_float(s),
+        # ``parse_override`` calls ``.strip()`` on the RHS before
+        # ``float()``. A junk string whose stripped form parses as a
+        # float (eg. ``"0\x1f"`` — ``\x1f`` is whitespace per
+        # ``str.strip``) would NOT raise; filter both raw and stripped
+        # forms so hypothesis only emits genuinely non-float strings.
+        lambda s: not _safe_float(s) and not _safe_float(s.strip()),
     ),
 )
 @settings(max_examples=50, deadline=timedelta(seconds=2))

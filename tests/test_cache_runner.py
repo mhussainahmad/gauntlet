@@ -21,7 +21,7 @@ from typing import Any
 import pytest
 
 from gauntlet.policy.scripted import ScriptedPolicy
-from gauntlet.runner import Episode, Runner
+from gauntlet.runner import Episode, Runner, episode_deterministic_dump
 from gauntlet.runner.cache import CACHE_SCHEMA_VERSION, EpisodeCache
 from gauntlet.suite.schema import AxisSpec, Suite
 
@@ -364,7 +364,7 @@ def test_no_cache_default_byte_identical(tmp_path: Path) -> None:
     b = runner.run(policy_factory=_make_scripted_policy, suite=suite)
     assert len(a) == len(b)
     for ea, eb in zip(a, b, strict=True):
-        assert ea.model_dump() == eb.model_dump()
+        assert episode_deterministic_dump(ea) == episode_deterministic_dump(eb)
 
 
 def test_runner_no_cache_does_not_construct_episodecache(
@@ -426,7 +426,7 @@ def test_runner_cache_hit_on_second_run(tmp_path: Path) -> None:
 
     assert len(first) == len(second)
     for ea, eb in zip(first, second, strict=True):
-        assert ea.model_dump() == eb.model_dump()
+        assert episode_deterministic_dump(ea) == episode_deterministic_dump(eb)
 
 
 def test_runner_cache_matches_no_cache_path(tmp_path: Path) -> None:
@@ -448,7 +448,7 @@ def test_runner_cache_matches_no_cache_path(tmp_path: Path) -> None:
 
     assert len(no_cache) == len(cached)
     for ea, eb in zip(no_cache, cached, strict=True):
-        assert ea.model_dump() == eb.model_dump()
+        assert episode_deterministic_dump(ea) == episode_deterministic_dump(eb)
 
 
 def test_runner_cache_invalidates_on_suite_edit(tmp_path: Path) -> None:

@@ -21,14 +21,16 @@ Covers the env→worker→Episode→report path:
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 import gymnasium as gym
 import numpy as np
 import pytest
 from numpy.typing import NDArray
 
+from gauntlet.env.base import GauntletEnv
 from gauntlet.env.tabletop import TabletopEnv
+from gauntlet.policy import Observation
 from gauntlet.policy.scripted import ScriptedPolicy
 from gauntlet.report.analyze import build_report
 from gauntlet.runner.episode import Episode
@@ -78,7 +80,7 @@ def test_tabletop_mocap_env_yields_none_telemetry() -> None:
     try:
         # Sanity: confirm the mocap-only assumption holds for this asset.
         assert env._model.nu == 0
-        episode = execute_one(env, _make_scripted, _make_work_item())
+        episode = execute_one(cast(GauntletEnv, env), _make_scripted, _make_work_item())
     finally:
         env.close()
     assert episode.actuator_energy is None
@@ -187,7 +189,7 @@ class _SyntheticTelemetryEnv:
 class _ZeroPolicy:
     """Trivial policy — always returns the zero action."""
 
-    def act(self, obs: dict[str, NDArray[Any]]) -> NDArray[Any]:
+    def act(self, obs: Observation) -> NDArray[Any]:
         del obs
         return np.zeros(7, dtype=np.float64)
 
@@ -204,12 +206,14 @@ def test_worker_accumulates_synthetic_telemetry_correctly() -> None:
         energy_schedule=energy,
         torque_schedule=torques,
     )
-    episode = execute_one(env, _make_zero_policy, _make_work_item(seed=7))
+    episode = execute_one(cast(GauntletEnv, env), _make_zero_policy, _make_work_item(seed=7))
     assert episode.step_count == 4
     assert episode.actuator_energy == pytest.approx(sum(energy))
     assert episode.mean_torque_norm == pytest.approx(sum(torques) / len(torques))
     assert episode.peak_torque_norm == pytest.approx(max(torques))
     # Peak >= mean by construction.
+    assert episode.peak_torque_norm is not None
+    assert episode.mean_torque_norm is not None
     assert episode.peak_torque_norm >= episode.mean_torque_norm
 
 
@@ -219,7 +223,7 @@ def test_worker_zero_torque_synthetic_yields_zero_energy() -> None:
         energy_schedule=[0.0] * 3,
         torque_schedule=[0.0] * 3,
     )
-    episode = execute_one(env, _make_zero_policy, _make_work_item(seed=13))
+    episode = execute_one(cast(GauntletEnv, env), _make_zero_policy, _make_work_item(seed=13))
     # Distinct from the "no telemetry keys" path: here the env DID
     # publish values, they just happened to be zero. Episode must
     # carry float zeros, not None.
@@ -294,7 +298,7 @@ class _FakeEnvNoTelemetry:
 def test_non_mujoco_backend_yields_none_telemetry() -> None:
     """A backend with no telemetry keys leaves all three fields None."""
     env = _FakeEnvNoTelemetry(max_steps=5)
-    episode = execute_one(env, _make_zero_policy, _make_work_item(seed=53))
+    episode = execute_one(cast(GauntletEnv, env), _make_zero_policy, _make_work_item(seed=53))
     assert episode.actuator_energy is None
     assert episode.mean_torque_norm is None
     assert episode.peak_torque_norm is None

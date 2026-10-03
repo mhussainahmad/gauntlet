@@ -3120,6 +3120,119 @@ def realsim_info(
     _echo_err(f"  time range: {time_summary}")
 
 
+@realsim_app.command("renderers")
+def realsim_renderers() -> None:
+    """List every renderer registered in the realsim renderer registry."""
+    from gauntlet.realsim import list_renderers
+
+    names = list_renderers()
+    if not names:
+        _echo_err("[warn]no renderers registered[/]")
+        return
+    _echo_err("[ok]registered realsim renderers:[/]")
+    for name in names:
+        _echo_err(f"  - {name}")
+
+
+@realsim_app.command("render")
+def realsim_render(
+    scene_dir: Annotated[
+        Path,
+        typer.Argument(
+            help="Path to a scene directory (containing manifest.json).",
+            exists=False,
+            dir_okay=True,
+            file_okay=False,
+        ),
+    ],
+    out_path: Annotated[
+        Path,
+        typer.Option(
+            "--out",
+            "-o",
+            help="Output PNG path. Created (parent dirs included) if missing.",
+        ),
+    ],
+    renderer_name: Annotated[
+        str,
+        typer.Option(
+            "--renderer",
+            "-r",
+            help="Registered renderer name (try `gauntlet realsim renderers`).",
+        ),
+    ] = "nearest-frame",
+    frame_index: Annotated[
+        int,
+        typer.Option(
+            "--frame-index",
+            help="Use this training frame's pose + intrinsics as the requested "
+            "viewpoint. -1 (default) renders from frame 0; the nearest-frame "
+            "renderer round-trips the same frame back, which is a useful "
+            "smoke test.",
+        ),
+    ] = 0,
+) -> None:
+    """Render one viewpoint of SCENE_DIR via a registered renderer."""
+    if not scene_dir.is_dir():
+        raise _fail(f"scene_dir not found: {scene_dir}")
+
+    from gauntlet.realsim import (
+        RendererRegistryError,
+        SceneIOError,
+        get_renderer,
+        list_renderers,
+        load_scene,
+    )
+    from gauntlet.realsim.renderers.nearest_frame import NearestFrameRenderer
+
+    try:
+        scene = load_scene(scene_dir)
+    except SceneIOError as exc:
+        raise _fail(str(exc)) from exc
+
+    if not scene.frames:
+        raise _fail(f"scene at {scene_dir} has zero frames; nothing to render from")
+    if frame_index < 0 or frame_index >= len(scene.frames):
+        raise _fail(
+            f"--frame-index {frame_index} out of range (scene has "
+            f"{len(scene.frames)} frame(s); valid: 0..{len(scene.frames) - 1})"
+        )
+
+    try:
+        renderer = get_renderer(renderer_name)
+    except RendererRegistryError as exc:
+        raise _fail(f"{exc}\nAvailable: {', '.join(list_renderers()) or '(none)'}") from exc
+
+    # The nearest-frame renderer needs scene_root to resolve frame paths.
+    # The zero-arg factory in the registry defaults scene_root to cwd;
+    # rebuild the instance here so it can find the frames.
+    if isinstance(renderer, NearestFrameRenderer):
+        renderer = NearestFrameRenderer(scene_root=scene_dir)
+
+    frame = scene.frames[frame_index]
+    intrinsics = scene.intrinsics[frame.intrinsics_id]
+
+    try:
+        image = renderer.render(scene=scene, viewpoint=frame.pose, intrinsics=intrinsics)
+    except ImportError as exc:
+        # Optional-extra install-hint path (gsplat).
+        raise _fail(str(exc)) from exc
+    except NotImplementedError as exc:
+        raise _fail(f"renderer {renderer_name!r} cannot render this scene: {exc}") from exc
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        from PIL import Image
+    except ImportError as exc:
+        raise _fail("PIL is required to write PNGs; pip install pillow") from exc
+    Image.fromarray(image).save(out_path, format="PNG")
+    _echo_err(
+        f"[ok]wrote[/] {_fmt_path(out_path)}  "
+        f"(renderer={renderer_name}, frame_index={frame_index}, "
+        f"shape={image.shape[1]}x{image.shape[0]})"
+    )
+
+
 # ──────────────────────────────────────────────────────────────────────
 # `suite` subcommand group — Phase 3 polish (B-25).
 # ──────────────────────────────────────────────────────────────────────

@@ -21,7 +21,7 @@ fake env (``_FakeImageEnv``) provides the GauntletEnv surface needed by
 from __future__ import annotations
 
 import sys
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 from unittest.mock import patch
 
 import gymnasium as gym
@@ -29,6 +29,7 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 
+from gauntlet.env.base import GauntletEnv
 from gauntlet.env.image_attack import (
     ATTACK_DROPOUT_ONE_CAMERA,
     ATTACK_GAUSSIAN_HIGH,
@@ -265,7 +266,7 @@ class TestJpegAttack:
 class TestImageAttackWrapper:
     def test_wrapper_axis_names_unions_inner_with_image_attack(self) -> None:
         env = _FakeImageEnv()
-        wrapped = ImageAttackWrapper(env)
+        wrapped = ImageAttackWrapper(cast(GauntletEnv, env))
         try:
             assert "image_attack" in wrapped.AXIS_NAMES
             assert "lighting_intensity" in wrapped.AXIS_NAMES
@@ -274,7 +275,7 @@ class TestImageAttackWrapper:
 
     def test_inner_axis_delegates_to_inner_env(self) -> None:
         env = _FakeImageEnv()
-        wrapped = ImageAttackWrapper(env)
+        wrapped = ImageAttackWrapper(cast(GauntletEnv, env))
         try:
             wrapped.set_perturbation("lighting_intensity", 0.42)
             assert env.last_perturbation == ("lighting_intensity", 0.42)
@@ -283,7 +284,7 @@ class TestImageAttackWrapper:
 
     def test_image_attack_intercepted_not_forwarded(self) -> None:
         env = _FakeImageEnv()
-        wrapped = ImageAttackWrapper(env)
+        wrapped = ImageAttackWrapper(cast(GauntletEnv, env))
         try:
             wrapped.set_perturbation("image_attack", float(ATTACK_GAUSSIAN_LOW))
             # Inner env never sees the image_attack value — it would
@@ -294,7 +295,7 @@ class TestImageAttackWrapper:
 
     def test_image_attack_modifies_obs_image(self) -> None:
         env = _FakeImageEnv()
-        wrapped = ImageAttackWrapper(env)
+        wrapped = ImageAttackWrapper(cast(GauntletEnv, env))
         try:
             wrapped.set_perturbation("image_attack", float(ATTACK_GAUSSIAN_HIGH))
             obs, _ = wrapped.reset(seed=0)
@@ -305,7 +306,7 @@ class TestImageAttackWrapper:
 
     def test_attack_none_passes_obs_through(self) -> None:
         env = _FakeImageEnv()
-        wrapped = ImageAttackWrapper(env)
+        wrapped = ImageAttackWrapper(cast(GauntletEnv, env))
         try:
             wrapped.set_perturbation("image_attack", float(ATTACK_NONE))
             obs, _ = wrapped.reset(seed=0)
@@ -317,8 +318,8 @@ class TestImageAttackWrapper:
     def test_same_seed_yields_identical_attacked_obs(self) -> None:
         env_a = _FakeImageEnv()
         env_b = _FakeImageEnv()
-        wrapped_a = ImageAttackWrapper(env_a)
-        wrapped_b = ImageAttackWrapper(env_b)
+        wrapped_a = ImageAttackWrapper(cast(GauntletEnv, env_a))
+        wrapped_b = ImageAttackWrapper(cast(GauntletEnv, env_b))
         try:
             wrapped_a.set_perturbation("image_attack", float(ATTACK_RANDOM_PATCH_8X8))
             wrapped_b.set_perturbation("image_attack", float(ATTACK_RANDOM_PATCH_8X8))
@@ -337,7 +338,7 @@ class TestImageAttackWrapper:
 
     def test_dropout_single_camera_is_noop(self) -> None:
         env = _FakeImageEnv()  # single-camera path
-        wrapped = ImageAttackWrapper(env)
+        wrapped = ImageAttackWrapper(cast(GauntletEnv, env))
         try:
             wrapped.set_perturbation("image_attack", float(ATTACK_DROPOUT_ONE_CAMERA))
             obs, _ = wrapped.reset(seed=0)
@@ -348,7 +349,7 @@ class TestImageAttackWrapper:
 
     def test_dropout_multi_camera_zeros_exactly_one(self) -> None:
         env = _FakeImageEnv(cameras=("top", "wrist", "side"))
-        wrapped = ImageAttackWrapper(env)
+        wrapped = ImageAttackWrapper(cast(GauntletEnv, env))
         try:
             wrapped.set_perturbation("image_attack", float(ATTACK_DROPOUT_ONE_CAMERA))
             obs, _ = wrapped.reset(seed=0)
@@ -363,7 +364,7 @@ class TestImageAttackWrapper:
 
     def test_invalid_attack_value_rejected_at_set_perturbation(self) -> None:
         env = _FakeImageEnv()
-        wrapped = ImageAttackWrapper(env)
+        wrapped = ImageAttackWrapper(cast(GauntletEnv, env))
         try:
             with pytest.raises(ValueError, match="image_attack: value must be one of"):
                 wrapped.set_perturbation("image_attack", 99.0)
@@ -372,7 +373,7 @@ class TestImageAttackWrapper:
 
     def test_unknown_axis_rejected_at_wrapper(self) -> None:
         env = _FakeImageEnv()
-        wrapped = ImageAttackWrapper(env)
+        wrapped = ImageAttackWrapper(cast(GauntletEnv, env))
         try:
             with pytest.raises(ValueError, match="unknown perturbation axis"):
                 wrapped.set_perturbation("not_a_real_axis", 0.0)

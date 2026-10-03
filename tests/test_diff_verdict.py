@@ -15,6 +15,7 @@ semantics.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from typer.testing import CliRunner
 
@@ -354,7 +355,7 @@ def test_legacy_cell_flip_json_without_verdict_round_trips() -> None:
 # ──────────────────────────────────────────────────────────────────────
 
 
-def _write_report_json(path, report: Report) -> None:
+def _write_report_json(path: Path, report: Report) -> None:
     path.write_text(report.model_dump_json(indent=2))
 
 

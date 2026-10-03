@@ -26,14 +26,16 @@ Covers the env→worker→Episode→report path for the five flat
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 import gymnasium as gym
 import numpy as np
 import pytest
 from numpy.typing import NDArray
 
+from gauntlet.env.base import GauntletEnv
 from gauntlet.env.tabletop import TabletopEnv
+from gauntlet.policy import Observation
 from gauntlet.policy.scripted import ScriptedPolicy
 from gauntlet.report.analyze import build_report
 from gauntlet.runner.episode import Episode
@@ -139,7 +141,7 @@ def test_tabletop_episode_carries_behavioral_metrics() -> None:
     """
     env = TabletopEnv(max_steps=10)
     try:
-        episode = execute_one(env, _make_scripted, _make_work_item())
+        episode = execute_one(cast(GauntletEnv, env), _make_scripted, _make_work_item())
     finally:
         env.close()
     # The cube doesn't reach the target in 10 steps with the scripted
@@ -251,7 +253,7 @@ class _SyntheticBehaviorEnv:
 
 
 class _ZeroPolicy:
-    def act(self, obs: dict[str, NDArray[Any]]) -> NDArray[Any]:
+    def act(self, obs: Observation) -> NDArray[Any]:
         del obs
         return np.zeros(7, dtype=np.float64)
 
@@ -269,7 +271,7 @@ def test_worker_time_to_success_from_step_count_and_dt() -> None:
         control_dt=0.1,
         success_at_step=4,
     )
-    episode = execute_one(env, _make_zero_policy, _make_work_item(seed=21))
+    episode = execute_one(cast(GauntletEnv, env), _make_zero_policy, _make_work_item(seed=21))
     assert episode.success is True
     assert episode.step_count == 4
     assert episode.time_to_success == pytest.approx(0.4)
@@ -283,7 +285,7 @@ def test_worker_time_to_success_none_on_failure() -> None:
         control_dt=0.1,
         success_at_step=None,  # never succeeds
     )
-    episode = execute_one(env, _make_zero_policy, _make_work_item(seed=23))
+    episode = execute_one(cast(GauntletEnv, env), _make_zero_policy, _make_work_item(seed=23))
     assert episode.success is False
     assert episode.time_to_success is None
 
@@ -292,7 +294,7 @@ def test_path_length_ratio_straight_line_is_one() -> None:
     """A straight-line EE trajectory has path_length_ratio == 1.0."""
     ee = [np.array([float(i), 0.0, 0.0]) for i in range(6)]  # 0..5 on X
     env = _SyntheticBehaviorEnv(ee_schedule=ee, control_dt=0.1)
-    episode = execute_one(env, _make_zero_policy, _make_work_item(seed=25))
+    episode = execute_one(cast(GauntletEnv, env), _make_zero_policy, _make_work_item(seed=25))
     assert episode.path_length_ratio is not None
     assert episode.path_length_ratio == pytest.approx(1.0)
 
@@ -310,7 +312,7 @@ def test_path_length_ratio_u_shape_above_one() -> None:
         np.array([1.0, 1.0, 0.0]),
     ]
     env = _SyntheticBehaviorEnv(ee_schedule=ee, control_dt=0.1)
-    episode = execute_one(env, _make_zero_policy, _make_work_item(seed=27))
+    episode = execute_one(cast(GauntletEnv, env), _make_zero_policy, _make_work_item(seed=27))
     assert episode.path_length_ratio is not None
     assert episode.path_length_ratio == pytest.approx(np.sqrt(2.0))
 
@@ -320,7 +322,7 @@ def test_path_length_ratio_none_for_stationary_policy() -> None:
     # All samples within 1e-9 of origin → straight < 1e-6 m guard.
     ee = [np.array([1e-10 * i, 0.0, 0.0]) for i in range(5)]
     env = _SyntheticBehaviorEnv(ee_schedule=ee, control_dt=0.1)
-    episode = execute_one(env, _make_zero_policy, _make_work_item(seed=29))
+    episode = execute_one(cast(GauntletEnv, env), _make_zero_policy, _make_work_item(seed=29))
     assert episode.path_length_ratio is None
 
 
@@ -329,7 +331,7 @@ def test_jerk_rms_zero_for_constant_velocity() -> None:
     # ee[t] = v * t (constant velocity v=1 along X). Third difference = 0.
     ee = [np.array([float(i), 0.0, 0.0]) for i in range(6)]
     env = _SyntheticBehaviorEnv(ee_schedule=ee, control_dt=0.1)
-    episode = execute_one(env, _make_zero_policy, _make_work_item(seed=31))
+    episode = execute_one(cast(GauntletEnv, env), _make_zero_policy, _make_work_item(seed=31))
     assert episode.jerk_rms is not None
     assert episode.jerk_rms == pytest.approx(0.0, abs=1e-9)
 
@@ -347,7 +349,7 @@ def test_jerk_rms_matches_closed_form_on_cubic() -> None:
     dt = 0.1
     ee = [np.array([(i * dt) ** 3, 0.0, 0.0]) for i in range(6)]
     env = _SyntheticBehaviorEnv(ee_schedule=ee, control_dt=dt)
-    episode = execute_one(env, _make_zero_policy, _make_work_item(seed=33))
+    episode = execute_one(cast(GauntletEnv, env), _make_zero_policy, _make_work_item(seed=33))
     assert episode.jerk_rms is not None
     assert episode.jerk_rms == pytest.approx(6.0, rel=1e-6)
 
@@ -356,7 +358,7 @@ def test_jerk_rms_none_below_four_samples() -> None:
     """Rollouts with fewer than 4 EE samples report ``jerk_rms=None``."""
     ee = [np.array([float(i), 0.0, 0.0]) for i in range(3)]  # only 3 samples
     env = _SyntheticBehaviorEnv(ee_schedule=ee, control_dt=0.1)
-    episode = execute_one(env, _make_zero_policy, _make_work_item(seed=35))
+    episode = execute_one(cast(GauntletEnv, env), _make_zero_policy, _make_work_item(seed=35))
     assert episode.jerk_rms is None
     # path_length_ratio still works at T=3 → 1.0 along straight line.
     assert episode.path_length_ratio == pytest.approx(1.0)
@@ -370,7 +372,7 @@ def test_worker_accumulates_near_collision_and_peak_force() -> None:
         near_collision_schedule=[0, 1, 2, 0, 3],
         peak_force_schedule=[0.0, 1.5, 0.5, 4.0, 2.0],
     )
-    episode = execute_one(env, _make_zero_policy, _make_work_item(seed=37))
+    episode = execute_one(cast(GauntletEnv, env), _make_zero_policy, _make_work_item(seed=37))
     assert episode.near_collision_count == 6  # 0+1+2+0+3
     assert episode.peak_force == pytest.approx(4.0)
 
@@ -433,7 +435,7 @@ class _FakeEnvNoBehavior:
 def test_non_mujoco_backend_yields_none_behavioral_fields() -> None:
     """A backend with no behaviour keys leaves all five Episode fields None."""
     env = _FakeEnvNoBehavior(max_steps=5)
-    episode = execute_one(env, _make_zero_policy, _make_work_item(seed=41))
+    episode = execute_one(cast(GauntletEnv, env), _make_zero_policy, _make_work_item(seed=41))
     assert episode.time_to_success is None
     assert episode.path_length_ratio is None
     assert episode.jerk_rms is None

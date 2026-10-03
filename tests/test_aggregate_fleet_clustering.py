@@ -265,7 +265,8 @@ def test_representative_signature_is_a_real_member(tmp_path: Path) -> None:
     sig = result.clusters[0].representative_failure_signature
     # The shared signature carries axes={"lighting_intensity": 0.3,
     # "object_texture": 0.0}; the medoid of a single bucket is itself.
-    assert sig["axes"] == {
+    axes: object = sig["axes"]
+    assert axes == {
         "lighting_intensity": pytest.approx(0.3),
         "object_texture": pytest.approx(0.0),
     }

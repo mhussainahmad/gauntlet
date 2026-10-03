@@ -1,0 +1,22 @@
+# CODEOWNERS — review-routing for Gauntlet.
+#
+# Every PR is automatically requested-review from the matching owner(s).
+# Later entries override earlier ones. See:
+# https://docs.github.com/en/repositories/managing-your-repositories-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default — every file unless overridden below.
+*                       @mhussainahmad
+
+# Security-sensitive: tighter review for the YAML guard, path-sanitiser
+# and HTML report (Jinja autoescape contract). Touch with care.
+/src/gauntlet/security/ @mhussainahmad
+/src/gauntlet/report/   @mhussainahmad
+
+# Public-API surface tracked in docs/stability.md. Any change here is
+# load-bearing for downstream pins.
+/docs/stability.md      @mhussainahmad
+/CHANGELOG.md           @mhussainahmad
+/pyproject.toml         @mhussainahmad
+
+# CI / release plumbing. Mis-configurations here ripple to every PR.
+/.github/               @mhussainahmad

@@ -77,7 +77,12 @@ def test_run_os_error_reading_suite_surfaces_clean_message(
     def _raise_os_error(*args: object, **kwargs: object) -> object:
         raise PermissionError("simulated read failure")
 
-    monkeypatch.setattr(loader_mod, "yaml", type("Y", (), {"safe_load": _raise_os_error}))
+    # Patch the loader's ``safe_yaml_load`` import (the post-RFC-014
+    # security-routed helper that replaced the bare ``yaml.safe_load``
+    # call). Loader calls ``safe_yaml_load(fh)`` inside ``load_suite``;
+    # raising from there surfaces as an OSError up the stack into the
+    # CLI's ``could not read file`` branch.
+    monkeypatch.setattr(loader_mod, "safe_yaml_load", _raise_os_error)
 
     result = runner.invoke(
         app,
@@ -137,7 +142,7 @@ def test_replay_os_error_reading_suite_surfaces_clean_message(
     def _raise_os_error(*args: object, **kwargs: object) -> object:
         raise PermissionError("simulated read failure")
 
-    monkeypatch.setattr(loader_mod, "yaml", type("Y", (), {"safe_load": _raise_os_error}))
+    monkeypatch.setattr(loader_mod, "safe_yaml_load", _raise_os_error)
 
     result = runner.invoke(
         app,

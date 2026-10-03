@@ -28,14 +28,16 @@ Covers the env→worker→Episode→report path for the four flat
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 import gymnasium as gym
 import numpy as np
 import pytest
 from numpy.typing import NDArray
 
+from gauntlet.env.base import GauntletEnv
 from gauntlet.env.tabletop import TabletopEnv
+from gauntlet.policy import Observation
 from gauntlet.policy.scripted import ScriptedPolicy
 from gauntlet.report.analyze import build_report, episode_has_safety_violation
 from gauntlet.runner.episode import Episode
@@ -136,7 +138,7 @@ def test_tabletop_episode_carries_safety_counts() -> None:
     """
     env = TabletopEnv(max_steps=20)
     try:
-        episode = execute_one(env, _make_scripted, _make_work_item())
+        episode = execute_one(cast(GauntletEnv, env), _make_scripted, _make_work_item())
     finally:
         env.close()
     assert episode.n_collisions is not None
@@ -233,7 +235,7 @@ class _SyntheticSafetyEnv:
 
 
 class _ZeroPolicy:
-    def act(self, obs: dict[str, NDArray[Any]]) -> NDArray[Any]:
+    def act(self, obs: Observation) -> NDArray[Any]:
         del obs
         return np.zeros(7, dtype=np.float64)
 
@@ -249,7 +251,7 @@ def test_worker_accumulates_synthetic_safety_telemetry() -> None:
         joint_schedule=[False, True, False, True, True],
         workspace_schedule=[True, False, False, False, True],
     )
-    episode = execute_one(env, _make_zero_policy, _make_work_item(seed=29))
+    episode = execute_one(cast(GauntletEnv, env), _make_zero_policy, _make_work_item(seed=29))
     assert episode.step_count == 5
     assert episode.n_collisions == 6  # 0+1+2+0+3
     assert episode.n_joint_limit_excursions == 3  # True at idx 1, 3, 4
@@ -271,7 +273,7 @@ def test_worker_energy_budget_derives_over_budget_bool() -> None:
         torque_schedule=[0.1, 0.2, 0.3, 0.4],
     )
     over = execute_one(
-        env,
+        cast(GauntletEnv, env),
         _make_zero_policy,
         _make_work_item(seed=33),
         energy_budget=5.0,
@@ -288,7 +290,7 @@ def test_worker_energy_budget_derives_over_budget_bool() -> None:
         torque_schedule=[0.1, 0.2, 0.3, 0.4],
     )
     within = execute_one(
-        env2,
+        cast(GauntletEnv, env2),
         _make_zero_policy,
         _make_work_item(seed=33),
         energy_budget=10.0,
@@ -354,7 +356,7 @@ class _FakeEnvNoSafety:
 def test_non_mujoco_backend_yields_none_safety_fields() -> None:
     """A backend with no safety keys leaves all four Episode fields None."""
     env = _FakeEnvNoSafety(max_steps=5)
-    episode = execute_one(env, _make_zero_policy, _make_work_item(seed=41))
+    episode = execute_one(cast(GauntletEnv, env), _make_zero_policy, _make_work_item(seed=41))
     assert episode.n_collisions is None
     assert episode.n_joint_limit_excursions is None
     assert episode.n_workspace_excursions is None

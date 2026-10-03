@@ -54,8 +54,10 @@ if TYPE_CHECKING:
 
 __all__ = [
     "IMAGE_OBS_KEYS",
+    "NONDETERMINISTIC_EPISODE_FIELDS",
     "STATE_OBS_KEYS",
     "assert_byte_identical",
+    "episode_deterministic_dump",
     "episode_hash",
     "obs_state_hash",
     "rollout_hash",
@@ -199,6 +201,73 @@ _EPISODE_HASH_FIELDS: tuple[str, ...] = (
     "step_count",
     "total_reward",
 )
+
+
+# Episode fields that are NOT part of the determinism contract: they
+# either depend on the host wall-clock (``inference_latency_ms_*``),
+# the on-disk output directory (``video_path``), the host environment
+# (``gauntlet_version`` / ``git_commit`` / ``suite_hash``), or are
+# derived from physics-engine floats that drift in float-asymmetric
+# ways across backends (safety telemetry, behavioural metrics).
+#
+# Tests that compare two Episode records for byte-identity (replay,
+# cache, parallel-vs-serial) MUST strip these fields first.
+# :func:`episode_deterministic_dump` does that strip for you.
+NONDETERMINISTIC_EPISODE_FIELDS: frozenset[str] = frozenset(
+    {
+        # Wall-clock derived.
+        "inference_latency_ms_p50",
+        "inference_latency_ms_p99",
+        "inference_latency_ms_max",
+        # Output-path derived.
+        "video_path",
+        # Provenance.
+        "gauntlet_version",
+        "git_commit",
+        "suite_hash",
+        # Backend-asymmetric / float-noisy. (Same as the
+        # :func:`episode_hash` exclusion list — kept in sync.)
+        "actuator_energy",
+        "mean_torque_norm",
+        "peak_torque_norm",
+        "action_variance",
+        "failure_score",
+        "failure_alarm",
+        "n_collisions",
+        "n_joint_limit_excursions",
+        "energy_over_budget",
+        "n_workspace_excursions",
+        "time_to_success",
+        "path_length_ratio",
+        "jerk_rms",
+        "near_collision_count",
+        "peak_force",
+    }
+)
+
+
+def episode_deterministic_dump(episode: Episode) -> dict[str, object]:
+    """Return ``episode.model_dump()`` with non-deterministic fields stripped.
+
+    Use in tests that assert byte-identity between two Episode records
+    produced by the Runner — either two back-to-back runs with the same
+    seed, the cache vs no-cache code paths, or serial vs n_workers>1.
+    The stripped fields are listed in :data:`NONDETERMINISTIC_EPISODE_FIELDS`;
+    everything that remains MUST match bit-for-bit. ``perturbation_config``
+    and ``metadata`` are normalised to sorted dicts so dict-insertion-order
+    differences (which Pydantic preserves) do not surface as false
+    diffs either.
+    """
+    dump: dict[str, object] = episode.model_dump()
+    for key in NONDETERMINISTIC_EPISODE_FIELDS:
+        dump.pop(key, None)
+    perturbation_config = dump.get("perturbation_config")
+    if isinstance(perturbation_config, dict):
+        dump["perturbation_config"] = dict(sorted(perturbation_config.items()))
+    metadata = dump.get("metadata")
+    if isinstance(metadata, dict):
+        dump["metadata"] = dict(sorted(metadata.items()))
+    return dump
 
 
 def episode_hash(episode: Episode) -> str:

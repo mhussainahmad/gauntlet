@@ -287,7 +287,7 @@ def _write_landing_page(out: Path, summary: dict[str, object]) -> None:
 
           <div class="verdict {regressed_cls}">
             <div><strong>Verdict:</strong> {verdict.upper()}</div>
-            <div class="num">{baseline*100:.1f}% &rarr; {regressed*100:.1f}%
+            <div class="num">{baseline * 100:.1f}% &rarr; {regressed * 100:.1f}%
               ({delta_pct:+.1f} pp)</div>
             <div>Suite: <code>{suite_name}</code> · Rollouts per side: {n_episodes}</div>
           </div>
@@ -300,13 +300,13 @@ def _write_landing_page(out: Path, summary: dict[str, object]) -> None:
               <tr>
                 <td>baseline</td>
                 <td><code>ClosedLoopReachPolicy</code></td>
-                <td>{baseline*100:.1f}%</td>
+                <td>{baseline * 100:.1f}%</td>
                 <td><a href="baseline/report.html">report.html</a> &middot; <a href="baseline/report.json">report.json</a></td>
               </tr>
               <tr>
                 <td>regressed</td>
                 <td><code>DegradedReachPolicy</code> (proprio noise σ=0.06 m)</td>
-                <td>{regressed*100:.1f}%</td>
+                <td>{regressed * 100:.1f}%</td>
                 <td><a href="regressed/report.html">report.html</a> &middot; <a href="regressed/report.json">report.json</a></td>
               </tr>
             </tbody>
@@ -354,8 +354,7 @@ def _summarise(out: Path) -> dict[str, object]:
 
     return {
         "gauntlet_version": gauntlet.__version__,
-        "suite_name": baseline_report.get("suite_name")
-        or compare["a"].get("name", "unknown"),
+        "suite_name": baseline_report.get("suite_name") or compare["a"].get("name", "unknown"),
         "n_episodes": int(compare["a"].get("n_episodes", 0)),
         "baseline_success_rate": float(compare["a"]["overall_success_rate"]),
         "regressed_success_rate": float(compare["b"]["overall_success_rate"]),

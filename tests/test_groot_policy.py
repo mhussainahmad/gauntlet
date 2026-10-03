@@ -21,6 +21,10 @@ from gauntlet.policy.base import Observation, Policy, ResettablePolicy
 
 pytestmark = pytest.mark.groot
 
+# The mocked upstream stack still builds real torch tensors, so skip the
+# whole module on the default torch-free install.
+pytest.importorskip("torch")
+
 
 def _zeros_image() -> np.ndarray[Any, Any]:
     return np.zeros((224, 224, 3), dtype=np.uint8)

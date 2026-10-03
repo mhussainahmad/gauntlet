@@ -16,7 +16,7 @@ import numpy as np
 import pytest
 
 from gauntlet.policy.random import RandomPolicy
-from gauntlet.runner import Episode, Runner
+from gauntlet.runner import Episode, Runner, episode_deterministic_dump
 from gauntlet.runner.worker import trajectory_path_for
 from gauntlet.suite.schema import AxisSpec, Suite
 
@@ -94,10 +94,13 @@ def test_trajectory_dir_set_produces_byte_identical_episodes(tmp_path: Path) -> 
         trajectory_dir=traj_dir,
     ).run(policy_factory=_make_random_policy, suite=suite)
 
-    # Same count + bit-for-bit equality on every field.
+    # Same count + bit-for-bit equality on every deterministic field.
+    # Wall-clock-derived fields (``inference_latency_ms_*``) are
+    # stripped via :func:`episode_deterministic_dump` — they are NOT
+    # part of the determinism contract.
     assert len(without) == len(with_traj)
     for a, b in zip(without, with_traj, strict=True):
-        assert a.model_dump(mode="json") == b.model_dump(mode="json")
+        assert episode_deterministic_dump(a) == episode_deterministic_dump(b)
 
 
 # ----------------------------------------------------------------------------

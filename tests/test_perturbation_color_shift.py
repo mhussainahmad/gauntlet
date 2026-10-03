@@ -22,13 +22,14 @@ fake env (``_FakeImageEnv``) provides the GauntletEnv surface needed by
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 import gymnasium as gym
 import numpy as np
 import pytest
 from numpy.typing import NDArray
 
+from gauntlet.env.base import GauntletEnv
 from gauntlet.env.color_attack import (
     SHIFT_ACHROMATIC,
     SHIFT_HUE_MINUS_30,
@@ -327,7 +328,7 @@ class TestPureShiftFunction:
 class TestColorShiftWrapper:
     def test_wrapper_axis_names_unions_inner_with_color_shift(self) -> None:
         env = _FakeImageEnv()
-        wrapped = ColorShiftWrapper(env)
+        wrapped = ColorShiftWrapper(cast(GauntletEnv, env))
         try:
             assert "color_shift_synthetic" in wrapped.AXIS_NAMES
             assert "lighting_intensity" in wrapped.AXIS_NAMES
@@ -336,7 +337,7 @@ class TestColorShiftWrapper:
 
     def test_inner_axis_delegates_to_inner_env(self) -> None:
         env = _FakeImageEnv()
-        wrapped = ColorShiftWrapper(env)
+        wrapped = ColorShiftWrapper(cast(GauntletEnv, env))
         try:
             wrapped.set_perturbation("lighting_intensity", 0.42)
             assert env.last_perturbation == ("lighting_intensity", 0.42)
@@ -345,7 +346,7 @@ class TestColorShiftWrapper:
 
     def test_color_shift_intercepted_not_forwarded(self) -> None:
         env = _FakeImageEnv()
-        wrapped = ColorShiftWrapper(env)
+        wrapped = ColorShiftWrapper(cast(GauntletEnv, env))
         try:
             wrapped.set_perturbation("color_shift_synthetic", float(SHIFT_HUE_PLUS_30))
             # Inner env never sees the color_shift value — it would
@@ -357,7 +358,7 @@ class TestColorShiftWrapper:
 
     def test_color_shift_modifies_obs_image(self) -> None:
         env = _FakeImageEnv(fill_rgb=(200, 100, 50))
-        wrapped = ColorShiftWrapper(env)
+        wrapped = ColorShiftWrapper(cast(GauntletEnv, env))
         try:
             wrapped.set_perturbation("color_shift_synthetic", float(SHIFT_ACHROMATIC))
             obs, _ = wrapped.reset(seed=0)
@@ -369,7 +370,7 @@ class TestColorShiftWrapper:
 
     def test_shift_none_passes_obs_through(self) -> None:
         env = _FakeImageEnv(fill_rgb=(200, 100, 50))
-        wrapped = ColorShiftWrapper(env)
+        wrapped = ColorShiftWrapper(cast(GauntletEnv, env))
         try:
             wrapped.set_perturbation("color_shift_synthetic", float(SHIFT_NONE))
             obs, _ = wrapped.reset(seed=0)
@@ -383,7 +384,7 @@ class TestColorShiftWrapper:
 
     def test_observation_shape_preserved_through_wrapper(self) -> None:
         env = _FakeImageEnv(image_shape=(48, 64, 3))
-        wrapped = ColorShiftWrapper(env)
+        wrapped = ColorShiftWrapper(cast(GauntletEnv, env))
         try:
             wrapped.set_perturbation("color_shift_synthetic", float(SHIFT_HUE_PLUS_30))
             obs, _ = wrapped.reset(seed=0)
@@ -401,8 +402,8 @@ class TestColorShiftWrapper:
         # RNG, so determinism is structural rather than seeded).
         env_a = _FakeImageEnv()
         env_b = _FakeImageEnv()
-        wrapped_a = ColorShiftWrapper(env_a)
-        wrapped_b = ColorShiftWrapper(env_b)
+        wrapped_a = ColorShiftWrapper(cast(GauntletEnv, env_a))
+        wrapped_b = ColorShiftWrapper(cast(GauntletEnv, env_b))
         try:
             wrapped_a.set_perturbation("color_shift_synthetic", float(SHIFT_HUE_MINUS_30))
             wrapped_b.set_perturbation("color_shift_synthetic", float(SHIFT_HUE_MINUS_30))
@@ -419,7 +420,7 @@ class TestColorShiftWrapper:
 
     def test_multi_camera_shifts_every_camera(self) -> None:
         env = _FakeImageEnv(cameras=("top", "wrist", "side"))
-        wrapped = ColorShiftWrapper(env)
+        wrapped = ColorShiftWrapper(cast(GauntletEnv, env))
         try:
             wrapped.set_perturbation("color_shift_synthetic", float(SHIFT_ACHROMATIC))
             obs, _ = wrapped.reset(seed=0)
@@ -436,7 +437,7 @@ class TestColorShiftWrapper:
 
     def test_invalid_shift_value_rejected_at_set_perturbation(self) -> None:
         env = _FakeImageEnv()
-        wrapped = ColorShiftWrapper(env)
+        wrapped = ColorShiftWrapper(cast(GauntletEnv, env))
         try:
             with pytest.raises(ValueError, match="color_shift_synthetic: value must be one of"):
                 wrapped.set_perturbation("color_shift_synthetic", 99.0)
@@ -445,7 +446,7 @@ class TestColorShiftWrapper:
 
     def test_unknown_axis_rejected_at_wrapper(self) -> None:
         env = _FakeImageEnv()
-        wrapped = ColorShiftWrapper(env)
+        wrapped = ColorShiftWrapper(cast(GauntletEnv, env))
         try:
             with pytest.raises(ValueError, match="unknown perturbation axis"):
                 wrapped.set_perturbation("not_a_real_axis", 0.0)
@@ -454,7 +455,7 @@ class TestColorShiftWrapper:
 
     def test_restore_baseline_clears_pending_shift(self) -> None:
         env = _FakeImageEnv(fill_rgb=(200, 100, 50))
-        wrapped = ColorShiftWrapper(env)
+        wrapped = ColorShiftWrapper(cast(GauntletEnv, env))
         try:
             wrapped.set_perturbation("color_shift_synthetic", float(SHIFT_ACHROMATIC))
             wrapped.restore_baseline()
@@ -477,7 +478,7 @@ class TestColorShiftWrapper:
             return "from_inner"
 
         env._custom_helper = _custom_helper  # type: ignore[attr-defined]
-        wrapped = ColorShiftWrapper(env)
+        wrapped = ColorShiftWrapper(cast(GauntletEnv, env))
         try:
             # ``__getattr__`` proxy returns ``Any`` so mypy lets the
             # call site through without a per-call type ignore.

@@ -227,6 +227,19 @@ parquet = [
 trajectory-taxonomy = [
     "dtw-python>=1.4,<2",
 ]
+# Phase 3 real-to-sim gaussian-splatting renderer plugin. Pulls
+# ``torch`` + ``gsplat``. Both lazy-imported inside
+# :mod:`gauntlet.realsim.renderers.gsplat`; a missing extra surfaces
+# as a clean :class:`ImportError` with the install hint only when
+# :meth:`GaussianSplatRenderer.render` is called. CUDA-capable torch
+# is required at runtime — gsplat ships a CUDA extension that has no
+# CPU fallback. The lower bound on gsplat is the first release with
+# the API used by :mod:`gauntlet.realsim.renderers.gsplat`
+# (``gsplat.rasterization``).
+realsim-gsplat = [
+    "torch>=2.0,<3",
+    "gsplat>=1.0,<2",
+]
 
 [project.scripts]
 gauntlet = "gauntlet.cli:app"
@@ -564,6 +577,13 @@ ignore_missing_imports = true
 # Also covers the [monitor] extra (torch + PIL).
 [[tool.mypy.overrides]]
 module = ["torch", "torch.*", "transformers", "transformers.*", "PIL", "PIL.*"]
+ignore_missing_imports = true
+
+# Optional [realsim-gsplat] extra — let mypy import-check
+# ``realsim/renderers/gsplat.py`` even when the gsplat CUDA extension is
+# not installed (default torch-free job has neither).
+[[tool.mypy.overrides]]
+module = ["gsplat", "gsplat.*"]
 ignore_missing_imports = true
 
 # Optional lerobot extras — let mypy import-check ``policy/lerobot.py`` even
