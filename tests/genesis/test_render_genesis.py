@@ -36,7 +36,9 @@ import pytest
 if TYPE_CHECKING:
     from gauntlet.env.genesis.tabletop_genesis import GenesisTabletopEnv
 
-pytestmark = pytest.mark.genesis
+# Also ``render``: needs a working EGL/OpenGL context, which hosted CI
+# runners lack, so the genesis CI job deselects these.
+pytestmark = [pytest.mark.genesis, pytest.mark.render]
 
 
 # ----------------------------------------------------------------- fixtures

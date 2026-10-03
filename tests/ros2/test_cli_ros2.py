@@ -8,6 +8,7 @@ recorder seams are patched per-test on the bound module symbols.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -18,6 +19,14 @@ from gauntlet.cli import app
 from gauntlet.runner import Episode
 
 pytestmark = pytest.mark.ros2
+
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _plain(text: str) -> str:
+    """Strip ANSI styling — rich forces colour on CI runners (GITHUB_ACTIONS)."""
+    return _ANSI.sub("", text)
 
 
 def _runner() -> CliRunner:
@@ -166,7 +175,7 @@ class TestRos2PublishCli:
         result = _runner().invoke(app, ["ros2", "publish", "--help"])
         assert result.exit_code == 0
         for fragment in ("--topic", "--node-name", "--dry-run", "--qos-depth"):
-            assert fragment in result.stdout
+            assert fragment in _plain(result.stdout)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -241,7 +250,7 @@ class TestRos2RecordCli:
         result = _runner().invoke(app, ["ros2", "record", "--help"])
         assert result.exit_code == 0
         for fragment in ("--topic", "--out", "--duration"):
-            assert fragment in result.stdout
+            assert fragment in _plain(result.stdout)
 
 
 # ──────────────────────────────────────────────────────────────────────

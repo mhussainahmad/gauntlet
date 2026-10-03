@@ -285,7 +285,8 @@ jobs:
           --reinstall-package gauntlet
 
       - name: Run genesis-marked tests
-        run: uv run pytest -m genesis -q
+        # Rendering tests need an EGL context the hosted runner lacks.
+        run: uv run pytest -m "genesis and not render" -q
 
   ros2-tests:
     name: ros2-tests (rclpy mocked, py${{ matrix.python-version }})
