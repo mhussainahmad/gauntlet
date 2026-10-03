@@ -1,6 +1,6 @@
 """Latin Hypercube Sampling (LHS) sampler — McKay/Beckman/Conover (1979).
 
-See ``docs/polish-exploration-lhs-sampling.md`` for the design rationale
+See ``docs/design/lhs-sampling.md`` for the design rationale
 and the unit-cube → axis-value mapping rules.
 
 The algorithm in six lines:

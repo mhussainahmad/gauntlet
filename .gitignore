@@ -52,21 +52,3 @@ benchmarks/local/
 *.pt
 *.pth
 *.safetensors
-
-# Local agent tooling (runtime state, never project code).
-# Contributors using per-developer agent tooling should prefer adding
-# these to their user-global gitignore (~/.config/git/ignore) — the
-# project does not care which tool you use.
-*.vector.db
-.swarm/
-.mcp.json
-
-# Per-developer tooling sandboxes co-located with the repo. The repo
-# does not depend on any of these; they belong in the user's
-# global ~/.config/git/ignore but are listed here so a fresh clone
-# from a workstation that uses them produces a clean ``git status``.
-.a5c/
-.obsidian/
-my-wiki/
-.code-review-graph/
-.remember/

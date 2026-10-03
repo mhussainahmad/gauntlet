@@ -131,7 +131,7 @@ the first camera so single-view consumers (the runner's video
 recorder, OpenVLA-style adapters) keep working unchanged. The
 single-camera default (`cameras=None`) is byte-identical to the
 phase-1 contract — see
-[`docs/polish-exploration-multi-camera.md`](./docs/polish-exploration-multi-camera.md)
+[`docs/design/multi-camera.md`](./docs/design/multi-camera.md)
 for the full design and
 [`examples/evaluate_multi_camera.py`](./examples/evaluate_multi_camera.py)
 for a worked example.
@@ -195,7 +195,7 @@ cover. See
 [`examples/suites/tabletop-lhs-smoke.yaml`](./examples/suites/tabletop-lhs-smoke.yaml)
 and [`examples/evaluate_random_policy_lhs.py`](./examples/evaluate_random_policy_lhs.py)
 for an LHS end-to-end demo, and
-[`docs/polish-exploration-sobol-sampler.md`](./docs/polish-exploration-sobol-sampler.md)
+[`docs/design/sobol-sampler.md`](./docs/design/sobol-sampler.md)
 for the Sobol design note (discrepancy targets, direction-number
 table, skip rationale).
 
@@ -432,7 +432,7 @@ The legacy `obs["image"]` key stays populated as an alias to the
 recorder, OpenVLA-style adapters) keep working unchanged. The
 single-camera default (`cameras=None`) is byte-identical to the
 phase-1 contract. See
-[`docs/polish-exploration-multi-camera.md`](./docs/polish-exploration-multi-camera.md)
+[`docs/design/multi-camera.md`](./docs/design/multi-camera.md)
 for the full design and
 [`examples/evaluate_multi_camera.py`](./examples/evaluate_multi_camera.py)
 for a worked example.
@@ -465,7 +465,7 @@ stays operational. See
 [`docs/plugin-development.md`](./docs/plugin-development.md) for the
 full how-to (writing a Policy / Env plugin, constructor-argument
 patterns, testing) and
-[`docs/polish-exploration-plugin-system.md`](./docs/polish-exploration-plugin-system.md)
+[`docs/design/plugin-system.md`](./docs/design/plugin-system.md)
 for the design note (precedence rules, lazy discovery, collision
 handling).
 

@@ -1,6 +1,6 @@
 """Tests for :class:`gauntlet.runner.cache.EpisodeCache` and Runner integration.
 
-See ``docs/polish-exploration-incremental-cache.md`` for the design.
+See ``docs/design/incremental-cache.md`` for the design.
 The cache is opt-in: ``Runner(cache_dir=None)`` (the default) MUST be
 byte-identical to pre-PR behaviour. The Runner-level integration tests
 live in this same module so the no-cache regression test sits next to

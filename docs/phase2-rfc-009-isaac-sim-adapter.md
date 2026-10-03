@@ -2,13 +2,11 @@
 
 - **Status**: Draft
 - **Phase**: 2, Task 9 (`GAUNTLET_SPEC.md` §7: "Additional simulators: Isaac Sim, Genesis, PyBullet adapters.")
-- **Author**: implementation agent
 - **Date**: 2026-04-24
 - **Supersedes**: n/a
 - **References**:
   - `docs/phase2-rfc-005-pybullet-adapter.md` (`GauntletEnv` Protocol + registry, state-only-first-cut template).
   - `docs/phase2-rfc-007-genesis-adapter.md` (most recent simulator-adapter RFC; this RFC mirrors its structure).
-  - `docs/phase2-exploration-task9-isaac-sim-adapter.md` (the measurement pass that constrains §4 / §6 / §8).
 
 ---
 
@@ -528,7 +526,7 @@ Each commit passes `ruff check` + `ruff format --check` +
 `mypy --strict` (without the extra installed) + the narrow pytest
 slice it adds.
 
-1. Exploration doc (`docs/phase2-exploration-task9-isaac-sim-adapter.md`). **Landed.**
+1. Measurement pass (backend API survey and install landscape). **Done.**
 2. RFC (this document).
 3. `pyproject.toml`: `[isaac]` extra (`isaacsim>=5.0,<6`), `isaac-dev`
    dev group, `isaac` pytest marker, `[[tool.mypy.overrides]]` for

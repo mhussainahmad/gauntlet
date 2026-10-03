@@ -534,7 +534,7 @@ class Suite(BaseModel):
     episodes_per_cell: int
     seed: int | None = None
     axes: dict[str, AxisSpec]
-    # See ``docs/polish-exploration-lhs-sampling.md``. Default preserves
+    # See ``docs/design/lhs-sampling.md``. Default preserves
     # the historical Cartesian-grid enumeration for every existing YAML.
     # Field type intentionally widened from :data:`SamplingMode` to
     # plain ``str`` so third-party samplers registered under the
@@ -868,7 +868,7 @@ class Suite(BaseModel):
     #   sequence; ``n_samples`` rows, deterministic from
     #   :attr:`seed`-independent (Sobol is fully deterministic; the
     #   sampler ignores the RNG it receives). See
-    #   ``docs/polish-exploration-sobol-sampler.md``.
+    #   ``docs/design/sobol-sampler.md``.
     # * ``"adversarial"`` — :class:`AdversarialSampler`, Thompson-
     #   sampling bandit over per-bin Beta posteriors fitted from
     #   :attr:`pilot_report`. ANTI-FEATURE: biases coverage toward

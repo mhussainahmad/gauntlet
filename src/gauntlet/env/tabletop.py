@@ -1449,7 +1449,7 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
 def _validate_camera_specs(specs: tuple[CameraSpec, ...]) -> None:
     """Reject invalid CameraSpec lists at construction time.
 
-    See ``docs/polish-exploration-multi-camera.md`` §2 — this enforces
+    See ``docs/design/multi-camera.md`` §2 — this enforces
     the public contract pinned in the RFC: non-empty unique names,
     positive image dimensions. The pose tuple is structurally typed
     by NamedTuple; no range check applies.

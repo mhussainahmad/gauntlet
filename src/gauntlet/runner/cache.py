@@ -1,6 +1,6 @@
 """File-based Episode cache for incremental rerun acceleration.
 
-See ``docs/polish-exploration-incremental-cache.md`` for the design and
+See ``docs/design/incremental-cache.md`` for the design and
 the open-question rationale.
 
 Cache key composition (B-40)::

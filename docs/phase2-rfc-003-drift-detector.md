@@ -2,7 +2,6 @@
 
 - **Status**: Draft
 - **Phase**: 2, Task 3 (third item in `GAUNTLET_SPEC.md` §7: "Runtime distribution-shift detector: small autoencoder on observations, flags when deployed obs drift off-manifold. Action entropy monitoring.")
-- **Author**: innovator / architect agent
 - **Date**: 2026-04-22
 - **Supersedes**: n/a
 - **References**: `docs/phase2-rfc-001-huggingface-policy.md` (extras-group pattern, torch-free core rule, `render_in_obs` kwarg); `docs/phase2-rfc-002-lerobot-smolvla.md` (per-capability extras precedent).
@@ -466,7 +465,7 @@ All torch-requiring tests live under `tests/monitor/` and are marked `@pytest.ma
 
 ## 12. Open questions
 
-Each has a reasonable default in parentheses so the implementation agent is not blocked.
+Each has a reasonable default in parentheses so implementation is not blocked.
 
 - **OOD threshold convention.** Is an episode "OOD" when `reconstruction_error_mean > reference_p95`, `reference_p99`, or `reference_mean + 3σ`? (**Default: `reference_p95`. Documented as the bar on the bar chart; the per-episode table lets users see the raw number and decide for themselves. Surfacing a single threshold in `drift.json` (rather than three) keeps the schema small; users with stricter requirements re-score in Python from `per_episode`.**)
 - **Image AE when `render_in_obs=False`.** `monitor train --mode image` against a trajectory dir that has no `obs_image` arrays — clean error or fall-back to state mode? (**Default: clean error. Falling back silently violates §6's "never hide failures". Error message points at `gauntlet run --render-in-obs` as the fix.**)

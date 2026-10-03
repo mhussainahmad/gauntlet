@@ -1,4 +1,4 @@
-# Polish exploration: type tightening — eliminate `Any` outside FFI overrides
+# Design note: type tightening — eliminate `Any` outside FFI overrides
 
 Status: shipped (this branch — Phase 2.5 follow-up — adds the
 project-wide `disallow_any_explicit` ratchet via per-module overrides,
@@ -174,10 +174,9 @@ under §3a (pydantic synthetic) and §3b (FFI seam).
 
 ## 6. Out of scope
 
-- `src/gauntlet/cli.py` — sibling agent owns it under the
+- `src/gauntlet/cli.py` — under concurrent change on the
   `polish/gauntlet-diff` branch. Eight `Any` leaks remain there; this
-  PR does not touch `cli.py`. The sibling agent can choose to address
-  them separately or leave them.
+  PR does not touch `cli.py`, and they can be addressed separately.
 - The `tests/` tree — hypothesis `@given(...)`-decorated test
   functions are typed `Callable[..., None]` by the mypy plugin. This
   is `disallow_any_decorated` territory and is deferred.
@@ -200,7 +199,7 @@ every commit.
 ## 8. Post-purge audit result
 
 Running the §2 invocation after the purge (against the rebased branch
-which now includes the sibling's `polish/gauntlet-diff` PR #29):
+which now includes the `polish/gauntlet-diff` PR #29):
 
 ```
 $ uv run mypy --warn-return-any --disallow-any-explicit src/gauntlet
@@ -208,14 +207,14 @@ $ uv run mypy --warn-return-any --disallow-any-explicit src/gauntlet
 Found 145 errors in 31 files (checked 61 source files)
 ```
 
-The pre-PR baseline (against `aa56142`, the commit before sibling
-PR #29 merged) was 145 across 33 files (58 checked). Sibling PR #29
+The pre-PR baseline (against `aa56142`, the commit before
+PR #29 merged) was 145 across 33 files (58 checked). PR #29
 added 4 new leaks (all in `src/gauntlet/diff/diff.py`) and shifted
 `cli.py` line numbers by +1 without changing its leak count. This PR
 purged 4 leaks in pure-Python helpers, so:
 
 ```
-145 (post-rebase) = 145 (baseline) + 4 (sibling diff/) − 4 (this PR)
+145 (post-rebase) = 145 (baseline) + 4 (PR #29 diff/) − 4 (this PR)
 ```
 
 The remaining 145 are all documented as either §3a (pydantic
@@ -229,12 +228,12 @@ synthetic) or §3b (FFI seam):
 | `policy/huggingface.py` | 13 | §3b — HuggingFace FFI |
 | `env/tabletop.py` | 13 | §3b — MuJoCo FFI |
 | `env/pybullet/tabletop_pybullet.py` | 10 | §3b — PyBullet FFI |
-| `cli.py` | 8 | §6 — sibling-owned, out of scope |
+| `cli.py` | 8 | §6 — concurrent branch, out of scope |
 | `env/base.py` | 6 | §3b — gymnasium Protocol |
 | `suite/loader.py` | 5 | §3b — yaml FFI |
 | `report/schema.py` | 5 | §3a — pydantic synthetic |
 | `env/registry.py` | 5 | §3b — `Callable[..., GauntletEnv]` |
-| `diff/diff.py` | 4 | §6 — sibling-owned, out of scope |
+| `diff/diff.py` | 4 | §6 — concurrent branch, out of scope |
 | `runner/worker.py` | 3 | §3b — `NDArray[Any]` + numpy stub + gymnasium info |
 | `ros2/recorder.py` | 3 | §3b — rclpy FFI |
 | `suite/schema.py` | 2 | §3a — pydantic synthetic |

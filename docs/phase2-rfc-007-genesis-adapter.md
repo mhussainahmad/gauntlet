@@ -2,7 +2,6 @@
 
 - **Status**: Draft
 - **Phase**: 2, Task 7 (`GAUNTLET_SPEC.md` §7: "Additional simulators: Isaac Sim, Genesis, PyBullet adapters.")
-- **Author**: architecture agent
 - **Date**: 2026-04-23
 - **Supersedes**: n/a
 - **References**:
@@ -10,7 +9,6 @@
   - `docs/phase2-rfc-003-drift-detector.md` (`[monitor]` extra — additive-torch precedent).
   - `docs/phase2-rfc-005-pybullet-adapter.md` (`GauntletEnv` Protocol + registry, state-only-first-cut template this RFC reuses).
   - `docs/phase2-rfc-006-pybullet-rendering.md` (shape of the follow-up rendering RFC this one defers to).
-  - `docs/phase2-exploration-task7-genesis-backend.md` (the measurement pass that constrains §4 / §5 / §6).
 
 ---
 
@@ -274,7 +272,7 @@ Default `lint-typecheck-test` job's `pytest` `-m` string extends to exclude `gen
 
 Mirrors RFC-005's step cadence to keep review easy. One commit per row, each passes `ruff check` + `ruff format --check` + `mypy --strict` (without the extras installed) + the narrow pytest slice it adds.
 
-1. Exploration doc (`docs/phase2-exploration-task7-genesis-backend.md`). **Landed.**
+1. Measurement pass (backend API survey and install landscape). **Done.**
 2. RFC (this document).
 3. `pyproject.toml`: add `[genesis]` extra, `genesis-dev` dev group, `genesis` pytest marker, `[[tool.mypy.overrides]]` for `genesis.*`, core `rich` ceiling bump `<15` → `<16`.
 4. `.github/workflows/ci.yml`: add `genesis-tests` job; extend the default job's `-m "not ..."` exclusion to include `genesis`.

@@ -1,4 +1,4 @@
-# Polish exploration — Latin-hypercube + Sobol perturbation sampling
+# Design note — Latin-hypercube + Sobol perturbation sampling
 
 Status: exploration. Targets `Suite.sampling: cartesian | latin_hypercube |
 sobol`. Scope: ship LHS, defer Sobol.

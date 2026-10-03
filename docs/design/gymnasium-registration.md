@@ -1,4 +1,4 @@
-# Polish exploration — Gymnasium env registration
+# Design note — Gymnasium env registration
 
 Status: exploration. Targets `gymnasium.make("gauntlet/Tabletop-v0")` and the
 three sibling backend ids. Scope: ship `gym.register(...)` plumbing for all

@@ -747,7 +747,7 @@ def run(
                 "looked up before dispatch — a hit returns the cached Episode "
                 "without re-rolling. Defaults to OFF (no cache lookup, "
                 "byte-identical to no-cache runs). See "
-                "docs/polish-exploration-incremental-cache.md."
+                "docs/design/incremental-cache.md."
             ),
         ),
     ] = None,

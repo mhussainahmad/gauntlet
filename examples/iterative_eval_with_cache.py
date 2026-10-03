@@ -18,7 +18,7 @@ For the smoke MuJoCo Tabletop env the gain is small (rollouts are
 already millisecond-cheap); for VLA policies (`evaluate_smolvla.py`,
 `evaluate_openvla.py`) where per-rollout time is 30+ seconds, the
 same opt-in flag turns a 10-hour rerun into a sub-second cache hit.
-See ``docs/polish-exploration-incremental-cache.md`` §1 for the
+See ``docs/design/incremental-cache.md`` §1 for the
 domain-win analysis.
 """
 

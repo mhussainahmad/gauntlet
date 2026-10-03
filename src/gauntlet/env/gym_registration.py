@@ -1,6 +1,6 @@
 """Register gauntlet env adapters with the gymnasium global registry.
 
-See ``docs/polish-exploration-gymnasium-registration.md`` for the full
+See ``docs/design/gymnasium-registration.md`` for the full
 rationale. Summary:
 
 * The four shipped adapters (MuJoCo / PyBullet / Genesis / Isaac Sim)

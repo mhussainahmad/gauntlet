@@ -38,7 +38,7 @@ class CameraSpec(NamedTuple):
     ``spec.name -> rendered frame``. The legacy ``obs["image"]`` key
     is also populated, aliased to the **first** camera's frame, so
     consumers that read the single-camera surface keep working
-    unchanged. See ``docs/polish-exploration-multi-camera.md`` §2 for
+    unchanged. See ``docs/design/multi-camera.md`` §2 for
     the full contract.
 
     Attributes

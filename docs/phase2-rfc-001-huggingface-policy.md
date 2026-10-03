@@ -2,7 +2,6 @@
 
 - **Status**: Draft
 - **Phase**: 2, Task 1 (first item in `GAUNTLET_SPEC.md` §7)
-- **Author**: innovator / architect agent
 - **Date**: 2026-04-22
 - **Supersedes**: n/a
 
@@ -318,7 +317,7 @@ That's the only core change. Everything else lives under `src/gauntlet/policy/hu
 
 ## 7. Open questions
 
-Things the implementation agent must resolve at code time; each has a reasonable default in parentheses so the implementer is not blocked.
+Things the implementer must resolve at code time; each has a reasonable default in parentheses so the implementer is not blocked.
 
 - **Action unnormalisation → TabletopEnv scaling.** OpenVLA's `unnorm_key="bridge_orig"` returns actions in BridgeData V2's world-frame-delta scale (metres). `TabletopEnv` expects `[-1, 1]`-bounded per-step twist commands scaled by `MAX_LINEAR_STEP = 0.05 m`. Does the adapter (a) clip, (b) rescale by dividing by `MAX_LINEAR_STEP`, or (c) pass through and let the env clip? (**Default: (c) pass-through with a warning when any coordinate exceeds `[-1, 1]` — matches "don't hide failures" from §6.**)
 - **Gripper convention.** OpenVLA emits `gripper ∈ [0, 1]` (0 = open, 1 = close). `TabletopEnv` takes `+1 = open / -1 = close` with a snap. Map via `action[6] = 1.0 - 2.0 * action[6]`? (**Default: yes, documented in the docstring; flagged for real-weight validation.**)

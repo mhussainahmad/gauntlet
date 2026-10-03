@@ -2,7 +2,6 @@
 
 - **Status**: Draft
 - **Phase**: 2, Task 2 (follow-up to RFC-001 `HuggingFacePolicy`)
-- **Author**: innovator / architect agent
 - **Date**: 2026-04-22
 - **Supersedes**: n/a
 - **References**: `docs/phase2-rfc-001-huggingface-policy.md` (OpenVLA-shape adapter; defers SmolVLA explicitly in its §2 non-goals).
@@ -447,7 +446,7 @@ All lerobot tests live under `tests/lerobot/` and are marked `@pytest.mark.lerob
 
 ## 7. Open questions
 
-Each has a reasonable default in parentheses so the implementation agent is not blocked.
+Each has a reasonable default in parentheses so implementation is not blocked.
 
 - **How much of the `build_inference_frame` / `make_pre_post_processors` / dequeue pipeline is hidden inside the adapter?** Hiding everything is ergonomic but couples us to lerobot's current factory signatures, which are *not* API-stable (April 2026: `build_inference_frame` lives in `policy/utils.py`; earlier releases had it elsewhere). (**Default: hide behind sensible defaults, but expose both `preprocessor_overrides` and `postprocessor_overrides` as explicit kwargs so users can patch around breaking lerobot changes without forking Gauntlet.**)
 - **Does `preprocessor_overrides={"empty_cameras": 2}` actually replace the camera-duplication path?** The `empty_cameras` config field exists on `SmolVLAConfig`, but the preprocessor's handling needs verification against lerobot main at implementation time. (**Default: do NOT rely on `empty_cameras`; keep the explicit camera-duplication in `_build_frame`. Revisit if users complain.**)
