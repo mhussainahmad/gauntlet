@@ -173,3 +173,9 @@ def test_arbitrary_text_either_parses_or_raises_override_error(spec: str) -> Non
     name, value = result
     assert isinstance(name, str)
     assert isinstance(value, float)
+
+
+@pytest.mark.parametrize("raw", ["nan", "NaN", "inf", "-inf", "Infinity"])
+def test_non_finite_rhs_raises_override_error(raw: str) -> None:
+    with pytest.raises(OverrideError, match="finite"):
+        parse_override(f"lighting_intensity={raw}")

@@ -9,6 +9,11 @@ from `0.2.0` onward (see `docs/stability.md`).
 ## [Unreleased]
 
 ### Added
+- `env: tabletop-push` (B-45): planar pushing on the tabletop scene.
+  No grasp, colliding end-effector, success only once the cube settles
+  inside the target. Shares every tabletop axis. Ships with a
+  closed-loop reference controller (`--policy scripted-push`) and
+  `examples/suites/tabletop-push-smoke.yaml`.
 - `image_attack`, `color_shift_synthetic` and `instruction_paraphrase`
   now run from a suite through `gauntlet run` / `Runner`. Previously the
   wrappers existed but the runner rejected the axes ("unknown
@@ -17,6 +22,8 @@ from `0.2.0` onward (see `docs/stability.md`).
   `examples/suites/tabletop-sensor-language.yaml`.
 
 ### Fixed
+- `gauntlet replay --override axis=NaN` (or `inf`) was accepted; non-finite
+  override values are now rejected.
 - Stacking two of the observation wrappers dropped the backend's own
   axes: each wrapper read `type(env).AXIS_NAMES`, which is empty on a
   wrapper class.

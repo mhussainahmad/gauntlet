@@ -16,6 +16,7 @@ from gauntlet.policy.scripted import (
     DEFAULT_PICK_AND_PLACE_TRAJECTORY as DEFAULT_PICK_AND_PLACE_TRAJECTORY,
 )
 from gauntlet.policy.scripted import ScriptedPolicy as ScriptedPolicy
+from gauntlet.policy.scripted import ScriptedPushPolicy as ScriptedPushPolicy
 
 if TYPE_CHECKING:  # pragma: no cover — re-export is dynamic, see __getattr__ below.
     from gauntlet.policy.huggingface import HuggingFacePolicy as HuggingFacePolicy
@@ -33,6 +34,7 @@ __all__ = [
     "ResettablePolicy",
     "SamplablePolicy",
     "ScriptedPolicy",
+    "ScriptedPushPolicy",
     "resolve_policy_factory",
 ]
 

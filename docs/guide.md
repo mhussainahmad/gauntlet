@@ -7,6 +7,7 @@ detection, ROS 2, replay, video, dashboard, real-to-sim, plugins).
 - [Backends](#backends)
 - [Sampling strategies and fleet aggregation](#sampling-strategies-and-fleet-aggregation)
 - [Using a real VLA](#using-a-real-vla)
+- [Push task](#push-task)
 - [Sensor and language axes](#sensor-and-language-axes)
 - [Runtime drift detection](#runtime-drift-detection)
 - [ROS 2 integration](#ros-2-integration)
@@ -139,6 +140,28 @@ for the algorithm.
   [`examples/evaluate_smolvla_pybullet.py`](../examples/evaluate_smolvla_pybullet.py).
   Set `GAUNTLET_SUPPRESS_SMOLVLA_WARNING=1` to silence the runtime
   banner once you've confirmed the embodiment fits.
+
+## Push task
+
+`env: tabletop-push` (gym id `gauntlet/TabletopPush-v0`) is the
+tabletop scene with grasping turned off: the end-effector sphere
+collides, the cube moves only by contact, and success needs the cube to
+come to rest inside the target (planar speed below
+`TabletopPushEnv.SETTLE_SPEED`). A cube that slides through the target
+counts as a failure. Every tabletop axis applies unchanged.
+
+`--policy scripted-push` is a closed-loop reference controller (align
+behind the cube on the cube-to-target line, descend, push, slow down
+near the goal). It solves the unperturbed scene; on
+[`examples/suites/tabletop-push-smoke.yaml`](../examples/suites/tabletop-push-smoke.yaml)
+it succeeds on every rollout up to 100 ms of control latency and
+drops to 20% at 200 ms, where the pick-and-place reference controller
+still manages 47% (see [field robustness](./field-robustness.md)).
+Contact-driven tasks are much less tolerant of stale commands.
+
+`gauntlet compare` refuses to compare a push run against a
+pick-and-place run unless `--allow-cross-backend` is passed: the two
+measure different tasks.
 
 ## Sensor and language axes
 

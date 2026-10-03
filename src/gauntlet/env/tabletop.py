@@ -398,6 +398,12 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         # did, so the collision / near-collision / peak-force telemetry
         # skips them. Re-captured on every reset.
         self._rest_contact_pairs: frozenset[tuple[int, int]] = frozenset()
+        # Geom pairs whose contact is the task itself rather than an
+        # incident (e.g. the end-effector pushing the cube in
+        # :class:`~gauntlet.env.tabletop_push.TabletopPushEnv`). Skipped
+        # by the same telemetry. Empty for pick-and-place, where the
+        # grasp is kinematic and makes no contact.
+        self._expected_contact_pairs: frozenset[tuple[int, int]] = frozenset()
 
         # B-02 behavioural-metrics telemetry: per-control-step scratch
         # slots populated inside :meth:`step` and surfaced via
@@ -1085,6 +1091,19 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
 
         return self._build_obs(), self._build_info()
 
+    def _is_success(self, cube_pos: NDArray[np.float64]) -> bool:
+        """Success predicate, checked after every step (latches once true).
+
+        Pick-and-place: cube XY within :attr:`TARGET_RADIUS` of the
+        target. Subclasses with a different task override this.
+        """
+        return self._xy_distance(cube_pos, self._target_pos) <= self.TARGET_RADIUS
+
+    def _is_ignored_contact(self, contact: Any) -> bool:
+        """True for contacts the safety / behaviour telemetry should skip."""
+        pair = self._contact_pair(contact)
+        return pair in self._rest_contact_pairs or pair in self._expected_contact_pairs
+
     @staticmethod
     def _contact_pair(contact: Any) -> tuple[int, int]:
         """Order-independent ``(geom_a, geom_b)`` key for a MuJoCo contact."""
@@ -1169,7 +1188,7 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         # 5. Bookkeeping + success.
         self._step_count += 1
         cube_pos = np.array(self._data.xpos[self._cube_body_id], dtype=np.float64)
-        if self._xy_distance(cube_pos, self._target_pos) <= self.TARGET_RADIUS:
+        if self._is_success(cube_pos):
             self._success = True
 
         # B-30 safety telemetry. The MuJoCo definition is the portable
@@ -1194,7 +1213,7 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         ncon_now = sum(
             1
             for cid in range(int(self._data.ncon))
-            if self._contact_pair(self._data.contact[cid]) not in self._rest_contact_pairs
+            if not self._is_ignored_contact(self._data.contact[cid])
         )
         self._last_step_n_collisions_delta = max(ncon_now - self._prev_ncon, 0)
         self._prev_ncon = ncon_now
@@ -1258,7 +1277,7 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         force_buf = np.zeros(6, dtype=np.float64)
         for cid in range(ncon_active):
             contact = self._data.contact[cid]
-            if self._contact_pair(contact) in self._rest_contact_pairs:
+            if self._is_ignored_contact(contact):
                 continue
             if float(contact.dist) < near_thresh:
                 near_count += 1
