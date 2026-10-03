@@ -17,12 +17,11 @@ See [`GAUNTLET_SPEC.md`](./GAUNTLET_SPEC.md) for the full design.
 
 ## See a real report before installing
 
-A public reference benchmark lives at
-**<https://mhussainahmad.github.io/gauntlet/>** — two policies on the
-bundled smoke suite, regenerated on every release, with the
-`gauntlet compare` and `gauntlet diff` deltas surfaced. Open the
-baseline / regressed `report.html` to see what the failure-cluster-first
-layout actually looks like.
+Every [GitHub Release](https://github.com/mhussainahmad/gauntlet/releases/latest)
+ships a `reference-benchmark.zip` — two policies on the bundled smoke
+suite, with the `gauntlet compare` and `gauntlet diff` deltas surfaced.
+Unzip it and open the baseline / regressed `report.html` to see what the
+failure-cluster-first layout actually looks like.
 
 To regenerate it locally:
 
