@@ -17,8 +17,10 @@ under 50 ms each.
 
 from __future__ import annotations
 
+import sys
 import warnings
 from collections.abc import Iterator, Mapping
+from pathlib import Path
 from typing import Any, cast
 from unittest.mock import patch
 
@@ -274,3 +276,24 @@ def test_resolve_policy_factory_random_keeps_action_dim_partial(
     assert isinstance(policy, RandomPolicy)
     # The action_dim default is wired in (the partial would crash if not).
     assert policy.action_dim == 7
+
+
+def test_module_spec_resolves_from_current_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--policy my_policy:make`` finds ``./my_policy.py``.
+
+    The ``gauntlet`` console script does not put the working directory on
+    ``sys.path`` (only ``python -m`` does), so a policy module sitting
+    next to the user used to fail with "No module named ...".
+    """
+    (tmp_path / "gauntlet_cwd_policy_probe.py").write_text(
+        "from gauntlet.policy import RandomPolicy\n"
+        "def make():\n"
+        "    return RandomPolicy(action_dim=7)\n"
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "path", [p for p in sys.path if p not in ("", str(tmp_path))])
+    monkeypatch.delitem(sys.modules, "gauntlet_cwd_policy_probe", raising=False)
+    factory = resolve_policy_factory("gauntlet_cwd_policy_probe:make")
+    assert callable(factory)

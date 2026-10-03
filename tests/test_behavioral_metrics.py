@@ -131,6 +131,57 @@ def test_tabletop_step_info_publishes_behavior_keys() -> None:
         env.close()
 
 
+def test_tabletop_resting_contacts_do_not_count_as_near_collisions() -> None:
+    """The cube resting on the table is not a near-collision.
+
+    Regression: every active contact counted, so an idle episode piled
+    up ~4 near-collisions per step and a peak force equal to the cube's
+    weight, swamping the signal the column is meant to carry.
+    """
+    env = TabletopEnv(max_steps=4)
+    try:
+        env.reset(seed=5)
+        assert env._data.ncon > 0, "precondition: cube rests on the table"
+        _, _, _, _, info = env.step(np.zeros(7, dtype=np.float64))
+        assert info["behavior_near_collision_delta"] == 0
+        assert info["behavior_peak_contact_force"] == 0.0
+    finally:
+        env.close()
+
+
+def test_tabletop_new_contact_counts_as_near_collision() -> None:
+    """A contact that was not there at reset (cube on a distractor) counts."""
+    import mujoco
+
+    env = TabletopEnv(max_steps=6)
+    try:
+        env.set_perturbation("distractor_count", 1.0)
+        env.reset(seed=5)
+        model, data = env._model, env._data
+        gid = env._distractor_geom_ids[0]
+        adr = env._cube_qpos_adr
+        data.qpos[adr : adr + 3] = data.geom_xpos[gid] + np.array(
+            [0.0, 0.0, float(model.geom_size[gid][2]) + 0.03]
+        )
+        mujoco.mj_forward(model, data)
+        near = 0
+        peak = 0.0
+        collisions = 0
+        for _ in range(3):
+            _, _, _, _, info = env.step(np.zeros(7, dtype=np.float64))
+            near += info["behavior_near_collision_delta"]
+            peak = max(peak, info["behavior_peak_contact_force"])
+            collisions += info["safety_n_collisions_delta"]
+        # The distractor is solid: the cube comes to rest on top of it,
+        # not at table height.
+        assert data.qpos[adr + 2] > env._CUBE_REST_Z + 0.01
+        assert near > 0
+        assert peak > 0.0
+        assert collisions > 0
+    finally:
+        env.close()
+
+
 def test_tabletop_episode_carries_behavioral_metrics() -> None:
     """End-to-end: a MuJoCo rollout produces non-None behavioural fields.
 

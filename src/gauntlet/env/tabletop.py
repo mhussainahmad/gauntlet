@@ -193,11 +193,9 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
     # ``data.contact[i].dist`` is below this distance counts toward the
     # per-step ``info["behavior_near_collision_delta"]``. 1cm is the
     # RoboEval-style "the policy was close to a contact" bar; the unit
-    # is metres (MuJoCo's native unit). Steady-state contacts (the
-    # cube resting on the table) sit at ``dist = 0`` and DO tick the
-    # counter — that is acceptable because the failure-cluster table
-    # cares about the *delta* across configurations, not the absolute
-    # value, and the baseline is the same across the dataset.
+    # is metres (MuJoCo's native unit). Contacts between geom pairs
+    # already touching at reset (the cube resting on the table) are
+    # excluded, so the count reflects contacts the rollout created.
     _NEAR_COLLISION_DIST: float = 0.01
 
     # Randomisation ranges (conservative — keep cube & target on the table).
@@ -391,10 +389,15 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         self._last_step_n_collisions_delta: int | None = None
         self._last_step_joint_limit_violation: bool | None = None
         self._last_step_workspace_excursion: bool | None = None
-        # Previous-step contact count for the ``ncon``-delta definition.
-        # Reset to 0 in :meth:`reset` so the first step's delta is the
-        # full count of new contacts since the bare scene.
+        # Previous-step count of non-resting contacts for the
+        # ``ncon``-delta definition.
         self._prev_ncon: int = 0
+        # Geom pairs already in contact when :meth:`reset` settles the
+        # scene (cube on table, distractors on table). Contacts between
+        # these pairs are the scene at rest, not something the policy
+        # did, so the collision / near-collision / peak-force telemetry
+        # skips them. Re-captured on every reset.
+        self._rest_contact_pairs: frozenset[tuple[int, int]] = frozenset()
 
         # B-02 behavioural-metrics telemetry: per-control-step scratch
         # slots populated inside :meth:`step` and surfaced via
@@ -590,8 +593,11 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         m.geom_matid[cube_g] = int(self._baseline["cube_geom_matid"][0])
         for i, gid in enumerate(d_ids):
             m.geom_rgba[gid] = self._baseline["distractor_rgba"][i]
-            m.geom_contype[gid] = int(self._baseline["distractor_contype"][i])
-            m.geom_conaffinity[gid] = int(self._baseline["distractor_conaffinity"][i])
+            self._set_geom_collision(
+                gid,
+                int(self._baseline["distractor_contype"][i]),
+                int(self._baseline["distractor_conaffinity"][i]),
+            )
         # B-06 — restore object-swap geom visibility / collision so a
         # prior episode's swap class cannot leak into the next reset.
         # Cube (index 0) returns to visible + colliding; alts return to
@@ -600,6 +606,23 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
             m.geom_rgba[gid] = self._baseline["object_swap_rgba"][i]
             m.geom_contype[gid] = int(self._baseline["object_swap_contype"][i])
             m.geom_conaffinity[gid] = int(self._baseline["object_swap_conaffinity"][i])
+
+    def _set_geom_collision(self, gid: int, contype: int, conaffinity: int) -> None:
+        """Toggle a single-geom body's collision bits, body masks included.
+
+        MuJoCo's broadphase first filters on ``body_contype`` /
+        ``body_conaffinity``, which the compiler fills as the OR over the
+        body's geoms. Flipping only ``geom_contype`` at runtime therefore
+        leaves a body that compiled non-colliding invisible to collision
+        detection. Each distractor slot is one geom on its own body, so
+        the body masks can simply mirror the geom's.
+        """
+        m = self._model
+        m.geom_contype[gid] = contype
+        m.geom_conaffinity[gid] = conaffinity
+        bid = int(m.geom_bodyid[gid])
+        m.body_contype[bid] = contype
+        m.body_conaffinity[bid] = conaffinity
 
     # ---------------------------------------------------------- perturbation
 
@@ -860,12 +883,14 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
                     base_rgba = self._baseline["distractor_rgba"][i].copy()
                     base_rgba[3] = 1.0
                     m.geom_rgba[gid] = base_rgba
-                    m.geom_contype[gid] = 1
-                    m.geom_conaffinity[gid] = 1
+                    self._set_geom_collision(gid, 1, 1)
                 else:
                     m.geom_rgba[gid] = self._baseline["distractor_rgba"][i]
-                    m.geom_contype[gid] = int(self._baseline["distractor_contype"][i])
-                    m.geom_conaffinity[gid] = int(self._baseline["distractor_conaffinity"][i])
+                    self._set_geom_collision(
+                        gid,
+                        int(self._baseline["distractor_contype"][i]),
+                        int(self._baseline["distractor_conaffinity"][i]),
+                    )
         elif name == "camera_extrinsics":
             # B-42 — index into the active extrinsics registry. The
             # apply branch reads the structured 6-tuple and composes
@@ -1035,11 +1060,10 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         self._last_step_actuator_energy = None
         self._last_step_torque_norm = None
 
-        # B-30: same treatment for the safety telemetry. ``_prev_ncon``
-        # resets to 0 so the first step's contact-count delta is the
-        # full count of new contacts since the bare scene; per-step
+        # B-30: same treatment for the safety telemetry. Per-step
         # scratch slots stay ``None`` until the first :meth:`step`
-        # populates them.
+        # populates them. The resting-contact set is captured after
+        # ``mj_forward`` below.
         self._last_step_n_collisions_delta = None
         self._last_step_joint_limit_violation = None
         self._last_step_workspace_excursion = None
@@ -1054,8 +1078,18 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
 
         # Populate body_xpos / site_xpos before we read them for the obs.
         mujoco.mj_forward(self._model, self._data)
+        self._rest_contact_pairs = frozenset(
+            self._contact_pair(self._data.contact[cid]) for cid in range(int(self._data.ncon))
+        )
+        self._prev_ncon = 0
 
         return self._build_obs(), self._build_info()
+
+    @staticmethod
+    def _contact_pair(contact: Any) -> tuple[int, int]:
+        """Order-independent ``(geom_a, geom_b)`` key for a MuJoCo contact."""
+        g1, g2 = int(contact.geom1), int(contact.geom2)
+        return (g1, g2) if g1 <= g2 else (g2, g1)
 
     def step(
         self,
@@ -1143,10 +1177,11 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         # this differently or not at all):
         #
         # * ``ncon`` delta — count of *new* contacts since the previous
-        #   step. Steady-state contacts (cube on table) do not tick the
-        #   counter; gripper poking a distractor or cube falling off
-        #   does. Clamped at 0 — a contact that resolved (object lifted
-        #   off) is not a "negative collision".
+        #   step, ignoring geom pairs already touching at reset. Setting
+        #   the cube back on the table does not tick the counter; the
+        #   cube hitting a distractor or falling off the table does.
+        #   Clamped at 0 — a contact that resolved (object lifted off)
+        #   is not a "negative collision".
         # * Joint-limit excursion — any joint with ``jnt_range``
         #   bounded that has its qpos outside the bounds. The
         #   tabletop's mocap-driven scene currently has no bounded
@@ -1156,7 +1191,11 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         # * Workspace excursion — end-effector mocap pos outside the
         #   table half-extents (``±_TABLE_HALF_X / Y``). Z is not
         #   checked (the EE legitimately hovers above the table).
-        ncon_now = int(self._data.ncon)
+        ncon_now = sum(
+            1
+            for cid in range(int(self._data.ncon))
+            if self._contact_pair(self._data.contact[cid]) not in self._rest_contact_pairs
+        )
         self._last_step_n_collisions_delta = max(ncon_now - self._prev_ncon, 0)
         self._prev_ncon = ncon_now
         # Joint-limit check. ``jnt_range`` is shape (njnt, 2). A joint
@@ -1190,7 +1229,8 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         #
         # * ``near_collision_delta`` — integer number of *active* contacts
         #   whose penetration distance ``data.contact[i].dist`` is below
-        #   the 1cm near-collision threshold this step. ``mj_data.contact``
+        #   the 1cm near-collision threshold this step, skipping geom
+        #   pairs that were already in contact at reset. ``mj_data.contact``
         #   is the live array of currently-active contacts; we count each
         #   step independently so a brief brush-by ticks the counter once
         #   per step it lasts. The worker sums across the rollout to land
@@ -1218,6 +1258,8 @@ class TabletopEnv(gym.Env[_ObsType, _ActType]):
         force_buf = np.zeros(6, dtype=np.float64)
         for cid in range(ncon_active):
             contact = self._data.contact[cid]
+            if self._contact_pair(contact) in self._rest_contact_pairs:
+                continue
             if float(contact.dist) < near_thresh:
                 near_count += 1
             mujoco.mj_contactForce(self._model, self._data, cid, force_buf)

@@ -146,6 +146,39 @@ def test_xor_interaction_lifts_total_order() -> None:
     assert math.isclose(st_b, 1.0, abs_tol=1e-9)
 
 
+# 4b. Within-cell seed noise is not attributed to an irrelevant axis.
+#     axis_a sets the cell success rate (0.75 vs 0.25); axis_b does
+#     nothing. Each cell's episodes split 3/1 or 1/3, so part of Var(Y)
+#     is irreducible seed noise. That noise must not show up in
+#     axis_b's total-order index.
+def test_within_cell_noise_does_not_leak_into_irrelevant_axis_total_order() -> None:
+    eps: list[Episode] = []
+    cell = 0
+    for a in (0.0, 1.0):
+        for b in (0.0, 1.0):
+            outcomes = (True, True, True, False) if a < 0.5 else (True, False, False, False)
+            for r, ok in enumerate(outcomes):
+                eps.append(
+                    _ep(
+                        cell_index=cell,
+                        episode_index=r,
+                        success=ok,
+                        config={"axis_a": a, "axis_b": b},
+                    )
+                )
+            cell += 1
+    out = compute_sobol_indices(eps, ("axis_a", "axis_b"))
+    s_a, st_a = out["axis_a"]
+    s_b, st_b = out["axis_b"]
+    assert s_a is not None and st_a is not None
+    assert s_b is not None and st_b is not None
+    # Var(Y) = 0.25; cell means explain 0.0625 → axis_a owns that share.
+    assert math.isclose(s_a, 0.25, abs_tol=1e-9)
+    assert math.isclose(st_a, 0.25, abs_tol=1e-9)
+    assert math.isclose(s_b, 0.0, abs_tol=1e-9)
+    assert math.isclose(st_b, 0.0, abs_tol=1e-9)
+
+
 # 5. build_report integration: indices populate the Report and are
 #    keyed by axis name.
 def test_build_report_populates_sensitivity_indices() -> None:

@@ -538,9 +538,10 @@ FAIL-Detect (arxiv 2503.08558).
 `SensitivityIndex` (one row per axis) carries the closed-form
 Saltelli decomposition of the success-rate variance: per-axis first-
 order index `S1` (axis-alone variance contribution) and total-order
-index `ST` (axis + interactions). Computed from
-`Report.per_axis` weighted by per-axis-value population so the
-output reflects sweep imbalance. `report.sensitivity_indices` is the
+index `ST` (axis + interactions). Conditional means are weighted by
+per-bucket population so the output reflects sweep imbalance, and
+`ST` is measured against the between-cell variance so within-cell
+seed noise is not credited to any axis. `report.sensitivity_indices` is the
 field on `Report` populated by `build_report` when sufficient
 per-axis cell counts exist; pure numpy, no scipy. The `B-42 SO(3)`
 rotation axis carries a documented bias warning surfaced by the HTML
