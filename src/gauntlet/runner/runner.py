@@ -64,7 +64,8 @@ from pathlib import Path
 import numpy as np
 
 from gauntlet.env.base import GauntletEnv
-from gauntlet.env.registry import get_env_factory, registered_envs
+from gauntlet.env.post_render import wrap_env_factory
+from gauntlet.env.registry import registered_envs
 from gauntlet.policy.base import Policy
 from gauntlet.report.wilson import wilson_interval
 from gauntlet.runner.cache import EpisodeCache
@@ -385,9 +386,10 @@ class Runner:
         # what keeps ``gauntlet run suite.yaml`` honest — a suite declaring
         # ``env: tabletop-pybullet`` must produce :class:`PyBulletTabletopEnv`,
         # not the MuJoCo built-in.
-        env_factory = (
-            self._env_factory if self._env_factory is not None else get_env_factory(suite.env)
-        )
+        # Wrapper-implemented axes (image_attack, color_shift_synthetic,
+        # instruction_paraphrase) are layered on here; with none of them
+        # in the suite this is the plain factory / registry lookup.
+        env_factory = wrap_env_factory(suite, self._env_factory)
 
         # Ensure the trajectory dir exists exactly once on the main
         # process before any worker touches it, so a common parent (even

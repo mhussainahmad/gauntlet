@@ -6,6 +6,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project commits to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 from `0.2.0` onward (see `docs/stability.md`).
 
+## [Unreleased]
+
+### Added
+- `image_attack`, `color_shift_synthetic` and `instruction_paraphrase`
+  now run from a suite through `gauntlet run` / `Runner`. Previously the
+  wrappers existed but the runner rejected the axes ("unknown
+  perturbation axis"). Registry envs are built with `render_in_obs=True`
+  when an image axis is present. Example:
+  `examples/suites/tabletop-sensor-language.yaml`.
+
+### Fixed
+- Stacking two of the observation wrappers dropped the backend's own
+  axes: each wrapper read `type(env).AXIS_NAMES`, which is empty on a
+  wrapper class.
+- An active image attack or colour shift on an env that renders no
+  image now raises instead of silently passing frames through.
+
 ## [0.2.1] — 2026-10-03
 
 ### Fixed

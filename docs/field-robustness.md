@@ -82,11 +82,12 @@ global (bad state estimate), not tied to one condition.
 ## Extending it
 
 - **Image-conditioned policies.** Add `camera_extrinsics` (mount
-  vibration / drift) and pass `render_in_obs=True`. Post-render sensor
-  axes (`image_attack`: blur, JPEG, occlusion patches;
-  `color_shift_synthetic`: hue / saturation casts) are applied through
-  `gauntlet.env.image_attack.ImageAttackWrapper` and
-  `gauntlet.env.color_attack.ColorShiftWrapper` from the Python API.
+  vibration / drift) and the sensor axes `image_attack` (sensor noise,
+  JPEG artefacts, occlusion patch, camera dropout) and
+  `color_shift_synthetic` (hue / saturation casts). Declaring either in
+  the suite is enough: `gauntlet run` builds the env with rendering on
+  and applies the wrappers. See
+  [`examples/suites/tabletop-sensor-language.yaml`](../examples/suites/tabletop-sensor-language.yaml).
 - **Statistical power.** `gauntlet suite plan
   examples/suites/tabletop-field-conditions.yaml` reports the
   per-cell episode counts needed to detect a given success-rate gap.

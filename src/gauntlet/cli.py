@@ -42,6 +42,7 @@ from gauntlet.diff import (
     render_text,
 )
 from gauntlet.env.base import GauntletEnv
+from gauntlet.env.post_render import suite_needs_render
 from gauntlet.env.registry import get_env_factory
 from gauntlet.policy.registry import PolicySpecError, resolve_policy_factory
 from gauntlet.replay import OverrideError, parse_override, replay_one
@@ -408,6 +409,8 @@ def _episodes_to_dicts(episodes: list[Episode]) -> list[dict[str, _JsonValue]]:
 def _make_env_factory(
     suite_env: str,
     env_max_steps: int | None,
+    *,
+    render_in_obs: bool = False,
 ) -> Callable[[], GauntletEnv] | None:
     """Build an env factory honouring the hidden ``--env-max-steps`` knob.
 
@@ -428,9 +431,14 @@ def _make_env_factory(
     if env_max_steps is None:
         return None
     backend = get_env_factory(suite_env)
+    # Suites with image axes need rendered frames; the registry path in
+    # the Runner sets this itself, but this factory bypasses it.
+    kwargs: dict[str, object] = {"max_steps": env_max_steps}
+    if render_in_obs:
+        kwargs["render_in_obs"] = True
     return cast(
         "Callable[[], GauntletEnv]",
-        partial(backend, max_steps=env_max_steps),
+        partial(backend, **kwargs),
     )
 
 
@@ -916,7 +924,9 @@ def run(
 
     out.mkdir(parents=True, exist_ok=True)
 
-    env_factory = _make_env_factory(suite.env, env_max_steps)
+    env_factory = _make_env_factory(
+        suite.env, env_max_steps, render_in_obs=suite_needs_render(suite)
+    )
 
     # Resolve the cache configuration. ``--no-cache`` always wins (so a
     # wrapper script that bakes in --cache-dir can be opted out per
@@ -2388,7 +2398,9 @@ def replay(
     except PolicySpecError as exc:
         raise _fail(str(exc)) from exc
 
-    env_factory = _make_env_factory(suite.env, env_max_steps)
+    env_factory = _make_env_factory(
+        suite.env, env_max_steps, render_in_obs=suite_needs_render(suite)
+    )
 
     try:
         replayed = replay_one(
@@ -2645,7 +2657,9 @@ def repro(
     except PolicySpecError as exc:
         raise _fail(str(exc)) from exc
 
-    env_factory = _make_env_factory(suite.env, effective_max_steps)
+    env_factory = _make_env_factory(
+        suite.env, effective_max_steps, render_in_obs=suite_needs_render(suite)
+    )
 
     try:
         replayed = replay_one(

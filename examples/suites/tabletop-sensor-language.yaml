@@ -1,0 +1,34 @@
+# tabletop-sensor-language — sensor corruption and instruction wording.
+#
+# For image- and language-conditioned policies (OpenVLA, SmolVLA, pi0).
+# These three axes are applied as env wrappers; declaring them is all
+# that is needed — `gauntlet run` turns rendering on and layers the
+# wrappers (see gauntlet.env.post_render):
+#
+#   image_attack            0 none, 1 / 2 Gaussian noise (low / high),
+#                           3 JPEG quality 10, 4 8x8 occlusion patch,
+#                           5 drop one camera (multi-camera envs)
+#   color_shift_synthetic   0 none, 1 / 2 hue +/-30 deg, 3 / 4 saturation
+#                           x0.5 / x1.5, 5 greyscale
+#   instruction_paraphrase  index into the strings below; index 0 is the
+#                           phrasing the policy was trained on
+#
+# Grid: 3 * 3 * 3 = 27 cells, 4 episodes each = 108 rollouts.
+#
+#   gauntlet run examples/suites/tabletop-sensor-language.yaml \
+#     --policy my_vla:make_policy --out out/sensor/
+
+name: tabletop-sensor-language
+env: tabletop
+seed: 11
+episodes_per_cell: 4
+axes:
+  image_attack:
+    values: [0, 2, 3]
+  color_shift_synthetic:
+    values: [0, 1, 5]
+  instruction_paraphrase:
+    values:
+      - "pick up the cube and place it on the target"
+      - "grab the block and set it on the marker"
+      - "move the cube to the goal"
