@@ -238,6 +238,7 @@ trajectory-taxonomy = [
 # (``gsplat.rasterization``).
 realsim-gsplat = [
     "torch>=2.0,<3",
+    "pillow>=10.0,<12",
     "gsplat>=1.0,<2",
 ]
 
@@ -820,6 +821,9 @@ module = [
     # dtype/shape deliberately unfixed so any in-tree or third-party
     # renderer can satisfy it (see ``realsim/renderer.py`` docstring).
     "gauntlet.realsim.renderer",
+    # torch FFI seam: tensors cross the boundary untyped because torch
+    # is an optional extra the core type-check runs without.
+    "gauntlet.realsim.renderers.gsplat",
     # SPA index payload — the dict is the wire-format contract between
     # the Python builder and the JS consumer (``dashboard.js``).
     # Tightening the public ``dict[str, Any]`` to a recursive

@@ -1,8 +1,9 @@
 # Real-to-sim (Phase 3 T18) — input pipeline
 
 This document covers the **input pipeline** half of the real-to-sim
-scene-reconstruction story. The renderer half is intentionally
-deferred; see "Out of scope" below.
+scene-reconstruction story. Renderers live behind the
+`RealSimRenderer` Protocol; see the user guide for the two that ship
+(`nearest-frame`, and the smoke-test `gsplat` fit).
 
 Companion docs: `docs/phase3-rfc-021-real-to-sim-stub.md` (the RFC
 itself), `docs/api.md` (the Real-to-sim section of the API
@@ -26,12 +27,13 @@ Phase 3 Task 18 therefore lands the **input pipeline** plus the
 | Shipped  | `gauntlet.realsim.RealSceneInput` (raw capture-dir parse). |
 | Shipped  | `gauntlet.realsim.scene_to_camera_extrinsics` (B-42 axis bridge). |
 | Shipped  | `gauntlet.realsim.RealSimRenderer` Protocol + registry.    |
-| Deferred | Gaussian-splatting / NeRF / mesh renderer.                 |
+| Shipped  | `nearest-frame` and `gsplat` renderers (`gauntlet.realsim.renderers`). |
+| Future   | A production-quality reconstructor (densification, SH, etc.). |
 
-The renderer is tracked as a follow-up RFC. The seam is the named
-exception `gauntlet.realsim.RendererNotImplementedError` — any future
-helper that pretends to render must raise it until the renderer
-lands. A meta-test (`tests/test_realsim_scene_to_axis.py::test_no_accidental_renderer_landed`)
+Renderers live in `gauntlet.realsim.renderers` and register through
+the renderer registry, not `gauntlet.realsim`'s top-level surface.
+`gauntlet.realsim.RendererNotImplementedError` remains the seam for
+helpers in the input pipeline that must not render. A meta-test (`tests/test_realsim_scene_to_axis.py::test_no_accidental_renderer_landed`)
 walks `gauntlet.realsim.__all__` on every CI run and fails if a
 public symbol accidentally grows a working `render` method.
 
@@ -164,9 +166,9 @@ test `test_scene_to_camera_extrinsics_output_matches_extrinsics_value_schema`.
 
 The following are deliberately deferred:
 
-* **Renderer.** No `torch`, no CUDA, no training loop, no dataset
-  download. The seam is `RendererNotImplementedError`. A follow-up
-  RFC will land the first concrete renderer.
+* **Production reconstruction.** The shipped `gsplat` fit is a smoke
+  test. Densification, view-dependent colour and tuned schedules are
+  left to subclasses that load externally trained splats.
 * **Camera-calibration helper.** Users supply intrinsics + extrinsics
   via JSON; the gauntlet pipeline does not run COLMAP / OpenCV /
   Polycam internally.

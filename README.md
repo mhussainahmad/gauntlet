@@ -157,7 +157,7 @@ src/gauntlet/
   diff/        # Structured per-axis report deltas powering `gauntlet diff`
   aggregate/   # Fleet-wide failure-mode clustering across many runs
   dashboard/   # Self-contained static SPA indexing every report.json
-  realsim/     # Real-to-sim scene ingestion + RealSimRenderer Protocol (renderer deferred)
+  realsim/     # Real-to-sim scene ingestion + renderers (nearest-frame, gaussian splat)
   plugins.py   # Entry-point discovery for third-party policies / envs
   cli.py       # gauntlet run / report / compare / diff / aggregate /
                # dashboard / realsim / monitor / replay / ros2

@@ -168,10 +168,10 @@ def test_gsplat_renderer_missing_extra_raises_install_hint(
     # Force the lazy import to fail regardless of host installation.
     from gauntlet.realsim.renderers import gsplat as gsplat_mod
 
-    def _raise_install_hint() -> tuple[object, object]:
+    def _raise_install_hint() -> object:
         raise ImportError(gsplat_mod._INSTALL_HINT)
 
-    monkeypatch.setattr(gsplat_mod, "_lazy_import_gsplat", _raise_install_hint)
+    monkeypatch.setattr(gsplat_mod, "_lazy_import_torch", _raise_install_hint)
 
     with pytest.raises(ImportError, match=r"realsim-gsplat"):
         renderer.render(scene=scene, viewpoint=_identity_pose(), intrinsics=intrinsics)

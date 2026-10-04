@@ -1005,10 +1005,10 @@ round-trips it. `IngestionError` / `SceneIOError` subclass
 
 `RealSimRenderer` is a `runtime_checkable` Protocol with one method:
 `render(scene, viewpoint, intrinsics) -> np.ndarray` (HxWx3 uint8
-RGB). The first concrete implementation (gaussian splatting) is
-deferred. The registry is module-local, not part of
-`gauntlet.plugins`, until a concrete renderer ships and a follow-up
-RFC promotes it.
+RGB). Two implementations ship in `gauntlet.realsim.renderers`:
+`NearestFrameRenderer` (`nearest-frame`) and `GaussianSplatRenderer`
+(`gsplat`, smoke-test fit; see the user guide). The registry is
+module-local, not part of `gauntlet.plugins`.
 
 ### `RealSceneInput` + `load_real_scene` (Phase 3 T18 raw capture-dir parse)
 
