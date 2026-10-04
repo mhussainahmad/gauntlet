@@ -143,3 +143,27 @@ def test_render_size_validated() -> None:
 
     with pytest.raises(ValueError, match="render_size"):
         IsaacSimTabletopEnv(render_size=(0, 64))
+
+
+def test_step_image_matches_post_step_scene() -> None:
+    """The frame returned by step() shows the cube where obs['cube_pos'] says it is.
+
+    Regression: rendering inside world.step and *then* snapping a grasped
+    cube to the end-effector made carried-cube frames one step stale.
+    """
+    env = _make(render_in_obs=True)
+    try:
+        obs = _reset_with(env)
+        # Put the EE on the cube, close the gripper, then carry it along +x.
+        env._ee.set_world_pose(position=obs["cube_pos"].copy())
+        close = np.zeros(7)
+        close[6] = -1.0
+        env.step(close)
+        carry = close.copy()
+        carry[0] = 1.0
+        obs, *_ = env.step(carry)
+        expected_alpha = round(1000 * obs["cube_pos"][0]) % 256
+        assert obs["image"].shape[2] == 3
+        assert env._renderer._camera.get_rgba()[0, 0, 3] == expected_alpha
+    finally:
+        env.close()

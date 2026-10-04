@@ -131,12 +131,18 @@ class IsaacTabletopRenderer:
         self._cube.apply_visual_material(self._materials[1 if texture else 0])
 
     def read(self) -> NDArray[np.uint8]:
-        """Return the latest ``[H, W, 3]`` ``uint8`` frame, rendering until one is available."""
+        """Render the current scene and return it as ``[H, W, 3]`` ``uint8``.
+
+        Always renders first: the camera annotator holds the most recently
+        rendered frame, so reading after a scene change without rendering
+        would return a stale image. Renders a few more times if the sensor
+        has not produced its first frame yet.
+        """
         for _ in range(_WARMUP_RENDERS + 1):
+            self._world.render()
             rgba = self._camera.get_rgba()
             if rgba is not None and np.asarray(rgba).size > 0:
                 break
-            self._world.render()
         else:
             raise RuntimeError(
                 "Isaac camera produced no frame after warm-up renders; "

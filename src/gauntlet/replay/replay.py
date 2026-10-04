@@ -32,7 +32,7 @@ from collections.abc import Callable
 import numpy as np
 
 from gauntlet.env.base import GauntletEnv
-from gauntlet.env.registry import get_env_factory
+from gauntlet.env.post_render import wrap_env_factory
 from gauntlet.policy.base import Policy
 from gauntlet.replay.overrides import validate_overrides
 from gauntlet.runner import Episode, execute_one
@@ -221,7 +221,9 @@ def replay_one(
         episodes_per_cell=episodes_per_cell,
     )
 
-    factory = env_factory if env_factory is not None else get_env_factory(suite.env)
+    # Same wrapper wiring as the Runner, so wrapper-implemented axes
+    # (image_attack, color_shift_synthetic, instruction_paraphrase) replay.
+    factory = wrap_env_factory(suite, env_factory)
     env = factory()
     try:
         replayed = execute_one(env, policy_factory, item)
