@@ -19,7 +19,11 @@ averaging them away.
 
 **58-second overview** (real rollouts, report and CLI output):
 
-https://github.com/user-attachments/assets/13df3e99-bd7a-411f-9f85-592c559b2f17
+https://github.com/user-attachments/assets/b91519fc-2dba-4d9d-8b56-556e082810a2
+
+[![Crop-row scene from the overview: classical detector vs CNN under dust and curved rows](https://raw.githubusercontent.com/mhussainahmad/gauntlet/main/docs/assets/overview-preview.webp)](https://github.com/user-attachments/assets/b91519fc-2dba-4d9d-8b56-556e082810a2)
+
+<sub>Clip from the overview (crop-row scene). If the player above does not load, click the clip to open the full video.</sub>
 
 ![Gauntlet report: failure clusters, per-axis sensitivity and success rates](https://raw.githubusercontent.com/mhussainahmad/gauntlet/main/docs/assets/report-field-conditions.png)
 
