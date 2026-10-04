@@ -22,6 +22,13 @@ from `0.2.0` onward (see `docs/stability.md`).
 - `examples/suites/crop-row-field.yaml` and `docs/crop-row.md`: the two
   models compared on 480 rollouts each.
 
+### Fixed
+- Suite YAML values written as exponent floats without a decimal point
+  (`1e-05`, `2E3`) loaded as strings under PyYAML's YAML 1.1 rules and
+  failed with a misleading "string-valued values" error. The canonical
+  loader now reads them as floats, as YAML 1.2 does. Found by the
+  suite-loader property test.
+
 ## [0.4.0] — 2026-10-03
 
 ### Added

@@ -26,6 +26,7 @@ top of :func:`yaml.safe_load` in future tasks.
 
 from __future__ import annotations
 
+import re
 from typing import IO, Any
 
 import yaml
@@ -46,10 +47,40 @@ class YamlSecurityError(ValueError):
     """
 
 
-def safe_yaml_load(stream: str | bytes | IO[str] | IO[bytes]) -> Any:
-    """Parse ``stream`` via :func:`yaml.safe_load`.
+class _SafeLoader(yaml.SafeLoader):
+    """``SafeLoader`` that also reads ``1e-05`` / ``2E3`` as floats.
 
-    Direct alias of :func:`yaml.safe_load`. The wrapper exists so every
+    PyYAML follows YAML 1.1, whose float pattern needs a decimal point,
+    so a suite value written ``1e-05`` (Python's own ``repr`` of 0.00001)
+    loaded as the *string* ``"1e-05"`` and failed validation with a
+    misleading "string-valued values" error. YAML 1.2 reads it as a
+    float; this resolver does the same. Construction is unchanged:
+    still only the safe tag set.
+    """
+
+
+# types-PyYAML leaves add_implicit_resolver and dispose unannotated.
+_SafeLoader.add_implicit_resolver(  # type: ignore[no-untyped-call]
+    "tag:yaml.org,2002:float",
+    re.compile(
+        r"""^(?:[-+]?(?:[0-9][0-9_]*)\.[0-9_]*(?:[eE][-+]?[0-9]+)?
+        |[-+]?(?:[0-9][0-9_]*)(?:[eE][-+]?[0-9]+)
+        |\.[0-9_]+(?:[eE][-+]?[0-9]+)?
+        |[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*
+        |[-+]?\.(?:inf|Inf|INF)
+        |\.(?:nan|NaN|NAN))$""",
+        re.X,
+    ),
+    list("-+0123456789."),
+)
+
+
+def safe_yaml_load(stream: str | bytes | IO[str] | IO[bytes]) -> Any:
+    """Parse ``stream`` with PyYAML's safe constructor.
+
+    Equivalent to :func:`yaml.safe_load` except that exponent floats
+    without a decimal point (``1e-05``) resolve to ``float`` as in
+    YAML 1.2 (see :class:`_SafeLoader`). The wrapper exists so every
     YAML read in ``src/gauntlet`` flows through one place — the CI
     grep gate then asserts no caller side-steps the wrapper by
     importing :func:`yaml.load` directly.
@@ -74,8 +105,11 @@ def safe_yaml_load(stream: str | bytes | IO[str] | IO[bytes]) -> Any:
             (``!!python/object/apply``, ``!!python/object/new``,
             ``!!python/name``).
     """
-    # Inline-pragma: the literal token ``yaml.safe_load(`` here is the
-    # canonical safe call-site. The grep gate matches ``yaml.load(``
-    # (without ``safe_``) so this line is intentionally exempt.
-    result: Any = yaml.safe_load(stream)
+    # Same steps as ``yaml.safe_load``, with the float-aware loader. The
+    # grep gate matches ``yaml.load(`` and stays clean.
+    loader = _SafeLoader(stream)
+    try:
+        result: Any = loader.get_single_data()
+    finally:
+        loader.dispose()  # type: ignore[no-untyped-call]
     return result
