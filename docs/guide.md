@@ -396,8 +396,8 @@ from gauntlet.env import CameraSpec, TabletopEnv
 
 env = TabletopEnv(
     cameras=[
-        CameraSpec(name="wrist", pose=(0.0, 0.0, 0.4, 0.0, 0.0, 0.0), size=(96, 96)),
-        CameraSpec(name="side",  pose=(0.5, 0.0, 0.3, 0.0, 1.2, 0.0), size=(96, 96)),
+        CameraSpec(name="wrist", pose=(0.15, -0.15, 0.55, 1.0, 0.0, 0.5), size=(96, 96)),
+        CameraSpec(name="side",  pose=(0.7, 0.0, 0.6, 1.2, 1.5, 0.0), size=(96, 96)),
     ],
 )
 obs, _ = env.reset(seed=0)
