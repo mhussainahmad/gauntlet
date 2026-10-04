@@ -151,6 +151,30 @@ grasp. Phase-1 scope: the wrapper does NOT forward perturbations to
 the inner env (`AXIS_NAMES` is empty); the freejoint-mounted-arm and
 collision rebake are deferred. Registered as `tabletop-mobile`.
 
+### `TabletopPushEnv` (B-45)
+
+```python
+from gauntlet.env import TabletopPushEnv
+from gauntlet.policy import ScriptedPushPolicy
+```
+
+Planar pushing on the tabletop scene: no grasp, a colliding
+end-effector, and success only once the cube has settled inside the
+target zone. Same action / observation spaces and perturbation axes as
+`TabletopEnv`. Registered as `tabletop-push`; `ScriptedPushPolicy`
+(`--policy scripted-push`) is the closed-loop reference controller.
+
+### `TabletopStackEnv` + `SubtaskMilestone` (B-09)
+
+```python
+from gauntlet.env import SubtaskMilestone, TabletopStackEnv
+```
+
+Three-cube stacking, registered as `tabletop-stack`. It also satisfies
+`SubtaskMilestone`, the opt-in Protocol for envs that publish
+per-subtask credit in `info["subtask_completion"]`; the Runner copies
+the final list onto the Episode for partial-credit reporting.
+
 ### Env registry
 
 ```python
@@ -418,6 +442,16 @@ The per-episode primitive shared by both execution paths. Public so
 `gauntlet.replay.replay_one` can reuse it; ordinary callers go through
 `Runner.run`.
 
+Non-finite values end the rollout instead of propagating: on the first
+NaN / ±Inf in an observation or in the policy's action, `execute_one`
+stops, records the episode as a failure and sets
+`Episode.observation_invalid` or `Episode.action_invalid` (both default
+`False`; neither is part of `episode_hash`). `gauntlet run` prints a
+warning with the counts. `gauntlet.runner.worker.validate_observation(obs)`
+is the same check as a standalone function that raises `ValueError`.
+Every backend's `step` also raises `ValueError` on a non-finite action
+when called directly.
+
 ### Provenance capture (B-22, B-40)
 
 ```python
@@ -447,6 +481,24 @@ helpers are deliberately fail-soft: a missing distribution, a missing
 git binary, or a missing assets directory each return `None` rather
 than crash the rollout loop. See B-22 and B-40 in `docs/backlog.md`.
 
+### Determinism helpers
+
+```python
+from gauntlet.runner import (
+    STATE_OBS_KEYS, IMAGE_OBS_KEYS, NONDETERMINISTIC_EPISODE_FIELDS,
+    obs_state_hash, rollout_hash, episode_hash,
+    episode_deterministic_dump, assert_byte_identical,
+)
+```
+
+`obs_state_hash(obs)` hashes the state-only keys (`STATE_OBS_KEYS`;
+`IMAGE_OBS_KEYS` are skipped because rendered pixels are not
+bit-stable across GPUs). `rollout_hash(...)` digests initial obs,
+actions, terminal obs, success and length. `episode_deterministic_dump`
+is `Episode.model_dump()` minus `NONDETERMINISTIC_EPISODE_FIELDS`
+(wall-clock and float-noisy telemetry). `assert_byte_identical(a, b)`
+compares two state-only obs dicts key by key. See `docs/determinism.md`.
+
 ---
 
 ## Episode (rollout result)
@@ -466,6 +518,9 @@ Pydantic model; `extra="forbid"`. Fields:
 - `video_path: str | None` — relative MP4 path when
   `Runner(record_video=True)`; `None` otherwise. Always relative so
   the HTML report can embed via `<video src="...">` without a server.
+- `observation_invalid` / `action_invalid: bool` — the rollout was
+  ended early by a NaN / ±Inf observation or action (see
+  `execute_one`).
 
 `ser_json_inf_nan="strings"` so NaN/Inf reward round-trips through
 JSON.
@@ -794,6 +849,21 @@ fleet roll-up. `persistence_threshold` is the minimum fraction of
 runs a failure cluster must appear in to be flagged as persistent —
 the headline cross-run signal. See
 `docs/phase3-rfc-019-fleet-aggregate.md`.
+
+### `cluster_fleet_failures(report_dir, max_clusters=8) -> FleetClusteringResult`
+
+```python
+from gauntlet.aggregate import FleetCluster, FleetClusteringResult, cluster_fleet_failures
+```
+
+Groups runs that fail the same way across every `report.json` under
+`report_dir`. Each failure cluster in a run becomes a signature (failing
+axis pair, Wilson lower bound on the failure rate, behavioural
+summaries); equal signatures are bucketed, then merged agglomeratively
+down to `max_clusters`. Returns a `FleetClusteringResult` of
+`FleetCluster`s, each with a medoid signature and its cross-run
+consistency; `gauntlet aggregate` writes it as
+`fleet_clustering.json`. See `docs/fleet-aggregation.md`.
 
 ---
 

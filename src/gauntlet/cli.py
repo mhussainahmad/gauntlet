@@ -1056,6 +1056,14 @@ def run(
         f"-> {_fmt_path(out)} (success: {_fmt_success_rate(report.overall_success_rate)})"
     )
     _echo_err(summary)
+    n_bad_obs = sum(ep.observation_invalid for ep in episodes)
+    n_bad_action = sum(ep.action_invalid for ep in episodes)
+    if n_bad_obs or n_bad_action:
+        _echo_err(
+            f"[warn]warning:[/] {n_bad_obs} episode(s) hit a non-finite observation and "
+            f"{n_bad_action} a non-finite action; they ended early and count as failures "
+            "(see observation_invalid / action_invalid in episodes.json)."
+        )
 
     if cache_stats:
         # Always emit a stats line when --cache-stats is set, even when

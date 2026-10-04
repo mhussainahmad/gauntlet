@@ -111,7 +111,7 @@ def test_bench_rollout_smoke(tmp_path: Path) -> None:
     assert sidecar["backend"] == "mujoco"
     assert sidecar["episodes"] == 2
     assert sidecar.get("skipped") is False
-    # Throughput / latency keys are spec'd by the T12 task.
+    # Throughput / latency keys every rollout sidecar must carry.
     for key in (
         "episodes_per_sec",
         "step_mean_ms",

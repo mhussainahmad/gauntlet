@@ -32,15 +32,15 @@ into:
 * ``policy_rng`` — ``np.random.default_rng(episode_seq)``. Decorrelated
   from the env stream but deterministic from the same node.
 
-**Departure from the original Pin 2 wording.** The pin asked for
-``env.reset(seed=episode_seq.entropy)``; empirically every spawned child
-inherits its parent's ``entropy`` value, which would force every episode
-to reset identically (and would break uniqueness of :attr:`Episode.seed`
-across a run). ``generate_state`` is the canonical bridge from a
-SeedSequence node to a per-spawn-unique scalar. The rest of the pin —
-the ``master.spawn(n_cells)[i].spawn(eps_per_cell)[j]`` derivation tree
-and ``np.random.default_rng(episode_seq)`` for the policy stream — is
-preserved verbatim.
+**Why not ``env.reset(seed=episode_seq.entropy)``.** It is the obvious
+choice, but empirically every spawned child inherits its parent's
+``entropy`` value, which would force every episode to reset identically
+(and would break uniqueness of :attr:`Episode.seed` across a run).
+``generate_state`` is the canonical bridge from a SeedSequence node to
+a per-spawn-unique scalar. The rest of the design — the
+``master.spawn(n_cells)[i].spawn(eps_per_cell)[j]`` derivation tree and
+``np.random.default_rng(episode_seq)`` for the policy stream — is
+unchanged.
 
 The master seed (literal int, or auto-generated entropy when
 ``suite.seed is None``) is echoed into every Episode's
@@ -505,8 +505,8 @@ class Runner:
     def _build_work_items(self, suite: Suite) -> list[WorkItem]:
         """Enumerate (cell, episode) pairs and attach SeedSequence nodes.
 
-        The derivation uses ``SeedSequence.spawn`` exactly as Pin 2
-        prescribes: one spawn level for cells, a second for episodes
+        The derivation uses ``SeedSequence.spawn`` at two levels: one
+        spawn level for cells, a second for episodes
         within each cell. This keeps the per-episode streams independent
         across the (cell, episode) lattice.
 

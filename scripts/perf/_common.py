@@ -71,9 +71,9 @@ def utc_iso8601_now() -> str:
 def provenance_fields() -> dict[str, str | None]:
     """Bundle of ``version``, ``timestamp``, ``git_commit`` provenance fields.
 
-    Spec'd by Phase 2.5 T12 to land in every benchmark JSON sidecar
-    so a downstream regression-monitor can correlate a number with the
-    exact tree it came from.
+    Written into every benchmark JSON sidecar so a downstream
+    regression monitor can correlate a number with the exact tree it
+    came from.
     """
     return {
         "version": gauntlet.__version__,

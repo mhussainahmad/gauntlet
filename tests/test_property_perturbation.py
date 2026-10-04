@@ -7,7 +7,7 @@ factory has a single contract: every emitted scalar lies inside the
 declared ``[low, high]`` range; the int-and-categorical wrappers narrow
 that contract further.
 
-Hypothesis budget: ``max_examples=50`` per test (well under the task's
+Hypothesis budget: ``max_examples=50`` per test (well under a
 30-second budget across the full property suite). ``deadline=2s`` keeps
 a slow draw from ballooning the run.
 """

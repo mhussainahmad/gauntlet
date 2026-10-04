@@ -552,6 +552,8 @@ class IsaacSimTabletopEnv:
         a = np.asarray(action, dtype=np.float64).reshape(-1)
         if a.shape != (7,):
             raise ValueError(f"action must have shape (7,); got {a.shape}")
+        if not np.all(np.isfinite(a)):
+            raise ValueError(f"action must be finite (no NaN/Inf); got {a}")
         a = np.clip(a, -1.0, 1.0).astype(np.float64, copy=False)
 
         self._apply_ee_command(a[0:3], a[3:6])

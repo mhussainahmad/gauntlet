@@ -78,7 +78,7 @@ def _load_api_doc_text() -> str:
     file is paid once.
     """
     if not _API_DOC_PATH.is_file():
-        msg = f"docs/api.md not found at {_API_DOC_PATH}; T14 deliverable is missing"
+        msg = f"docs/api.md not found at {_API_DOC_PATH}; the API reference is missing"
         raise AssertionError(msg)
     return _API_DOC_PATH.read_text(encoding="utf-8")
 

@@ -397,6 +397,21 @@ class Episode(BaseModel):
     inference_latency_ms_max: float | None = None
 
     # ------------------------------------------------------------------
+    # Non-finite rollout flags. A NaN / +-Inf in an observation (a
+    # diverged solver, a buggy wrapper) or in the policy's action (a
+    # diverged checkpoint) would otherwise flow silently into the next
+    # ``policy.act`` / ``env.step`` and corrupt the outcome.
+    # :func:`gauntlet.runner.worker.execute_one` ends the rollout on the
+    # first non-finite value, records it as a failure and sets the
+    # matching flag, so one bad episode never crashes a sweep and never
+    # hides inside the success rate. Defaults ``False`` so episodes
+    # written before these fields existed still load.
+    # ------------------------------------------------------------------
+
+    observation_invalid: bool = False
+    action_invalid: bool = False
+
+    # ------------------------------------------------------------------
     # Sim-vs-real provenance tag (B-28) — explicit "this episode came
     # from a sim rollout" / "real-robot rollout" marker. Default
     # ``None`` keeps the field semantically inert for the legacy

@@ -329,3 +329,17 @@ def test_invalid_max_steps_rejected() -> None:
         IsaacSimTabletopEnv(max_steps=0)
     with pytest.raises(ValueError, match="max_steps must be positive"):
         IsaacSimTabletopEnv(max_steps=-1)
+
+
+def test_step_rejects_non_finite_action() -> None:
+    from gauntlet.env.isaac.tabletop_isaac import IsaacSimTabletopEnv
+
+    env = IsaacSimTabletopEnv()
+    try:
+        env.reset(seed=0)
+        bad = np.zeros(7, dtype=np.float64)
+        bad[3] = -np.inf
+        with pytest.raises(ValueError, match=r"finite"):
+            env.step(bad)
+    finally:
+        env.close()
