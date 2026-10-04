@@ -19,7 +19,7 @@ averaging them away.
 
 **58-second overview** (real rollouts, report and CLI output):
 
-https://github.com/user-attachments/assets/b91519fc-2dba-4d9d-8b56-556e082810a2
+https://github.com/user-attachments/assets/184f7b8d-84f5-4087-bf57-f0b942219227
 
 ![Gauntlet report: failure clusters, per-axis sensitivity and success rates](https://raw.githubusercontent.com/mhussainahmad/gauntlet/main/docs/assets/report-field-conditions.png)
 
