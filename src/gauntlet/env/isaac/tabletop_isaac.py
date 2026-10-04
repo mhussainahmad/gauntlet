@@ -559,9 +559,10 @@ class IsaacSimTabletopEnv:
         self._gripper_state = self.GRIPPER_OPEN if a[6] > 0.0 else self.GRIPPER_CLOSED
         self._update_grasp_state()
 
-        # Render only when image observations are on; the state-only
-        # path stays rasterisation-free.
-        self._world.step(render=self._render_in_obs)
+        # Physics only. With image observations on, the renderer draws a
+        # frame in ``_build_obs`` *after* the grasp snap below, so the
+        # image matches the returned state.
+        self._world.step(render=False)
 
         if self._grasped:
             self._snap_cube_to_ee()

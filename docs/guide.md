@@ -367,7 +367,10 @@ renderers ship:
   densification — good for checking that poses and intrinsics are
   consistent, not for judging reconstruction quality. On a synthetic
   8-view scene it lifts held-out PSNR from 6 to 15 dB in about 25 s
-  on a laptop GPU. Override `_fit_gaussians` to load trained splats.
+  on a laptop GPU. The PyTorch path on CPU is much slower (about
+  4 minutes for 8 views at 32x32 on a 16-core laptop; cost grows with
+  pixels x gaussians), so lower `num_gaussians` / `max_train_steps`
+  or `train_max_side` when no GPU is available. Override `_fit_gaussians` to load trained splats.
   Poses are read as NeRFStudio / OpenGL camera-to-world by default
   (`camera_convention="opencv"` for COLMAP-style poses).
 

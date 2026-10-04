@@ -116,6 +116,7 @@ class _FakePrim:
     def apply_visual_material(self, material: _FakePreviewSurface) -> None:
         self.material = material
         _FAKE_STAGE["cube_color"] = material.color
+        _FAKE_STAGE["cube"] = self
 
 
 # Shared fake "stage": the light, camera and cube material write here and
@@ -162,8 +163,10 @@ class _FakeCamera:
 
     Returns no frame until ``initialize()`` plus one ``World.render()``
     (mirroring the warm-up the real sensor needs), then a uint8 RGBA
-    frame encoding the light intensity (R), cube colour (G) and camera
-    x position (B).
+    frame encoding the light intensity (R), cube colour (G), camera
+    x position (B) and cube x position (A) *as of the last render* — like the real annotator,
+    which holds the most recently rendered frame, so reading without
+    rendering after a scene change returns a stale image.
     """
 
     def __init__(
@@ -196,16 +199,24 @@ class _FakeCamera:
         self.orientation = orientation
         self.set_world_pose_calls.append({"position": position, "camera_axes": camera_axes})
 
-    def get_rgba(self) -> NDArray[np.uint8]:
-        if not self.initialized or _FAKE_STAGE.get("renders", 0) == 0:
-            return np.zeros((0, 0, 4), dtype=np.uint8)
+    def snapshot(self) -> None:
+        """Capture the stage as the "rendered" frame (called by the fake World)."""
+        if not self.initialized:
+            return
         width, height = self.resolution
         frame = np.zeros((height, width, 4), dtype=np.uint8)
         frame[..., 0] = int(_FAKE_STAGE.get("inputs:intensity", 0.0) / 100) % 256
         frame[..., 1] = int(255 * float(np.asarray(_FAKE_STAGE.get("cube_color", np.zeros(3)))[1]))
         frame[..., 2] = int(100 * self.position[0]) % 256
-        frame[..., 3] = 255
-        return frame
+        cube = _FAKE_STAGE.get("cube")
+        frame[..., 3] = 0 if cube is None else round(1000 * cube._position[0]) % 256
+        self._frame = frame
+
+    def get_rgba(self) -> NDArray[np.uint8]:
+        frame: NDArray[np.uint8] | None = getattr(self, "_frame", None)
+        if frame is None:
+            return np.zeros((0, 0, 4), dtype=np.uint8)
+        return frame.copy()
 
 
 class _FakeScene:
@@ -235,10 +246,13 @@ class _FakeWorld:
     def step(self, render: bool = True) -> None:
         self.step_calls += 1
         if render:
-            _FAKE_STAGE["renders"] = _FAKE_STAGE.get("renders", 0) + 1
+            self.render()
 
     def render(self) -> None:
         _FAKE_STAGE["renders"] = _FAKE_STAGE.get("renders", 0) + 1
+        camera = _FAKE_STAGE.get("camera")
+        if camera is not None:
+            camera.snapshot()
 
 
 class _FakeSimulationApp:

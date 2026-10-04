@@ -209,3 +209,22 @@ def test_runner_sweeps_all_post_render_axes() -> None:
         for ep in episodes
     }
     assert len(seen) == 8
+
+
+def test_replay_reproduces_episode_with_wrapper_axes() -> None:
+    """``replay_one`` builds its env through the same wrapper wiring."""
+    from gauntlet.replay import replay_one
+
+    suite = load_suite_from_string(_suite_yaml())
+    episodes = Runner(n_workers=1).run(
+        policy_factory=partial(RandomPolicy, action_dim=7),
+        suite=suite,
+    )
+    target = next(ep for ep in episodes if ep.perturbation_config["image_attack"] == 2.0)
+    replayed = replay_one(
+        target=target,
+        suite=suite,
+        policy_factory=partial(RandomPolicy, action_dim=7),
+    )
+    assert replayed.perturbation_config == target.perturbation_config
+    assert replayed.step_count == target.step_count

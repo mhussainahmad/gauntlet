@@ -15,6 +15,9 @@ from `0.2.0` onward (see `docs/stability.md`).
   `camera_offset_x/y` and `object_texture` onto them. Written against
   the Isaac Sim 5.0 sources and tested only against a fake `isaacsim`
   namespace — **not run on real hardware**; the constructor warns.
+  Each observation renders after all scene writes (including the
+  grasped-cube snap), so frames are never one step or one episode
+  stale.
 - `gsplat` real-to-sim renderer now renders (B-46). The first call per
   scene fits a small set of 3D gaussians to the scene's frames; any
   viewpoint is then rasterised. Uses gsplat's CUDA rasterizer when it
@@ -36,6 +39,10 @@ from `0.2.0` onward (see `docs/stability.md`).
   `examples/suites/tabletop-sensor-language.yaml`.
 
 ### Fixed
+- `gauntlet replay` failed with "unknown perturbation axis" on episodes
+  from suites using `image_attack`, `color_shift_synthetic` or
+  `instruction_paraphrase`; it now builds the env through the same
+  wrapper wiring as `gauntlet run`.
 - `gauntlet replay --override axis=NaN` (or `inf`) was accepted; non-finite
   override values are now rejected.
 - Stacking two of the observation wrappers dropped the backend's own
