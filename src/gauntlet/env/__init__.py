@@ -13,6 +13,7 @@ from collections.abc import Callable
 from typing import cast
 
 from gauntlet.env.base import CameraSpec, GauntletEnv, SubtaskMilestone
+from gauntlet.env.crop_row import CropRowEnv
 from gauntlet.env.mobile import MobileTabletopEnv
 from gauntlet.env.perturbation import AXIS_NAMES, PerturbationAxis, axis_for
 from gauntlet.env.registry import register_env
@@ -49,11 +50,17 @@ register_env(
     "tabletop-stack",
     cast(Callable[..., GauntletEnv], TabletopStackEnv),
 )
+# B-47 — camera-guided crop-row following; numpy renderer, no MuJoCo.
+register_env(
+    "crop-row",
+    cast(Callable[..., GauntletEnv], CropRowEnv),
+)
 
 __all__ = [
     "AXIS_NAMES",
     "N_DISTRACTOR_SLOTS",
     "CameraSpec",
+    "CropRowEnv",
     "GauntletEnv",
     "MobileTabletopEnv",
     "PerturbationAxis",

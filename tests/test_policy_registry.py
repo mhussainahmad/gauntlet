@@ -177,7 +177,7 @@ class _ZeroArgFakePolicy:
 
 def test_policy_registry_contains_builtins() -> None:
     """The built-in table must hold the two first-party adapters."""
-    assert set(POLICY_REGISTRY) == {"random", "scripted", "scripted-push"}
+    assert set(POLICY_REGISTRY) == {"random", "scripted", "scripted-push", "crop-row-classical"}
     assert POLICY_REGISTRY["random"] is cast(Any, RandomPolicy)
     assert POLICY_REGISTRY["scripted"] is cast(Any, ScriptedPolicy)
 

@@ -46,6 +46,12 @@ from gauntlet.env.perturbation.axes import (
     distractor_count as distractor_count,
 )
 from gauntlet.env.perturbation.axes import (
+    dust_density as dust_density,
+)
+from gauntlet.env.perturbation.axes import (
+    glare_intensity as glare_intensity,
+)
+from gauntlet.env.perturbation.axes import (
     image_attack as image_attack,
 )
 from gauntlet.env.perturbation.axes import (
@@ -61,6 +67,9 @@ from gauntlet.env.perturbation.axes import (
     lighting_intensity as lighting_intensity,
 )
 from gauntlet.env.perturbation.axes import (
+    motion_blur as motion_blur,
+)
+from gauntlet.env.perturbation.axes import (
     object_initial_pose_x as object_initial_pose_x,
 )
 from gauntlet.env.perturbation.axes import (
@@ -71,6 +80,12 @@ from gauntlet.env.perturbation.axes import (
 )
 from gauntlet.env.perturbation.axes import (
     object_texture as object_texture,
+)
+from gauntlet.env.perturbation.axes import (
+    row_curvature as row_curvature,
+)
+from gauntlet.env.perturbation.axes import (
+    weed_density as weed_density,
 )
 from gauntlet.env.perturbation.base import (
     AXIS_KIND_CATEGORICAL as AXIS_KIND_CATEGORICAL,
@@ -117,6 +132,11 @@ AXIS_NAMES: Final[tuple[str, ...]] = (
     "camera_extrinsics",
     "color_shift_synthetic",
     "inference_delay_jitter",
+    "dust_density",
+    "glare_intensity",
+    "motion_blur",
+    "weed_density",
+    "row_curvature",
 )
 
 
@@ -136,6 +156,8 @@ __all__ = [
     "camera_offset_y",
     "color_shift_synthetic",
     "distractor_count",
+    "dust_density",
+    "glare_intensity",
     "image_attack",
     "inference_delay_jitter",
     "initial_state_ood",
@@ -144,8 +166,11 @@ __all__ = [
     "make_categorical_sampler",
     "make_continuous_sampler",
     "make_int_sampler",
+    "motion_blur",
     "object_initial_pose_x",
     "object_initial_pose_y",
     "object_swap",
     "object_texture",
+    "row_curvature",
+    "weed_density",
 ]

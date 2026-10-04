@@ -1,0 +1,38 @@
+# crop-row-field — camera row guidance under field conditions.
+#
+# A vehicle follows a crop row from a forward camera (env: crop-row,
+# procedurally generated scenes). Each axis is a condition that hits
+# vision-based guidance in the field:
+#
+#   dust_density     tillage / harvest dust (0 = clear, 1 = dense)
+#   glare_intensity  low sun ahead of the camera
+#   motion_blur      vibration and speed over rough ground
+#   weed_density     green weeds between the rows
+#   row_curvature    0 = straight, 0.1 = a 10 m-radius bend (1/m)
+#
+# Grid: 3 * 2 * 2 * 2 * 2 = 48 cells, 10 episodes each = 480 rollouts
+# of 100 steps (15 m). About a minute per policy with --n-workers 4.
+#
+#   uv run gauntlet run examples/suites/crop-row-field.yaml \
+#     --policy crop-row-classical --out out/crop-classical --n-workers 4
+#   PYTHONPATH=examples/crop_row uv run gauntlet run \
+#     examples/suites/crop-row-field.yaml \
+#     --policy cnn_policy:make_policy --out out/crop-cnn --n-workers 4
+#
+# See docs/crop-row.md for the results.
+
+name: crop-row-field
+env: crop-row
+seed: 11
+episodes_per_cell: 10
+axes:
+  dust_density:
+    values: [0.0, 0.5, 1.0]
+  glare_intensity:
+    values: [0.0, 1.0]
+  motion_blur:
+    values: [0.0, 1.0]
+  weed_density:
+    values: [0.0, 1.0]
+  row_curvature:
+    values: [0.0, 0.1]

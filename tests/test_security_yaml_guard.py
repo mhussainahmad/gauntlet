@@ -222,3 +222,17 @@ def test_yaml_security_error_is_a_value_error() -> None:
     that catch ``ValueError`` already work without a churn-only PR.
     """
     assert issubclass(YamlSecurityError, ValueError)
+
+
+def test_exponent_floats_without_a_decimal_point_load_as_floats() -> None:
+    """``1e-05`` is Python's own repr of 0.00001; YAML 1.1 reads it as a string."""
+    data = safe_yaml_load('v: [1e-05, 2E3, -3e+2, 1.5, 10, "1e5", .inf, abc]')
+    assert data["v"][:4] == [1e-05, 2000.0, -300.0, 1.5]
+    assert data["v"][4] == 10 and isinstance(data["v"][4], int)
+    assert data["v"][5] == "1e5"  # quoted stays a string
+    assert data["v"][6] == float("inf") and data["v"][7] == "abc"
+
+
+def test_unsafe_tags_still_rejected_by_float_aware_loader() -> None:
+    with pytest.raises(yaml.constructor.ConstructorError):
+        safe_yaml_load("!!python/object/apply:os.system ['true']")

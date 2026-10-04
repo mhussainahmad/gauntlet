@@ -51,6 +51,7 @@ benchmarks/field-conditions/
 # Test runs produce these under tmp paths but also land in ad-hoc local
 # directories when users follow the quickstart; never commit them.
 *.npz
+!examples/crop_row/cnn_weights.npz
 *.pt
 *.pth
 *.safetensors

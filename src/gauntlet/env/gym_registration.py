@@ -108,6 +108,11 @@ def register_envs() -> None:
         "gauntlet.env.tabletop_push:TabletopPushEnv",
         max_episode_steps=_DEFAULT_MAX_EPISODE_STEPS,
     )
+    _register_one(
+        "gauntlet/CropRow-v0",
+        "gauntlet.env.crop_row:CropRowEnv",
+        max_episode_steps=100,
+    )
     # Heavy backends — string entry_points keep the [pybullet] / [genesis] /
     # [isaac] subpackages OUT of sys.modules at registration time. Gymnasium
     # resolves the import lazily inside ``gym.make(...)`` so the install-hint

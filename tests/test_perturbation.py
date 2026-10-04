@@ -82,6 +82,13 @@ _APPLY_VALUE: dict[str, float] = {
     # ``TabletopEnv.AXIS_NAMES``). Tests that exercise backend-direct
     # ``set_perturbation`` filter this name out.
     "inference_delay_jitter": 0.0,
+    # B-47 — crop-row field-condition axes. They belong to
+    # ``CropRowEnv`` only; ``TabletopEnv`` rejects them.
+    "dust_density": 0.5,
+    "glare_intensity": 0.5,
+    "motion_blur": 0.5,
+    "weed_density": 0.5,
+    "row_curvature": 0.05,
 }
 
 # Axes whose dispatch lives outside the inner backend env. Filtered out
@@ -91,6 +98,7 @@ _APPLY_VALUE: dict[str, float] = {
 # * B-05 ``instruction_paraphrase`` — handled by ``InstructionWrapper``.
 # * B-43 ``color_shift_synthetic`` — handled by ``ColorShiftWrapper``.
 # * B-38 ``inference_delay_jitter`` — handled by the runner's worker FIFO.
+# * B-47 crop-row axes — implemented by ``CropRowEnv``, not the tabletop.
 _BACKEND_DIRECT_AXES: tuple[str, ...] = tuple(
     name
     for name in AXIS_NAMES
@@ -100,6 +108,11 @@ _BACKEND_DIRECT_AXES: tuple[str, ...] = tuple(
         "instruction_paraphrase",
         "color_shift_synthetic",
         "inference_delay_jitter",
+        "dust_density",
+        "glare_intensity",
+        "motion_blur",
+        "weed_density",
+        "row_curvature",
     }
 )
 
@@ -143,6 +156,12 @@ class TestAxisNamesRegistry:
             # gauntlet.runner.worker.execute_one). Backend AXIS_NAMES
             # ClassVars deliberately do NOT contain it.
             "inference_delay_jitter",
+            # B-47 — crop-row field conditions (CropRowEnv only).
+            "dust_density",
+            "glare_intensity",
+            "motion_blur",
+            "weed_density",
+            "row_curvature",
         )
 
     def test_axis_names_is_tuple(self) -> None:

@@ -38,6 +38,7 @@ from functools import partial
 from typing import cast
 
 from gauntlet.policy.base import Policy
+from gauntlet.policy.crop_row import CropRowClassicalPolicy
 from gauntlet.policy.random import RandomPolicy
 from gauntlet.policy.scripted import ScriptedPolicy, ScriptedPushPolicy
 
@@ -69,6 +70,7 @@ POLICY_REGISTRY: dict[str, type[Policy]] = {
     "random": cast(type[Policy], RandomPolicy),
     "scripted": cast(type[Policy], ScriptedPolicy),
     "scripted-push": cast(type[Policy], ScriptedPushPolicy),
+    "crop-row-classical": cast(type[Policy], CropRowClassicalPolicy),
 }
 
 
@@ -212,6 +214,8 @@ def resolve_policy_factory(spec: str) -> Callable[[], Policy]:
         return ScriptedPolicy
     if spec == "scripted-push":
         return ScriptedPushPolicy
+    if spec == "crop-row-classical":
+        return CropRowClassicalPolicy
     if ":" in spec:
         return _resolve_module_attr(spec)
     # Plugin fallthrough — lazy import to avoid touching importlib.metadata

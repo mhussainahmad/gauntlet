@@ -8,6 +8,27 @@ from `0.2.0` onward (see `docs/stability.md`).
 
 ## [Unreleased]
 
+### Added
+- `env: crop-row` (`CropRowEnv`, gym id `gauntlet/CropRow-v0`, B-47):
+  camera-guided crop-row following on a procedurally generated field,
+  rendered in numpy (no simulator). The observation is the image only;
+  ground-truth lateral / heading error are in `info`.
+- Perturbation axes `dust_density`, `glare_intensity`, `motion_blur`,
+  `weed_density` and `row_curvature` (crop-row only).
+- `--policy crop-row-classical` (`CropRowClassicalPolicy`): excess-green
+  / Otsu / calibrated line-fit row detector.
+- `examples/crop_row/`: a CNN trained on clean scenes (`train_cnn.py`,
+  torch) with numpy inference (`cnn_policy.py`, weights included).
+- `examples/suites/crop-row-field.yaml` and `docs/crop-row.md`: the two
+  models compared on 480 rollouts each.
+
+### Fixed
+- Suite YAML values written as exponent floats without a decimal point
+  (`1e-05`, `2E3`) loaded as strings under PyYAML's YAML 1.1 rules and
+  failed with a misleading "string-valued values" error. The canonical
+  loader now reads them as floats, as YAML 1.2 does. Found by the
+  suite-loader property test.
+
 ## [0.4.0] — 2026-10-03
 
 ### Added

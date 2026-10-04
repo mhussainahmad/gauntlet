@@ -38,6 +38,13 @@ Carryover items that did not make the v0.2.0 cut. Sized like the rest of the bac
 - **Disjoint with:** `realsim/renderers/gsplat.py`. No conflicts.
 - **Anti-feature?** A bare default loop is worse than no default loop — users will benchmark Gauntlet's gsplat output against their own pipelines and conclude the harness is the bottleneck. Land with a loud "smoke-test only" banner and a pointer to the override hook.
 
+### B-47: Crop-row guidance env + field-condition perception axes — shipped (`env: crop-row`)
+
+- **What:** `CropRowEnv`: camera-guided row following on a procedurally generated field (numpy renderer, no simulator), with `dust_density`, `glare_intensity`, `motion_blur`, `weed_density` and `row_curvature` axes. Reference classical detector (`crop-row-classical`) and a CNN example trained on clean scenes (`examples/crop_row/`). Worked comparison in `docs/crop-row.md`.
+- **Why:** Every other task is manipulation. Perception-driven guidance is where field robots meet dust, glare and weeds, and it shows the harness evaluating a perception model end to end, not just a controller.
+- **Scope:** M. One env module, one policy module, five axes, one suite, one example directory.
+- **Anti-feature?** Procedural scenes invite over-reading the numbers. The env docstring and the worked example both say they are synthetic; the claim is about the method.
+
 ## v0.1 candidates (still open — see original section below)
 
 Original B-01 → B-44 inventory remains as historical record. Every numbered item is shipped; this section is preserved so a future maintainer can trace the rationale for each landed feature.

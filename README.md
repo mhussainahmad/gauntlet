@@ -54,6 +54,18 @@ and a degraded copy of it) on the smoke suite and the
 [field-conditions suite](https://github.com/mhussainahmad/gauntlet/blob/main/docs/field-robustness.md), with the
 `compare` / `diff` deltas. Unzip and open any `report.html`.
 
+## Example: perception for row guidance
+
+[`docs/crop-row.md`](https://github.com/mhussainahmad/gauntlet/blob/main/docs/crop-row.md)
+evaluates two row-guidance perception models, a classical
+excess-green detector and a small CNN trained on clean images, on 480
+rollouts each under dust, glare, motion blur, weeds and curved rows
+(procedurally generated scenes). Overall success differs by under
+3 points; the per-condition report shows the CNN fails **every** curved
+row while the classical detector collapses in dense dust (3%) and weeds.
+
+![Crop-row conditions](https://raw.githubusercontent.com/mhussainahmad/gauntlet/main/docs/assets/crop-row-conditions.png)
+
 ## Install
 
 ```bash
@@ -117,11 +129,11 @@ points; see [`docs/plugin-development.md`](https://github.com/mhussainahmad/gaun
 
 | | |
 |---|---|
-| **Tasks** | Tabletop pick-and-place (`tabletop`), planar pushing (`tabletop-push`: no grasp, success only once the cube settles in the target), three-cube stacking with per-subtask credit (`tabletop-stack`) and a mobile-base variant (`tabletop-mobile`). |
+| **Tasks** | Tabletop pick-and-place (`tabletop`), planar pushing (`tabletop-push`: no grasp, success only once the cube settles in the target), three-cube stacking with per-subtask credit (`tabletop-stack`), a mobile-base variant (`tabletop-mobile`), and camera-guided crop-row following (`crop-row`: perception under dust, glare, blur, weeds and curved rows). |
 | **Backends** | MuJoCo (core; every task), PyBullet (pick-and-place, state and images) and Genesis (pick-and-place; state tested in CI, image rendering not exercised in CI). Isaac Sim adapter written against the Isaac Sim 5.0 API, CI-tested against a mocked runtime but **not yet run on hardware**. Same action/observation spaces; `compare` refuses cross-backend diffs unless asked. |
-| **Perturbation axes** | Lighting, camera offset and full extrinsics, object texture / pose / class swap, distractors, OOD initial state, actuation latency, image corruption, colour shift, instruction paraphrase. All of them run straight from a suite YAML. |
+| **Perturbation axes** | Lighting, camera offset and full extrinsics, object texture / pose / class swap, distractors, OOD initial state, actuation latency, image corruption, colour shift, instruction paraphrase; for crop rows, dust, glare, motion blur, weeds and row curvature. All of them run straight from a suite YAML. |
 | **Sampling** | Cartesian grids, Latin hypercube, Sobol, worst-case search; `gauntlet suite plan` sizes episodes-per-cell for a target effect. |
-| **Policy adapters** | Random, scripted pick-and-place and push controllers, OpenVLA (HF), SmolVLA / pi0 / diffusion (LeRobot), GR00T, RDT, Decision Transformer. |
+| **Policy adapters** | Random, scripted pick-and-place and push controllers, a classical crop-row detector, OpenVLA (HF), SmolVLA / pi0 / diffusion (LeRobot), GR00T, RDT, Decision Transformer. |
 | **Analysis** | Failure clusters, Wilson CIs, paired compare, per-cell diff, Sobol indices, behavioural metrics (time, path length, jerk), safety counters, `gauntlet bisect` across checkpoints. Non-finite observations or actions end the episode as a flagged failure instead of silently corrupting it. |
 | **Operations** | Rollout caching, MP4 recording, runtime drift detection, ROS 2 publish/record, fleet aggregation, static dashboard, real-to-sim scene ingestion with a nearest-frame renderer and a smoke-test gaussian-splat fit (gsplat CUDA or pure PyTorch). |
 
