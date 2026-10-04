@@ -8,6 +8,13 @@ from `0.2.0` onward (see `docs/stability.md`).
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-10-04
+
+### Changed
+- README: the overview video is re-encoded for wider browser support
+  (H.264 Main profile, 2.4 MB) and now has an animated preview that
+  links to it, so the project page on PyPI shows it too. No code changes.
+
 ## [0.5.0] — 2026-10-04
 
 ### Added
@@ -236,6 +243,7 @@ tooling) is partially shipped — see "Phase 3 (partial)" below.
 - Provisional: `gauntlet.realsim` (Phase 3 renderer protocol);
   `gauntlet.bisect`; the multi-camera `CameraSpec` API.
 
+[0.5.1]: https://github.com/mhussainahmad/gauntlet/releases/tag/v0.5.1
 [0.5.0]: https://github.com/mhussainahmad/gauntlet/releases/tag/v0.5.0
 [0.4.0]: https://github.com/mhussainahmad/gauntlet/releases/tag/v0.4.0
 [0.3.0]: https://github.com/mhussainahmad/gauntlet/releases/tag/v0.3.0
