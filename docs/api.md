@@ -175,6 +175,32 @@ Three-cube stacking, registered as `tabletop-stack`. It also satisfies
 per-subtask credit in `info["subtask_completion"]`; the Runner copies
 the final list onto the Episode for partial-credit reporting.
 
+### `CropRowEnv` (B-47)
+
+```python
+from gauntlet.env import CropRowEnv
+from gauntlet.policy import CropRowClassicalPolicy
+
+env = CropRowEnv(max_steps=100, render_size=(96, 128))
+env.set_perturbation("dust_density", 0.8)
+obs, info = env.reset(seed=0)        # obs = {"image": uint8[96, 128, 3]}
+obs, r, term, trunc, info = env.step(CropRowClassicalPolicy().act(obs))
+```
+
+Camera-guided crop-row following on a procedurally generated field
+(numpy renderer, no simulator). Action is `[steer]` in `[-1, 1]`;
+the observation is the image only, and `info` carries the ground-truth
+`lateral_error` / `heading_error`. Success: the vehicle stays inside
+the row corridor for the whole episode and finishes near the row
+centre. Axes: `dust_density`, `glare_intensity`, `motion_blur`,
+`weed_density`, `row_curvature`, `lighting_intensity`, plus the
+runner's `inference_delay_jitter` (`control_dt` = 0.1 s).
+`CropRowEnv.ground_coords(render_size)` returns the calibrated
+camera's per-pixel ground intersection. Registered as `crop-row`
+(gymnasium id `gauntlet/CropRow-v0`). `CropRowClassicalPolicy`
+(`--policy crop-row-classical`) is the excess-green / Otsu / line-fit
+reference detector; see `docs/crop-row.md`.
+
 ### Env registry
 
 ```python

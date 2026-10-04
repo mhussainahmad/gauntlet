@@ -9,6 +9,7 @@ from gauntlet.policy.base import Observation as Observation
 from gauntlet.policy.base import Policy as Policy
 from gauntlet.policy.base import ResettablePolicy as ResettablePolicy
 from gauntlet.policy.base import SamplablePolicy as SamplablePolicy
+from gauntlet.policy.crop_row import CropRowClassicalPolicy as CropRowClassicalPolicy
 from gauntlet.policy.random import RandomPolicy as RandomPolicy
 from gauntlet.policy.registry import PolicySpecError as PolicySpecError
 from gauntlet.policy.registry import resolve_policy_factory as resolve_policy_factory
@@ -25,6 +26,7 @@ if TYPE_CHECKING:  # pragma: no cover — re-export is dynamic, see __getattr__ 
 __all__ = [
     "DEFAULT_PICK_AND_PLACE_TRAJECTORY",
     "Action",
+    "CropRowClassicalPolicy",
     "HuggingFacePolicy",
     "LeRobotPolicy",
     "Observation",

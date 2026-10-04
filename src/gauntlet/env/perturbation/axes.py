@@ -114,15 +114,20 @@ __all__ = [
     "camera_offset_y",
     "color_shift_synthetic",
     "distractor_count",
+    "dust_density",
+    "glare_intensity",
     "image_attack",
     "inference_delay_jitter",
     "initial_state_ood",
     "instruction_paraphrase",
     "lighting_intensity",
+    "motion_blur",
     "object_initial_pose_x",
     "object_initial_pose_y",
     "object_swap",
     "object_texture",
+    "row_curvature",
+    "weed_density",
 ]
 
 
@@ -198,6 +203,14 @@ DEFAULT_BOUNDS: Final[dict[str, tuple[float, float]]] = {
     # 50 ms / 20 Hz fallback). A 1-second ceiling on the default
     # sampler is generous — real suites override via the YAML.
     "inference_delay_jitter": (0.0, 1000.0),
+    # B-47 — crop-row field conditions (``env: crop-row`` only). The
+    # first four are unitless intensities in [0, 1]; ``row_curvature``
+    # is in 1/m (0.1 = a 10 m bend radius).
+    "dust_density": (0.0, 1.0),
+    "glare_intensity": (0.0, 1.0),
+    "motion_blur": (0.0, 1.0),
+    "weed_density": (0.0, 1.0),
+    "row_curvature": (0.0, 0.1),
 }
 
 
@@ -596,6 +609,45 @@ def distractor_count(*, low: int | None = None, high: int | None = None) -> Pert
     )
 
 
+def _crop_row_axis(name: str, low: float | None, high: float | None) -> PerturbationAxis:
+    lo, hi = _resolve_bounds(name, low, high)
+    d_lo, d_hi = DEFAULT_BOUNDS[name]
+    if lo < d_lo or hi > d_hi:
+        raise ValueError(f"{name} bounds must lie within [{d_lo}, {d_hi}]; got [{lo}, {hi}]")
+    return PerturbationAxis(
+        name=name,
+        kind=AXIS_KIND_CONTINUOUS,
+        sampler=make_continuous_sampler(lo, hi),
+        low=lo,
+        high=hi,
+    )
+
+
+def dust_density(*, low: float | None = None, high: float | None = None) -> PerturbationAxis:
+    """Airborne dust haze, 0 (clear) to 1 (dense). ``env: crop-row`` (B-47)."""
+    return _crop_row_axis("dust_density", low, high)
+
+
+def glare_intensity(*, low: float | None = None, high: float | None = None) -> PerturbationAxis:
+    """Low-sun flare and veiling glare, 0 to 1. ``env: crop-row`` (B-47)."""
+    return _crop_row_axis("glare_intensity", low, high)
+
+
+def motion_blur(*, low: float | None = None, high: float | None = None) -> PerturbationAxis:
+    """Vertical motion blur, 0 to 1 (1 = 15 px at 96 px height). ``env: crop-row`` (B-47)."""
+    return _crop_row_axis("motion_blur", low, high)
+
+
+def weed_density(*, low: float | None = None, high: float | None = None) -> PerturbationAxis:
+    """Weeds between the rows, 0 to 1. ``env: crop-row`` (B-47)."""
+    return _crop_row_axis("weed_density", low, high)
+
+
+def row_curvature(*, low: float | None = None, high: float | None = None) -> PerturbationAxis:
+    """Row curvature in 1/m, 0 (straight) to 0.1 (10 m radius). ``env: crop-row`` (B-47)."""
+    return _crop_row_axis("row_curvature", low, high)
+
+
 # Registry: axis_name -> zero-arg constructor producing the default axis.
 # Lets callers (tests, runner, YAML loader) iterate over all 7 axes
 # without hard-coding the list.
@@ -614,6 +666,11 @@ _DEFAULT_CONSTRUCTORS: Final[dict[str, AxisCtor]] = {
     "camera_extrinsics": camera_extrinsics,
     "color_shift_synthetic": color_shift_synthetic,
     "inference_delay_jitter": inference_delay_jitter,
+    "dust_density": dust_density,
+    "glare_intensity": glare_intensity,
+    "motion_blur": motion_blur,
+    "weed_density": weed_density,
+    "row_curvature": row_curvature,
 }
 
 

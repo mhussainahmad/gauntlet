@@ -751,6 +751,9 @@ module = [
     # gymnasium ``spaces.Space[Any]`` Protocol fields and
     # ``dict[str, Any]`` info-dict surface as ``gauntlet.env.tabletop``.
     "gauntlet.env.tabletop_stack",
+    # B-47 — crop-row env: same gymnasium ``dict[str, Any]`` reset / step
+    # info surface; the renderer itself is plain typed numpy.
+    "gauntlet.env.crop_row",
     # ``Callable[..., AxisSampler]`` factory ParamSpec (perturbation registry).
     "gauntlet.env.perturbation.base",
     # B-31 — wraps any GauntletEnv; carries the same gymnasium

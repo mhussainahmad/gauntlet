@@ -174,6 +174,23 @@ Contact-driven tasks are much less tolerant of stale commands.
 pick-and-place run unless `--allow-cross-backend` is passed: the two
 measure different tasks.
 
+## Crop-row guidance
+
+`env: crop-row` (gym id `gauntlet/CropRow-v0`) is a perception task: a
+vehicle follows a crop row at constant speed, the policy sees only a
+forward camera image and outputs a steering command. The scene is
+procedurally generated and rendered in numpy (about 2 ms per frame), so
+it needs no simulator. Its axes are field conditions for vision:
+`dust_density`, `glare_intensity`, `motion_blur`, `weed_density` and
+`row_curvature`, plus `lighting_intensity` and the runner's
+`inference_delay_jitter`.
+
+`--policy crop-row-classical` is a reference excess-green / Otsu /
+line-fit detector; `examples/crop_row/` trains a small CNN on clean
+scenes and runs it with numpy inference. [`docs/crop-row.md`](./crop-row.md)
+compares the two on `examples/suites/crop-row-field.yaml`: nearly the
+same overall success, completely different failure modes.
+
 ## Sensor and language axes
 
 Three axes act on what the policy *receives* rather than on the
