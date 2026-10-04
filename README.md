@@ -17,9 +17,9 @@ actuation latency, sensor corruption, instruction paraphrase), and
 writes a report that **breaks failures down by condition** instead of
 averaging them away.
 
-**55-second overview** (real rollouts, report and CLI output):
+**58-second overview** (real rollouts, report and CLI output):
 
-https://github.com/user-attachments/assets/7a55c70a-6c0d-42f4-8004-991032c3ac87
+https://github.com/user-attachments/assets/13df3e99-bd7a-411f-9f85-592c559b2f17
 
 ![Gauntlet report: failure clusters, per-axis sensitivity and success rates](https://raw.githubusercontent.com/mhussainahmad/gauntlet/main/docs/assets/report-field-conditions.png)
 
