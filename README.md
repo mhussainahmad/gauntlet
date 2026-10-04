@@ -113,12 +113,13 @@ points; see [`docs/plugin-development.md`](./docs/plugin-development.md).
 
 | | |
 |---|---|
-| **Backends** | MuJoCo (core), PyBullet, Genesis, Isaac Sim. Same action/observation spaces and axes; `compare` refuses cross-backend diffs unless asked. |
-| **Perturbation axes** | Lighting, camera offset and full extrinsics, object texture / pose / class swap, distractors, OOD initial state, actuation latency, image corruption, colour shift, instruction paraphrase. |
+| **Tasks** | Tabletop pick-and-place (`tabletop`) and planar pushing (`tabletop-push`: no grasp, success only once the cube settles in the target). |
+| **Backends** | MuJoCo (core), PyBullet, Genesis, Isaac Sim (state; image observations experimental and not hardware-verified). Same action/observation spaces and axes; `compare` refuses cross-backend diffs unless asked. |
+| **Perturbation axes** | Lighting, camera offset and full extrinsics, object texture / pose / class swap, distractors, OOD initial state, actuation latency, image corruption, colour shift, instruction paraphrase. All of them run straight from a suite YAML. |
 | **Sampling** | Cartesian grids, Latin hypercube, Sobol, worst-case search; `gauntlet suite plan` sizes episodes-per-cell for a target effect. |
-| **Policy adapters** | Random, scripted, OpenVLA (HF), SmolVLA / pi0 / diffusion (LeRobot), GR00T, RDT, Decision Transformer. |
+| **Policy adapters** | Random, scripted pick-and-place and push controllers, OpenVLA (HF), SmolVLA / pi0 / diffusion (LeRobot), GR00T, RDT, Decision Transformer. |
 | **Analysis** | Failure clusters, Wilson CIs, paired compare, per-cell diff, Sobol indices, behavioural metrics (time, path length, jerk), safety counters, `gauntlet bisect` across checkpoints. |
-| **Operations** | Rollout caching, MP4 recording, runtime drift detection, ROS 2 publish/record, fleet aggregation, static dashboard, real-to-sim scene ingestion. |
+| **Operations** | Rollout caching, MP4 recording, runtime drift detection, ROS 2 publish/record, fleet aggregation, static dashboard, real-to-sim scene ingestion with a nearest-frame renderer and a smoke-test gaussian-splat fit (gsplat CUDA or pure PyTorch). |
 
 Details for each are in the **[user guide](./docs/guide.md)**. Design
 decisions are recorded as RFCs and design notes under [`docs/`](./docs/).
