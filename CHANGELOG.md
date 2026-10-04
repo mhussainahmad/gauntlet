@@ -8,6 +8,8 @@ from `0.2.0` onward (see `docs/stability.md`).
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-10-04
+
 ### Added
 - `env: crop-row` (`CropRowEnv`, gym id `gauntlet/CropRow-v0`, B-47):
   camera-guided crop-row following on a procedurally generated field,
@@ -234,6 +236,7 @@ tooling) is partially shipped — see "Phase 3 (partial)" below.
 - Provisional: `gauntlet.realsim` (Phase 3 renderer protocol);
   `gauntlet.bisect`; the multi-camera `CameraSpec` API.
 
+[0.5.0]: https://github.com/mhussainahmad/gauntlet/releases/tag/v0.5.0
 [0.4.0]: https://github.com/mhussainahmad/gauntlet/releases/tag/v0.4.0
 [0.3.0]: https://github.com/mhussainahmad/gauntlet/releases/tag/v0.3.0
 [0.2.1]: https://github.com/mhussainahmad/gauntlet/releases/tag/v0.2.1

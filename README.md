@@ -142,10 +142,10 @@ decisions are recorded as RFCs and design notes under [`docs/`](https://github.c
 
 ## Stability
 
-`0.4.x` is on PyPI as `gauntlet-robotics`. The public API, on-disk
+`0.5.x` is on PyPI as `gauntlet-robotics`. The public API, on-disk
 schemas and CLI flags follow [Semantic Versioning](https://semver.org/);
 the contract is in [`docs/stability.md`](https://github.com/mhussainahmad/gauntlet/blob/main/docs/stability.md). Pin
-`gauntlet-robotics>=0.4,<0.5`.
+`gauntlet-robotics>=0.5,<0.6`.
 
 ## Development
 
