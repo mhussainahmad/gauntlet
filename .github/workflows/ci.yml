@@ -99,7 +99,7 @@ jobs:
         # wedge pool shutdown on the hosted runner (coverage is not
         # consumed in CI). ``faulthandler_timeout`` dumps every thread's
         # stack if a single test stalls, so a future hang is diagnosable.
-        run: uv run pytest -v --no-cov -o faulthandler_timeout=180 -m "not hf and not lerobot and not monitor and not pybullet and not genesis and not ros2 and not isaac and not video and not render and not slow"
+        run: uv run pytest -v --no-cov -o faulthandler_timeout=180 -m "not hf and not lerobot and not monitor and not pybullet and not genesis and not ros2 and not isaac and not video and not render"
 
   hf-tests:
     name: hf tests (py${{ matrix.python-version }})
