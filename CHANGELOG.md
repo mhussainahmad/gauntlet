@@ -24,6 +24,13 @@ from `0.2.0` onward (see `docs/stability.md`).
   PyBullet, Genesis, Isaac) raises `ValueError` on a non-finite action.
   Previously `np.clip` passed NaN through to the simulator.
 
+### Fixed
+- MuJoCo `CameraSpec` angles were applied as degrees, not the
+  documented radians: the asset has no `<compiler angle="radian"/>`, so
+  `rx=1.2` compiled to a 1.2° tilt and custom cameras pointed almost
+  straight down. Angles are now converted on injection. The multi-camera
+  example in `docs/guide.md` uses poses checked against the fix.
+
 ## [0.3.0] — 2026-10-03
 
 ### Added

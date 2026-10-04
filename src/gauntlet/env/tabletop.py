@@ -46,6 +46,7 @@ across runs.
 from __future__ import annotations
 
 import contextlib
+import math
 from pathlib import Path
 from typing import Any, ClassVar, Final
 
@@ -1541,10 +1542,11 @@ def _inject_camera_elements(xml_str: str, specs: tuple[CameraSpec, ...]) -> str:
 
     The injected elements live just before the closing ``</worldbody>``
     tag and are named ``cam_<spec.name>`` to avoid colliding with the
-    existing ``main`` camera. Pose is written as MuJoCo XYZ Euler in
-    radians (RFC §2). The legacy single-camera codepath continues to
-    use the ``main`` camera so ``camera_offset_*`` perturbations are
-    untouched.
+    existing ``main`` camera. ``CameraSpec`` angles are radians (RFC §2);
+    the asset has no ``<compiler angle="radian"/>``, so MuJoCo reads
+    ``euler`` in degrees and the values are converted here. The legacy
+    single-camera codepath continues to use the ``main`` camera so
+    ``camera_offset_*`` perturbations are untouched.
 
     Raises:
         RuntimeError: if the input XML lacks a ``</worldbody>`` close tag.
@@ -1555,8 +1557,9 @@ def _inject_camera_elements(xml_str: str, specs: tuple[CameraSpec, ...]) -> str:
     inserts: list[str] = []
     for spec in specs:
         x, y, z, rx, ry, rz = spec.pose
+        ex, ey, ez = (math.degrees(v) for v in (rx, ry, rz))
         inserts.append(
-            f'    <camera name="cam_{spec.name}" pos="{x} {y} {z}" euler="{rx} {ry} {rz}"/>'
+            f'    <camera name="cam_{spec.name}" pos="{x} {y} {z}" euler="{ex} {ey} {ez}"/>'
         )
     block = "\n".join(inserts)
     return xml_str.replace(close_tag, f"{block}\n  {close_tag}", 1)

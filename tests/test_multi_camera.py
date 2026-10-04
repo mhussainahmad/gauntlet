@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 from collections.abc import Iterator
 
+import mujoco
 import numpy as np
 import pytest
 from gymnasium import spaces
@@ -305,3 +306,26 @@ class TestMultiCameraDeterminism:
         finally:
             env_a.close()
             env_b.close()
+
+
+def test_camera_spec_angles_are_radians() -> None:
+    """``CameraSpec.pose`` angles are radians; the MJCF compiler reads
+    ``euler`` in degrees, so the injected camera must be converted.
+
+    Regression: a pose of ``rx=pi/2`` used to compile to a 1.57 degree
+    tilt, leaving every custom camera pointing almost straight down.
+    """
+    import math
+
+    from gauntlet.env.tabletop import _quat_from_xyz_euler
+
+    pose = (0.0, -0.8, 1.1, math.pi / 2, 0.0, 0.3)
+    env = TabletopEnv(cameras=[CameraSpec(name="side", pose=pose, size=(16, 16))])
+    try:
+        cam_id = mujoco.mj_name2id(env._model, mujoco.mjtObj.mjOBJ_CAMERA, "cam_side")
+        quat = np.asarray(env._model.cam_quat[cam_id], dtype=np.float64)
+        expected = _quat_from_xyz_euler(*pose[3:])
+        # q and -q are the same rotation.
+        assert min(np.abs(quat - expected).max(), np.abs(quat + expected).max()) < 1e-6
+    finally:
+        env.close()
