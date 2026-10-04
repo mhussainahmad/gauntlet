@@ -8,6 +8,8 @@ from `0.2.0` onward (see `docs/stability.md`).
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-10-03
+
 ### Added
 - Experimental image observations on the Isaac Sim backend:
   `IsaacSimTabletopEnv(render_in_obs=True, render_size=(H, W))` adds a
@@ -178,4 +180,6 @@ tooling) is partially shipped — see "Phase 3 (partial)" below.
 - Provisional: `gauntlet.realsim` (Phase 3 renderer protocol);
   `gauntlet.bisect`; the multi-camera `CameraSpec` API.
 
-[0.2.0]: https://github.com/mhussainahmad/gauntlet/releases/tag/v0.2.0
+[0.3.0]: https://github.com/mhussainahmad/gauntlet/releases/tag/v0.3.0
+[0.2.1]: https://github.com/mhussainahmad/gauntlet/releases/tag/v0.2.1
+[0.2.0]: https://pypi.org/project/gauntlet-robotics/0.2.0/
