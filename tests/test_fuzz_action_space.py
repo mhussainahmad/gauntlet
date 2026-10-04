@@ -10,10 +10,9 @@ Cost control: each example loads a fresh :class:`TabletopEnv` (MuJoCo
 model load is ~50ms cold). We cap at ``max_examples=10`` and reuse the
 env across the inner loop. Wall-time well under 5s.
 
-We do NOT fuzz NaN / inf actions: ``np.clip(NaN, -1, 1)`` returns NaN,
-which the env propagates without raising. Asserting that NaN propagates
-silently is a behaviour the env does not promise; the production
-contract starts at *finite* float64 actions.
+NaN / inf actions are not fuzzed here: the env rejects them with
+:class:`ValueError` (see ``tests/test_property_action_clipping.py``).
+The silent-clip contract covers *finite* float64 actions.
 """
 
 from __future__ import annotations

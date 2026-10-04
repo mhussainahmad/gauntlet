@@ -213,6 +213,8 @@ class MobileTabletopEnv(gym.Env[_ObsType, _ActType]):
             raise ValueError(
                 f"action must have shape ({_TOTAL_ACTION_DIM},); got {a.shape}",
             )
+        if not np.all(np.isfinite(a)):
+            raise ValueError(f"action must be finite (no NaN/Inf); got {a}")
         a = np.clip(a, -1.0, 1.0).astype(np.float64, copy=False)
 
         inner_action = a[:_INNER_ACTION_DIM]

@@ -8,6 +8,22 @@ from `0.2.0` onward (see `docs/stability.md`).
 
 ## [Unreleased]
 
+### Added
+- `Episode.observation_invalid` / `Episode.action_invalid`. A NaN or
+  ±Inf in an observation or in the policy's action now ends the rollout
+  as a failure with the matching flag set, instead of flowing into the
+  next `policy.act` / `env.step`. One diverged checkpoint no longer
+  corrupts results silently or crashes a sweep; `gauntlet run` prints
+  how many episodes were affected. Both fields default to `False`, so
+  older `episodes.json` files still load, and `episode_hash` is
+  unchanged.
+- `gauntlet.runner.worker.validate_observation(obs)`.
+
+### Changed
+- Every backend's `step` (MuJoCo tabletop / push / stack / mobile,
+  PyBullet, Genesis, Isaac) raises `ValueError` on a non-finite action.
+  Previously `np.clip` passed NaN through to the simulator.
+
 ## [0.3.0] — 2026-10-03
 
 ### Added

@@ -4,7 +4,7 @@ The Runner pushes :class:`WorkItem` records into a multiprocessing
 :class:`multiprocessing.pool.Pool`; each worker turns one item into one
 :class:`Episode` via :func:`run_work_item`.
 
-Process lifecycle (matches Pin 3 in the task brief):
+Process lifecycle:
 
 * ``_pool_initializer`` runs once per worker on pool startup. It builds
   the env (``env_factory()``) and stashes it in this module's
@@ -34,10 +34,10 @@ Determinism contract
   deterministic stream from the same SeedSequence node, so policy
   randomness is decorrelated from env randomness but equally reproducible.
 
-Why two streams from one node? The pin asks for
-``policy_rng = np.random.default_rng(episode_seq)``; we keep that exact
-call. The env, however, takes an int (gymnasium's ``reset(seed=...)``
-contract), so we derive a uint32 from the same node. Empirically,
+Why two streams from one node? The policy stream is
+``policy_rng = np.random.default_rng(episode_seq)``. The env, however,
+takes an int (gymnasium's ``reset(seed=...)`` contract), so we derive a
+uint32 from the same node. Empirically,
 ``SeedSequence.spawn(...)[i].entropy`` is shared across siblings — it
 echoes the master seed — and would make every episode reset to the
 same state if used as the env seed. ``generate_state`` is the canonical
@@ -49,7 +49,7 @@ from __future__ import annotations
 import time
 import warnings
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final, Literal, TypedDict
@@ -85,6 +85,7 @@ __all__ = [
     "resolve_inference_delay_steps",
     "run_work_item",
     "trajectory_path_for",
+    "validate_observation",
     "write_trajectory_npz",
 ]
 
@@ -398,6 +399,32 @@ def extract_env_seed(seq: np.random.SeedSequence) -> int:
     return int(seq.generate_state(1, dtype=np.uint32)[0])
 
 
+def _first_non_finite_key(obs: Mapping[str, Any]) -> str | None:
+    """Return the first observation key holding a NaN / +-Inf, else ``None``.
+
+    Only floating-point entries are checked: integer arrays (``uint8``
+    images) cannot hold non-finite values, and non-numeric entries (an
+    instruction string) are not numeric state.
+    """
+    for key, value in obs.items():
+        arr = np.asarray(value)
+        if np.issubdtype(arr.dtype, np.floating) and not np.all(np.isfinite(arr)):
+            return key
+    return None
+
+
+def validate_observation(obs: Mapping[str, Any]) -> None:
+    """Raise :class:`ValueError` if any floating-point entry of *obs* is NaN / +-Inf.
+
+    The check :func:`execute_one` applies to every observation; there it
+    ends the rollout and sets :attr:`Episode.observation_invalid` rather
+    than raising, so one bad episode cannot crash a sweep.
+    """
+    key = _first_non_finite_key(obs)
+    if key is not None:
+        raise ValueError(f"observation {key!r} contains non-finite values (NaN/Inf)")
+
+
 def trajectory_path_for(trajectory_dir: Path, cell_index: int, episode_index: int) -> Path:
     """Return the canonical trajectory NPZ path for a (cell, episode).
 
@@ -483,7 +510,7 @@ def execute_one(
     ``n_workers=4``, and one produced by ``replay_one`` are all
     bit-identical for the same inputs.
 
-    Pipeline (mirrors Pin 3):
+    Pipeline:
 
     1. ``env.restore_baseline()`` wipes any model mutation from the
        previous episode handled by this worker.
@@ -585,6 +612,10 @@ def execute_one(
     obs, _ = env.reset(seed=env_seed)
     if isinstance(policy, ResettablePolicy):
         policy.reset(policy_rng)
+    # A non-finite observation or action ends the rollout as a flagged
+    # failure instead of flowing into the next policy / env call.
+    observation_invalid = _first_non_finite_key(obs) is not None
+    action_invalid = False
 
     # B-38 — resolve the millisecond axis value to an integer FIFO depth
     # NOW (after reset, but before the first ``policy.act``) so the
@@ -693,7 +724,7 @@ def execute_one(
     # would inflate every measured step by ~Nx and bias p99 toward
     # measurement overhead rather than the deployed critical path.
     inference_latency_buffer: list[float] = []
-    while not (terminated or truncated):
+    while not (terminated or truncated or observation_invalid):
         if sample_policy is not None and step_count % CONSISTENCY_STRIDE == 0:
             # Sample N actions for the current obs (state-preserving on
             # the SamplablePolicy contract), reduce per-axis variance to
@@ -714,6 +745,9 @@ def execute_one(
         action = policy.act(obs)
         _t1 = time.perf_counter()
         inference_latency_buffer.append((_t1 - _t0) * 1000.0)
+        if not np.all(np.isfinite(np.asarray(action, dtype=np.float64))):
+            action_invalid = True
+            break
         # B-38 — the trajectory / consistency / video buffers below
         # capture the FRESH action straight off ``policy.act`` (i.e.
         # what the policy *intended* this step). The action delivered
@@ -750,6 +784,7 @@ def execute_one(
             else:
                 delivered_action = delay_buffer[0]
         obs, reward, terminated, truncated, info = env.step(delivered_action)
+        observation_invalid = _first_non_finite_key(obs) is not None
         if record_trajectory:
             # Per-step reward / terminated / truncated. Ignored by the
             # NPZ writer (schema unchanged), surfaced as columns by
@@ -861,7 +896,7 @@ def execute_one(
     if energy_budget is not None and actuator_energy is not None:
         energy_over_budget = bool(actuator_energy > energy_budget)
 
-    success = bool(info.get("success", False))
+    success = bool(info.get("success", False)) and not (observation_invalid or action_invalid)
 
     # B-02 behavioural-metrics resolution. ``behavior_observed`` False
     # collapses every derived field to ``None`` — distinct from any
@@ -1010,6 +1045,8 @@ def execute_one(
         inference_latency_ms_p50=inference_latency_ms_p50,
         inference_latency_ms_p99=inference_latency_ms_p99,
         inference_latency_ms_max=inference_latency_ms_max,
+        observation_invalid=observation_invalid,
+        action_invalid=action_invalid,
     )
 
     if record_trajectory:

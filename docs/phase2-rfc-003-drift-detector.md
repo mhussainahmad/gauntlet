@@ -140,7 +140,7 @@ Three options were on the table.
 
 ### Why not (A)
 
-The task brief flagged "cheap per-step hook" as a possible option; on measurement it isn't. A 14→32→14 MLP forward on CPU is ~50 µs, which is <1% of a 5 ms env step — tolerable in isolation. But the CNN image-AE forward at 224×224 is 5-10 ms on CPU, which doubles the step time. Users would then disable the runtime check for image mode and re-enable it for state mode, and we'd be maintaining two integration paths. Post-episode analysis sidesteps the whole question.
+A "cheap per-step hook" looked like a possible option; on measurement it isn't. A 14→32→14 MLP forward on CPU is ~50 µs, which is <1% of a 5 ms env step — tolerable in isolation. But the CNN image-AE forward at 224×224 is 5-10 ms on CPU, which doubles the step time. Users would then disable the runtime check for image mode and re-enable it for state mode, and we'd be maintaining two integration paths. Post-episode analysis sidesteps the whole question.
 
 ## 5. Action-entropy metric: per-dim action std within the trajectory
 
@@ -155,7 +155,7 @@ action_entropy_scalar = mean(action_std_per_dim)           # scalar
 
 Both are emitted in `drift.json` per episode (`per_episode[i].action_std_per_dim` and `per_episode[i].action_entropy`). The scalar is plotted; the per-dim vector is visible in the per-episode table for drill-down.
 
-### Why this, over the three alternatives the task brief named
+### Why this, over the three alternatives
 
 1. **Variance / std across steps within an episode** (chosen). Captures the concrete failure mode "policy saturates at ±1 on every step" — std drops to ~0. Captures the opposite failure "policy oscillates wildly" — std rises. Works identically for deterministic (`ScriptedPolicy`) and stochastic (`RandomPolicy`) policies. Requires **no reference distribution** (the AE side already needs one; doubling the reference-data requirement is a bad tradeoff). Trivially unit-testable — a synthetic trajectory with known std gives an exact expected value.
 2. **Per-dim histogram divergence (KL) against a reference distribution.** Strictly more informative than std — captures distributional shape, not just spread — but requires building a reference action histogram per axis per dim and keeping it around. Flagged as future work: the reference-sweep workflow (§2) already produces the raw data, so the upgrade path is "add an `action_histogram.npz` emitted by `monitor train` and consumed by `monitor score`". Adding it in Task 3 doubles the state of `ae_dir` and forces another schema decision for zero additional signal over (1) on the tabletop env. Defer.
@@ -168,7 +168,7 @@ Deliberate limitations (documented in the `drift.json` schema docstring so users
 - A policy that is stuck at `action = [0.5, 0, 0, 0, 0, 0, open]` for every step of every episode has near-zero std; the AE reconstruction error will catch the *observation* staleness (the cube isn't being moved) but action-entropy alone reads "low variability" without distinguishing "stuck" from "confidently executing a short plan".
 - Per-dim std is scale-dependent. Action dim 6 (gripper) is ±1 binary per TabletopEnv's snap semantics; dims 0-5 are `[-1, 1]`-bounded twist commands. A "high std on dim 6" signal usually means "the policy is toggling the gripper every step", which is a failure mode. The scalar mean across dims is reported so users can spot the obvious case; the per-dim vector lets them investigate.
 
-## 6. Trajectory capture (the design question the task brief glossed)
+## 6. Trajectory capture (the open design question)
 
 ### The gating fact
 

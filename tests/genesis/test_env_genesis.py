@@ -408,3 +408,11 @@ def test_restore_baseline_hides_all_distractors(env: GenesisTabletopEnv) -> None
     zs2 = [float(d.get_pos().cpu().numpy()[2]) for d in env._distractors]
     assert all(z == -10.0 for z in zs1)
     assert zs1 == zs2
+
+
+def test_step_rejects_non_finite_action(env: GenesisTabletopEnv) -> None:
+    env.reset(seed=0)
+    bad = np.zeros(7, dtype=np.float64)
+    bad[0] = np.inf
+    with pytest.raises(ValueError, match=r"finite"):
+        env.step(bad)

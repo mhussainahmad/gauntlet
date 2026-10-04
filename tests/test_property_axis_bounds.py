@@ -113,7 +113,7 @@ def test_every_axis_value_lies_within_declared_bounds(seed: int) -> None:
 
     1000 samples per (seed, axis) pair across 200 hypothesis examples
     works out to ~2.8M draws over the full property suite — far above
-    the 1000-sample target the plan asks for, while still wall-time-
+    a 1000-sample target, while still wall-time-
     cheap because no env is involved.
     """
     rng = np.random.default_rng(seed)

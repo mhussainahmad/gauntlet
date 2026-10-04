@@ -30,8 +30,8 @@ options today:
    real-robot evaluation.
 
 This RFC adds a **first-class, opt-in** multi-camera surface that
-keeps the single-camera default byte-identical (sacred per the task
-spec; the existing render tests at `tests/test_env.py:430-481` pin
+keeps the single-camera default byte-identical (a hard requirement;
+the existing render tests at `tests/test_env.py:430-481` pin
 this), and lights up an `obs["images"]: dict[str, np.ndarray]` path
 for callers that want it.
 

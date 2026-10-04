@@ -18,7 +18,7 @@ reset is clean); the property here is orthogonal and covers the
 *step-history*-then-reset case (no perturbation, but several arbitrary
 ``step`` calls in between).
 
-Hypothesis budget: ``max_examples=20`` per test (the plan asks for
+Hypothesis budget: ``max_examples=20`` per test (the target is
 "100 random seeds"; 200 default examples would saturate the env-step
 cost). The conftest profile's ``max_examples=200`` only governs the
 no-env tests — these env-touching tests cap themselves explicitly.

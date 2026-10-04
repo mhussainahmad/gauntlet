@@ -220,3 +220,19 @@ def test_texture_assets_resolve_via_importlib_resources() -> None:
     # The two textures must be distinct — step-9 object_texture swap
     # relies on them producing visibly different cube colours.
     assert default_tex.read_bytes() != alt_tex.read_bytes()
+
+
+def test_step_rejects_non_finite_action() -> None:
+    import numpy as np
+
+    from gauntlet.env.pybullet.tabletop_pybullet import PyBulletTabletopEnv
+
+    env = PyBulletTabletopEnv()
+    try:
+        env.reset(seed=0)
+        bad = np.zeros(7, dtype=np.float64)
+        bad[0] = np.nan
+        with pytest.raises(ValueError, match=r"finite"):
+            env.step(bad)
+    finally:
+        env.close()

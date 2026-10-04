@@ -14,15 +14,10 @@ Phase 2.5 Task 13 — covers two gaps left by
    in the snapshot delta, but the env's silent-clip contract keeps the
    delta inside the envelope.
 
-2. **NaN / Inf input behaviour as a spec.** ``np.clip(NaN, -1, 1)``
-   returns NaN; the env propagates that NaN into mocap_pos and the
-   downstream observation. The existing fuzz test explicitly excludes
-   NaN/Inf inputs *and* documents the env's silent propagation. We
-   re-pin the gap here as ``pytest.xfail(strict=False)`` properties
-   — they serve as a spec for the future hardening that should sanitise
-   NaN/Inf inputs at the env boundary (tracked separately; T13 is the
-   *measurement* task, not the *fix*). ``strict=False`` lets a future
-   sanitiser flip these into XPASS without failing the suite.
+2. **Non-finite actions are rejected.** ``np.clip(NaN, -1, 1)`` returns
+   NaN, so without a check a NaN action would reach the mocap pose and
+   the next observation. Every backend's ``step`` raises
+   :class:`ValueError` on a NaN / +-Inf action instead.
 
 The hypothesis budget for the env-touching properties is capped via
 per-test ``@settings(max_examples=15)`` because each example pays the
@@ -152,80 +147,49 @@ def test_wrong_shape_action_with_arbitrary_fill_raises_value_error(
         e.close()
 
 
-# ----- NaN / Inf input behaviour as a spec (xfail) --------------------------
+# ----- NaN / Inf actions are rejected ---------------------------------------
 
 
 def _make_action_with_non_finite(fill_strategy: str, dim: int = _ACTION_DIM) -> NDArray[np.float64]:
     """Build a 7-vector containing exactly one non-finite entry.
 
-    The single-entry shape is the most aggressive test (a fully NaN
-    vector would also produce NaN obs trivially); we target a single
-    axis so a future "sanitise per-axis" fix is correctly exercised.
+    A single bad entry is the most aggressive case: one non-finite axis
+    must be enough to reject the whole action.
     """
     a = np.zeros(dim, dtype=np.float64)
     a[0] = {"nan": np.nan, "inf": np.inf, "neg_inf": -np.inf}[fill_strategy]
     return a
 
 
-@pytest.mark.xfail(
-    strict=False,
-    reason=(
-        "Spec for future hardening: ``np.clip(NaN, -1, 1)`` returns NaN, "
-        "and the env propagates the NaN into mocap_pos and the downstream "
-        "observation. T13 is the measurement task; the fix (sanitise "
-        "non-finite inputs at the env boundary, raise ValueError) lands "
-        "in a separate follow-up PR. ``strict=False`` so a future "
-        "sanitiser produces XPASS without breaking the suite."
-    ),
-)
 @pytest.mark.parametrize("fill_strategy", ["nan", "inf", "neg_inf"])
 def test_step_rejects_non_finite_action_input(fill_strategy: str) -> None:
-    """Spec: an action containing NaN / +Inf / -Inf should raise
-    :class:`ValueError` at the env boundary (mirroring the wrong-shape
-    branch's typed-rejection contract). Currently the env silently
-    propagates non-finite inputs through ``np.clip`` into the mocap
-    pose, and the resulting observation contains NaN — the test below
-    ``test_step_with_non_finite_action_currently_propagates_to_obs``
-    pins that current behaviour so a future sanitiser fix surfaces as
-    a single-test diff rather than two correlated regressions."""
-    e = TabletopEnv(max_steps=1)
+    """A NaN / +Inf / -Inf action raises :class:`ValueError` at the env
+    boundary (mirroring the wrong-shape branch) and leaves the env state
+    untouched, so the caller can keep stepping with a finite action."""
+    e = TabletopEnv(max_steps=5)
     try:
-        e.reset(seed=0)
-        bad_action = _make_action_with_non_finite(fill_strategy)
-        with pytest.raises(ValueError, match=r"non-finite|finite|NaN|Inf"):
-            e.step(bad_action)
+        obs0, _ = e.reset(seed=0)
+        with pytest.raises(ValueError, match=r"finite"):
+            e.step(_make_action_with_non_finite(fill_strategy))
+        obs1, *_ = e.step(np.zeros(_ACTION_DIM, dtype=np.float64))
+        assert np.all(np.isfinite(obs1["ee_pos"]))
+        np.testing.assert_allclose(obs1["ee_pos"], obs0["ee_pos"], atol=1e-3)
     finally:
         e.close()
 
 
-@pytest.mark.parametrize("fill_strategy", ["nan", "inf", "neg_inf"])
-def test_step_with_non_finite_action_currently_propagates_to_obs(fill_strategy: str) -> None:
-    """Pins the *current* behaviour: a non-finite action propagates
-    through ``np.clip`` (which preserves NaN and saturates +/- Inf) and
-    appears as non-finite mocap_pos / ee_pos in the next observation.
-    This is the gap the xfail spec above documents; pinned here so a
-    future sanitiser change knows to flip both tests in lockstep —
-    the xfail becomes XPASS, this test starts failing, and the diff
-    ratchets the contract honestly."""
-    e = TabletopEnv(max_steps=1)
+@pytest.mark.parametrize("env_name", ["tabletop-push", "tabletop-stack", "tabletop-mobile"])
+def test_other_mujoco_envs_reject_non_finite_action(env_name: str) -> None:
+    from gauntlet.env.registry import get_env_factory
+
+    e = get_env_factory(env_name)()
     try:
         e.reset(seed=0)
-        bad_action = _make_action_with_non_finite(fill_strategy)
-        obs, _reward, _terminated, _truncated, _info = e.step(bad_action)
-        ee_pos = np.asarray(obs["ee_pos"], dtype=np.float64)
-        # NaN saturates `np.clip` to NaN; +/-Inf saturates to the bound,
-        # so for the Inf cases the propagated value is a finite +/- 1.0
-        # which arrives at the mocap as a delta of MAX_LINEAR_STEP. The
-        # NaN case is the one that produces a non-finite obs; the Inf
-        # cases produce a finite-but-saturated obs. Document both.
-        if fill_strategy == "nan":
-            assert not np.all(np.isfinite(ee_pos)), (
-                "regression: NaN action no longer propagates to obs — "
-                "if intended, flip the xfail above to XPASS in the same diff."
-            )
-        else:
-            # +/-Inf clips to +/-1; the mocap delta is bounded by
-            # MAX_LINEAR_STEP. The obs is finite — pin it.
-            assert np.all(np.isfinite(ee_pos))
+        shape = e.action_space.shape
+        assert shape is not None
+        bad = np.zeros(shape, dtype=np.float64)
+        bad[-1] = np.nan
+        with pytest.raises(ValueError, match=r"finite"):
+            e.step(bad)
     finally:
         e.close()
