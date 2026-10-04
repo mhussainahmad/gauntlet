@@ -9,6 +9,12 @@ from `0.2.0` onward (see `docs/stability.md`).
 ## [Unreleased]
 
 ### Added
+- Experimental image observations on the Isaac Sim backend:
+  `IsaacSimTabletopEnv(render_in_obs=True, render_size=(H, W))` adds a
+  camera, key light and cube materials, and maps `lighting_intensity`,
+  `camera_offset_x/y` and `object_texture` onto them. Written against
+  the Isaac Sim 5.0 sources and tested only against a fake `isaacsim`
+  namespace — **not run on real hardware**; the constructor warns.
 - `gsplat` real-to-sim renderer now renders (B-46). The first call per
   scene fits a small set of 3D gaussians to the scene's frames; any
   viewpoint is then rasterised. Uses gsplat's CUDA rasterizer when it

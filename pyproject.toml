@@ -777,6 +777,7 @@ module = [
     "gauntlet.env.genesis.tabletop_genesis",
     "gauntlet.env.isaac",
     "gauntlet.env.isaac.tabletop_isaac",
+    "gauntlet.env.isaac.rendering",
     # Policy adapters — torch / transformers / lerobot / PIL FFI.
     "gauntlet.policy",
     "gauntlet.policy.base",

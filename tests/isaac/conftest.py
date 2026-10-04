@@ -37,6 +37,11 @@ _FAKE_MODULE_NAMES: tuple[str, ...] = (
     "isaacsim.core",
     "isaacsim.core.api",
     "isaacsim.core.api.objects",
+    "isaacsim.core.api.materials",
+    "isaacsim.core.utils",
+    "isaacsim.core.utils.prims",
+    "isaacsim.sensors",
+    "isaacsim.sensors.camera",
     "omni",
     "omni.isaac",
     "omni.isaac.core",
@@ -108,6 +113,100 @@ class _FakePrim:
     def get_world_pose(self) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         return self._position.copy(), self._orientation.copy()
 
+    def apply_visual_material(self, material: _FakePreviewSurface) -> None:
+        self.material = material
+        _FAKE_STAGE["cube_color"] = material.color
+
+
+# Shared fake "stage": the light, camera and cube material write here and
+# the fake camera's frame is a pure function of it, so tests can check
+# that each cosmetic axis reaches the image.
+_FAKE_STAGE: dict[str, Any] = {}
+
+
+class _FakeAttribute:
+    def __init__(self, key: str) -> None:
+        self._key = key
+
+    def Set(self, value: float) -> None:
+        _FAKE_STAGE[self._key] = float(value)
+
+
+class _FakeUsdPrim:
+    """Stub for the ``Usd.Prim`` returned by ``create_prim``."""
+
+    def __init__(self, prim_path: str, prim_type: str, attributes: dict[str, Any]) -> None:
+        self.prim_path = prim_path
+        self.prim_type = prim_type
+        for key, value in attributes.items():
+            _FAKE_STAGE[key] = float(value)
+
+    def GetAttribute(self, name: str) -> _FakeAttribute:
+        return _FakeAttribute(name)
+
+
+def _fake_create_prim(
+    prim_path: str, prim_type: str = "Xform", attributes: dict[str, Any] | None = None, **_: Any
+) -> _FakeUsdPrim:
+    return _FakeUsdPrim(prim_path, prim_type, attributes or {})
+
+
+class _FakePreviewSurface:
+    def __init__(self, prim_path: str, color: NDArray[np.float64] | None = None) -> None:
+        self.prim_path = prim_path
+        self.color = np.zeros(3) if color is None else np.asarray(color, dtype=np.float64)
+
+
+class _FakeCamera:
+    """Stub for ``isaacsim.sensors.camera.Camera``.
+
+    Returns no frame until ``initialize()`` plus one ``World.render()``
+    (mirroring the warm-up the real sensor needs), then a uint8 RGBA
+    frame encoding the light intensity (R), cube colour (G) and camera
+    x position (B).
+    """
+
+    def __init__(
+        self,
+        prim_path: str,
+        resolution: tuple[int, int] = (128, 128),
+        position: NDArray[np.float64] | None = None,
+        orientation: NDArray[np.float64] | None = None,
+        **_: Any,
+    ) -> None:
+        self.prim_path = prim_path
+        self.resolution = resolution
+        self.position = np.zeros(3) if position is None else np.asarray(position)
+        self.orientation = orientation
+        self.initialized = False
+        self.set_world_pose_calls: list[dict[str, Any]] = []
+        _FAKE_STAGE["camera"] = self
+
+    def initialize(self) -> None:
+        self.initialized = True
+
+    def set_world_pose(
+        self,
+        position: NDArray[np.float64] | None = None,
+        orientation: NDArray[np.float64] | None = None,
+        camera_axes: str = "world",
+    ) -> None:
+        if position is not None:
+            self.position = np.asarray(position, dtype=np.float64)
+        self.orientation = orientation
+        self.set_world_pose_calls.append({"position": position, "camera_axes": camera_axes})
+
+    def get_rgba(self) -> NDArray[np.uint8]:
+        if not self.initialized or _FAKE_STAGE.get("renders", 0) == 0:
+            return np.zeros((0, 0, 4), dtype=np.uint8)
+        width, height = self.resolution
+        frame = np.zeros((height, width, 4), dtype=np.uint8)
+        frame[..., 0] = int(_FAKE_STAGE.get("inputs:intensity", 0.0) / 100) % 256
+        frame[..., 1] = int(255 * float(np.asarray(_FAKE_STAGE.get("cube_color", np.zeros(3)))[1]))
+        frame[..., 2] = int(100 * self.position[0]) % 256
+        frame[..., 3] = 255
+        return frame
+
 
 class _FakeScene:
     """Stub for ``World.scene`` — collects every added prim and
@@ -134,8 +233,12 @@ class _FakeWorld:
         self.reset_calls += 1
 
     def step(self, render: bool = True) -> None:
-        del render
         self.step_calls += 1
+        if render:
+            _FAKE_STAGE["renders"] = _FAKE_STAGE.get("renders", 0) + 1
+
+    def render(self) -> None:
+        _FAKE_STAGE["renders"] = _FAKE_STAGE.get("renders", 0) + 1
 
 
 class _FakeSimulationApp:
@@ -179,6 +282,15 @@ def _build_fake_modules() -> dict[str, types.ModuleType]:
     # imports through `isaacsim.core.api`, but we expose the omni.*
     # path for forward compatibility / future tests that simulate
     # transition between API generations.
+    isaacsim_core_api_materials_mod = types.ModuleType("isaacsim.core.api.materials")
+    isaacsim_core_api_materials_mod.PreviewSurface = _FakePreviewSurface  # type: ignore[attr-defined]
+    isaacsim_core_utils_mod = types.ModuleType("isaacsim.core.utils")
+    isaacsim_core_utils_prims_mod = types.ModuleType("isaacsim.core.utils.prims")
+    isaacsim_core_utils_prims_mod.create_prim = _fake_create_prim  # type: ignore[attr-defined]
+    isaacsim_sensors_mod = types.ModuleType("isaacsim.sensors")
+    isaacsim_sensors_camera_mod = types.ModuleType("isaacsim.sensors.camera")
+    isaacsim_sensors_camera_mod.Camera = _FakeCamera  # type: ignore[attr-defined]
+
     omni_mod = types.ModuleType("omni")
     omni_isaac_mod = types.ModuleType("omni.isaac")
     omni_isaac_core_mod = types.ModuleType("omni.isaac.core")
@@ -189,6 +301,11 @@ def _build_fake_modules() -> dict[str, types.ModuleType]:
         "isaacsim.core": isaacsim_core_mod,
         "isaacsim.core.api": isaacsim_core_api_mod,
         "isaacsim.core.api.objects": isaacsim_core_api_objects_mod,
+        "isaacsim.core.api.materials": isaacsim_core_api_materials_mod,
+        "isaacsim.core.utils": isaacsim_core_utils_mod,
+        "isaacsim.core.utils.prims": isaacsim_core_utils_prims_mod,
+        "isaacsim.sensors": isaacsim_sensors_mod,
+        "isaacsim.sensors.camera": isaacsim_sensors_camera_mod,
         "omni": omni_mod,
         "omni.isaac": omni_isaac_mod,
         "omni.isaac.core": omni_isaac_core_mod,
@@ -215,6 +332,7 @@ def _install_fake_isaacsim(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         if mod.startswith("gauntlet.env.isaac") or mod in _FAKE_MODULE_NAMES:
             monkeypatch.delitem(sys.modules, mod, raising=False)
 
+    _FAKE_STAGE.clear()
     fakes = _build_fake_modules()
     for name, module in fakes.items():
         monkeypatch.setitem(sys.modules, name, module)
@@ -243,6 +361,8 @@ def _install_fake_isaacsim(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 # without re-walking ``sys.modules``.
 
 __all__ = [
+    "_FAKE_STAGE",
+    "_FakeCamera",
     "_FakePrim",
     "_FakeScene",
     "_FakeSimulationApp",

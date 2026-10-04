@@ -32,7 +32,7 @@ install); `tabletop-pybullet`, `tabletop-genesis`, and
 | `tabletop`           | MuJoCo    | `uv sync` (core)                         | State + render-on-demand |
 | `tabletop-pybullet`  | PyBullet  | `uv sync --extra pybullet`               | State + render-on-demand |
 | `tabletop-genesis`   | Genesis   | `uv sync --extra genesis`                | State + render-on-demand |
-| `tabletop-isaac`     | Isaac Sim | `uv sync --extra isaac` (GPU required)   | State-only (rendering follow-up) |
+| `tabletop-isaac`     | Isaac Sim | `uv sync --extra isaac` (GPU required)   | State; images experimental, not hardware-verified |
 
 The four backends share action/observation spaces byte-for-byte and
 the canonical 7 perturbation axes. They are **not** numerically
@@ -47,15 +47,26 @@ a CUDA-capable RTX-class GPU at runtime**. The `[isaac]` extra resolves
 on CPU-only machines but the Kit bootstrap inside `IsaacSimTabletopEnv.__init__`
 fails without a GPU. CI tests use a `sys.modules`-injected fake
 `isaacsim` namespace and do NOT install this extra; live execution
-needs a developer GPU workstation. The state-only first cut declares
-the four cosmetic axes (`lighting_intensity`, `camera_offset_x`,
-`camera_offset_y`, `object_texture`) `VISUAL_ONLY_AXES` so cosmetic-only
-sweeps are rejected at suite-load time on this backend until the
-rendering follow-up RFC lands.
+needs a developer GPU workstation.
 
-Image observations are available on all three backends via
+`IsaacSimTabletopEnv(render_in_obs=True)` adds an RGB camera, a key
+light and two cube materials, and routes `lighting_intensity`,
+`camera_offset_x/y` and `object_texture` to them
+(`gauntlet.env.isaac.rendering`). **This path is experimental and has
+not been run on real hardware.** It is written against the Isaac Sim
+5.0 sources (`isaacsim.sensors.camera.Camera`, `PreviewSurface`,
+`create_prim(..., "DistantLight")`) and tested only against the fake
+namespace, which proves the routing, not the pixels; the constructor
+warns accordingly. The default is state-only, and because
+`VISUAL_ONLY_AXES` is a class-level set the four cosmetic axes stay in
+it, so a suite made only of cosmetic axes is still rejected at load
+time on this backend. Mixed suites run, and with rendering on the
+cosmetic axes take effect.
+
+Image observations are available on MuJoCo, PyBullet and Genesis via
 `render_in_obs=True` / `render_size=(H, W)` on the env constructor
-(`TabletopEnv`, `PyBulletTabletopEnv`, or `GenesisTabletopEnv`).
+(`TabletopEnv`, `PyBulletTabletopEnv`, or `GenesisTabletopEnv`), and
+experimentally on Isaac (above).
 PyBullet uses a headless, deterministic TINY rasteriser; Genesis uses
 its default CPU Rasterizer (pyrender-backed). The emitted `obs["image"]`
 Box has shape / dtype / bounds byte-identical across backends, so VLA

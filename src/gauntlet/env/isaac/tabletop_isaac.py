@@ -12,10 +12,15 @@ the deliberate differences RFC-009 §7 documents:
   vs Genesis vs Isaac Sim. Semantically similar, not numerically
   identical. ``gauntlet compare`` across backends measures simulator
   drift.
-* **State-only first cut** (§6). Cosmetic axes
+* **State-only by default** (§6). Cosmetic axes
   (``lighting_intensity``, ``object_texture``, ``camera_offset_{x,y}``)
-  queue + validate + store on shadow attributes and are members of
-  :attr:`VISUAL_ONLY_AXES` pending a follow-up rendering RFC.
+  queue + validate + store on shadow attributes. With
+  ``render_in_obs=True`` (experimental, not hardware-verified; see
+  :mod:`gauntlet.env.isaac.rendering`) they drive a camera, key light
+  and cube material, and ``obs["image"]`` is emitted. They stay in
+  :attr:`VISUAL_ONLY_AXES` because that set is class-level and the
+  default construction is state-only, so a suite of *only* cosmetic
+  axes is still rejected at load time.
 * **GPU-runtime requirement.** ``isaacsim`` wraps NVIDIA Omniverse
   Kit; constructing this env on a CPU-only machine raises a Kit
   bootstrap error from inside :class:`isaacsim.SimulationApp`.
@@ -216,6 +221,8 @@ class IsaacSimTabletopEnv:
         self,
         *,
         max_steps: int = 200,
+        render_in_obs: bool = False,
+        render_size: tuple[int, int] = (224, 224),
     ) -> None:
         """Boot Isaac Sim's ``SimulationApp`` (headless) and build the scene.
 
@@ -226,8 +233,21 @@ class IsaacSimTabletopEnv:
         """
         if max_steps <= 0:
             raise ValueError(f"max_steps must be positive; got {max_steps}")
+        h, w = render_size
+        if h <= 0 or w <= 0:
+            raise ValueError(f"render_size must be positive (H, W); got {render_size}")
 
         self._max_steps = max_steps
+        self._render_in_obs = bool(render_in_obs)
+        if self._render_in_obs:
+            warnings.warn(
+                "IsaacSimTabletopEnv(render_in_obs=True) is experimental and not "
+                "hardware-verified: written against the Isaac Sim 5.0 camera / material / "
+                "light APIs and tested only against a fake isaacsim namespace. See "
+                "gauntlet.env.isaac.rendering.",
+                UserWarning,
+                stacklevel=2,
+            )
 
         # ---- spaces (5-key state obs, identical to Genesis state-only) ----
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(7,), dtype=np.float64)
@@ -238,6 +258,8 @@ class IsaacSimTabletopEnv:
             "gripper": spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float64),
             "target_pos": spaces.Box(low=-np.inf, high=np.inf, shape=(3,), dtype=np.float64),
         }
+        if self._render_in_obs:
+            obs_spaces["image"] = spaces.Box(low=0, high=255, shape=(h, w, 3), dtype=np.uint8)
         self.observation_space = spaces.Dict(obs_spaces)
 
         # ---- Kit bootstrap + scene construction ----
@@ -325,6 +347,13 @@ class IsaacSimTabletopEnv:
             )
             self._distractors.append(d)
 
+        # ---- optional camera / light / materials (experimental) ----
+        self._renderer: Any = None
+        if self._render_in_obs:
+            from gauntlet.env.isaac.rendering import IsaacTabletopRenderer
+
+            self._renderer = IsaacTabletopRenderer(self._world, self._cube, (h, w))
+
         # ---- pending perturbations queue (drained by reset) ----
         self._pending_perturbations: dict[str, float] = {}
 
@@ -365,13 +394,16 @@ class IsaacSimTabletopEnv:
         return np.asarray(quat, dtype=np.float64).reshape(4)
 
     def _build_obs(self) -> dict[str, NDArray[Any]]:
-        return {
+        obs: dict[str, NDArray[Any]] = {
             "cube_pos": self._prim_pos(self._cube),
             "cube_quat": self._prim_quat(self._cube),
             "ee_pos": self._prim_pos(self._ee),
             "gripper": np.array([self._gripper_state], dtype=np.float64),
             "target_pos": self._target_pos.copy(),
         }
+        if self._renderer is not None:
+            obs["image"] = self._renderer.read()
+        return obs
 
     def _build_info(self) -> dict[str, Any]:
         return {
@@ -457,6 +489,8 @@ class IsaacSimTabletopEnv:
         # is a no-op so the unit tests don't catch this; documented
         # here so a real-GPU smoke doesn't surface drift later.
         self._world.reset()
+        if self._renderer is not None:
+            self._renderer.after_world_reset()
 
         # Re-seed cube XY (identity quat).
         cube_xy = self._rng.uniform(
@@ -491,6 +525,12 @@ class IsaacSimTabletopEnv:
         if self._pending_perturbations:
             self._apply_pending_perturbations()
             self._pending_perturbations = {}
+        if self._renderer is not None:
+            self._renderer.apply(
+                light_intensity=self._light_intensity,
+                cam_offset=self._cam_offset,
+                texture=self._texture_choice,
+            )
 
         self._step_count = 0
         self._grasped = False
@@ -519,9 +559,9 @@ class IsaacSimTabletopEnv:
         self._gripper_state = self.GRIPPER_OPEN if a[6] > 0.0 else self.GRIPPER_CLOSED
         self._update_grasp_state()
 
-        # ``render=False`` keeps the headless step path fast — no
-        # rasterisation cost on the state-only first cut.
-        self._world.step(render=False)
+        # Render only when image observations are on; the state-only
+        # path stays rasterisation-free.
+        self._world.step(render=self._render_in_obs)
 
         if self._grasped:
             self._snap_cube_to_ee()
