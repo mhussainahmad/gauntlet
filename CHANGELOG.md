@@ -8,6 +8,8 @@ from `0.2.0` onward (see `docs/stability.md`).
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-10-03
+
 ### Added
 - `Episode.observation_invalid` / `Episode.action_invalid`. A NaN or
   ±Inf in an observation or in the policy's action now ends the rollout
@@ -23,6 +25,12 @@ from `0.2.0` onward (see `docs/stability.md`).
 - Every backend's `step` (MuJoCo tabletop / push / stack / mobile,
   PyBullet, Genesis, Isaac) raises `ValueError` on a non-finite action.
   Previously `np.clip` passed NaN through to the simulator.
+- README: 55-second video overview; absolute links so they also work on
+  PyPI; feature table lists the stacking and mobile-base tasks and
+  states each backend's verification level.
+- `docs/api.md` documents every public symbol again (14 were missing).
+- CI's torch-free job now runs `slow`-marked tests too, including the
+  API-docs freshness check.
 
 ### Fixed
 - MuJoCo `CameraSpec` angles were applied as degrees, not the
@@ -30,6 +38,8 @@ from `0.2.0` onward (see `docs/stability.md`).
   `rx=1.2` compiled to a 1.2° tilt and custom cameras pointed almost
   straight down. Angles are now converted on injection. The multi-camera
   example in `docs/guide.md` uses poses checked against the fix.
+- `gauntlet compare --help` no longer says the HTML companion is
+  "deferred"; it points at `--github-summary` and `gauntlet diff`.
 
 ## [0.3.0] — 2026-10-03
 
@@ -203,6 +213,7 @@ tooling) is partially shipped — see "Phase 3 (partial)" below.
 - Provisional: `gauntlet.realsim` (Phase 3 renderer protocol);
   `gauntlet.bisect`; the multi-camera `CameraSpec` API.
 
+[0.4.0]: https://github.com/mhussainahmad/gauntlet/releases/tag/v0.4.0
 [0.3.0]: https://github.com/mhussainahmad/gauntlet/releases/tag/v0.3.0
 [0.2.1]: https://github.com/mhussainahmad/gauntlet/releases/tag/v0.2.1
 [0.2.0]: https://pypi.org/project/gauntlet-robotics/0.2.0/

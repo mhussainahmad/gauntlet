@@ -10,8 +10,8 @@ Three subcommands wire the rest of the harness end-to-end:
   ``report.json`` (loads as-is). Auto-detects by peeking at the JSON
   top-level type (``list`` vs ``dict``).
 * :func:`compare` — diff two runs and emit ``compare.json`` plus a
-  short stderr summary. The HTML companion is deferred to Phase 2;
-  Phase 1 callers script off the JSON.
+  short stderr summary (``--github-summary`` adds a Markdown table for
+  CI). ``gauntlet diff`` prints the per-cell human-readable delta.
 
 Stdout is reserved for machine-readable output (none in Phase 1).
 Status messages and errors all go to stderr via
@@ -1389,7 +1389,7 @@ def compare(
         ),
     ] = None,
 ) -> None:
-    """Diff two runs and emit compare.json (HTML companion deferred to Phase 2)."""
+    """Diff two runs and emit compare.json (plus an optional GitHub summary)."""
     report_a, episodes_a = _load_report_with_episodes(results_a)
     report_b, episodes_b = _load_report_with_episodes(results_b)
 

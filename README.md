@@ -3,7 +3,7 @@
 [![CI](https://github.com/mhussainahmad/gauntlet/actions/workflows/ci.yml/badge.svg)](https://github.com/mhussainahmad/gauntlet/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/gauntlet-robotics.svg)](https://pypi.org/project/gauntlet-robotics/)
 [![Python](https://img.shields.io/pypi/pyversions/gauntlet-robotics.svg)](https://pypi.org/project/gauntlet-robotics/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/mhussainahmad/gauntlet/blob/main/LICENSE)
 
 **Regression testing and failure analysis for learned robot policies.**
 
@@ -17,9 +17,13 @@ actuation latency, sensor corruption, instruction paraphrase), and
 writes a report that **breaks failures down by condition** instead of
 averaging them away.
 
+**55-second overview** (real rollouts, report and CLI output):
+
+https://github.com/user-attachments/assets/7a55c70a-6c0d-42f4-8004-991032c3ac87
+
 ![Gauntlet report: failure clusters, per-axis sensitivity and success rates](https://raw.githubusercontent.com/mhussainahmad/gauntlet/main/docs/assets/report-field-conditions.png)
 
-<sub>Report from the [field-conditions example](./docs/field-robustness.md):
+<sub>Report from the [field-conditions example](https://github.com/mhussainahmad/gauntlet/blob/main/docs/field-robustness.md):
 the baseline is perfect up to 100 ms of control latency and falls to
 47% at 200 ms. Every failure cluster is a latency cluster.</sub>
 
@@ -47,7 +51,7 @@ default output:
 Every [GitHub Release](https://github.com/mhussainahmad/gauntlet/releases/latest)
 ships `reference-benchmark.zip`: two policies (a closed-loop controller
 and a degraded copy of it) on the smoke suite and the
-[field-conditions suite](./docs/field-robustness.md), with the
+[field-conditions suite](https://github.com/mhussainahmad/gauntlet/blob/main/docs/field-robustness.md), with the
 `compare` / `diff` deltas. Unzip and open any `report.html`.
 
 ## Install
@@ -107,29 +111,29 @@ uv run gauntlet compare out/last_week/episodes.json out/mine/episodes.json
 ```
 
 Third-party packages can also register policies and envs through entry
-points; see [`docs/plugin-development.md`](./docs/plugin-development.md).
+points; see [`docs/plugin-development.md`](https://github.com/mhussainahmad/gauntlet/blob/main/docs/plugin-development.md).
 
 ## What's in the box
 
 | | |
 |---|---|
-| **Tasks** | Tabletop pick-and-place (`tabletop`) and planar pushing (`tabletop-push`: no grasp, success only once the cube settles in the target). |
-| **Backends** | MuJoCo (core), PyBullet, Genesis, Isaac Sim (state; image observations experimental and not hardware-verified). Same action/observation spaces and axes; `compare` refuses cross-backend diffs unless asked. |
+| **Tasks** | Tabletop pick-and-place (`tabletop`), planar pushing (`tabletop-push`: no grasp, success only once the cube settles in the target), three-cube stacking with per-subtask credit (`tabletop-stack`) and a mobile-base variant (`tabletop-mobile`). |
+| **Backends** | MuJoCo (core; every task), PyBullet (pick-and-place, state and images) and Genesis (pick-and-place; state tested in CI, image rendering not exercised in CI). Isaac Sim adapter written against the Isaac Sim 5.0 API, CI-tested against a mocked runtime but **not yet run on hardware**. Same action/observation spaces; `compare` refuses cross-backend diffs unless asked. |
 | **Perturbation axes** | Lighting, camera offset and full extrinsics, object texture / pose / class swap, distractors, OOD initial state, actuation latency, image corruption, colour shift, instruction paraphrase. All of them run straight from a suite YAML. |
 | **Sampling** | Cartesian grids, Latin hypercube, Sobol, worst-case search; `gauntlet suite plan` sizes episodes-per-cell for a target effect. |
 | **Policy adapters** | Random, scripted pick-and-place and push controllers, OpenVLA (HF), SmolVLA / pi0 / diffusion (LeRobot), GR00T, RDT, Decision Transformer. |
-| **Analysis** | Failure clusters, Wilson CIs, paired compare, per-cell diff, Sobol indices, behavioural metrics (time, path length, jerk), safety counters, `gauntlet bisect` across checkpoints. |
+| **Analysis** | Failure clusters, Wilson CIs, paired compare, per-cell diff, Sobol indices, behavioural metrics (time, path length, jerk), safety counters, `gauntlet bisect` across checkpoints. Non-finite observations or actions end the episode as a flagged failure instead of silently corrupting it. |
 | **Operations** | Rollout caching, MP4 recording, runtime drift detection, ROS 2 publish/record, fleet aggregation, static dashboard, real-to-sim scene ingestion with a nearest-frame renderer and a smoke-test gaussian-splat fit (gsplat CUDA or pure PyTorch). |
 
-Details for each are in the **[user guide](./docs/guide.md)**. Design
-decisions are recorded as RFCs and design notes under [`docs/`](./docs/).
+Details for each are in the **[user guide](https://github.com/mhussainahmad/gauntlet/blob/main/docs/guide.md)**. Design
+decisions are recorded as RFCs and design notes under [`docs/`](https://github.com/mhussainahmad/gauntlet/tree/main/docs/).
 
 ## Stability
 
-`0.3.x` is on PyPI as `gauntlet-robotics`. The public API, on-disk
+`0.4.x` is on PyPI as `gauntlet-robotics`. The public API, on-disk
 schemas and CLI flags follow [Semantic Versioning](https://semver.org/);
-the contract is in [`docs/stability.md`](./docs/stability.md). Pin
-`gauntlet-robotics>=0.3,<0.4`.
+the contract is in [`docs/stability.md`](https://github.com/mhussainahmad/gauntlet/blob/main/docs/stability.md). Pin
+`gauntlet-robotics>=0.4,<0.5`.
 
 ## Development
 
@@ -137,11 +141,11 @@ the contract is in [`docs/stability.md`](./docs/stability.md). Pin
 uv sync
 uv run ruff check . && uv run ruff format --check .
 uv run mypy                 # --strict
-uv run pytest               # ~1,700 torch-free tests; extras run in their own CI jobs
+uv run pytest               # ~1,800 torch-free tests; extras run in their own CI jobs
 ```
 
-See [`CONTRIBUTING.md`](./CONTRIBUTING.md) and the
-[property-test notes](./docs/guide.md#property-tests).
+See [`CONTRIBUTING.md`](https://github.com/mhussainahmad/gauntlet/blob/main/CONTRIBUTING.md) and the
+[property-test notes](https://github.com/mhussainahmad/gauntlet/blob/main/docs/guide.md#property-tests).
 
 ## Project layout
 
@@ -166,4 +170,4 @@ src/gauntlet/
 
 ## License
 
-MIT, see [LICENSE](./LICENSE).
+MIT, see [LICENSE](https://github.com/mhussainahmad/gauntlet/blob/main/LICENSE).
