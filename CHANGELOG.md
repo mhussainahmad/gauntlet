@@ -9,6 +9,14 @@ from `0.2.0` onward (see `docs/stability.md`).
 ## [Unreleased]
 
 ### Added
+- `gsplat` real-to-sim renderer now renders (B-46). The first call per
+  scene fits a small set of 3D gaussians to the scene's frames; any
+  viewpoint is then rasterised. Uses gsplat's CUDA rasterizer when it
+  works and falls back to a pure-PyTorch rasterizer of the same model
+  (CPU or GPU) otherwise. The default fit is a smoke-test reconstructor
+  and says so. Poses are read as OpenGL camera-to-world by default;
+  `camera_convention="opencv"` for COLMAP-style poses. The
+  `[realsim-gsplat]` extra now includes Pillow.
 - `env: tabletop-push` (B-45): planar pushing on the tabletop scene.
   No grasp, colliding end-effector, success only once the cube settles
   inside the target. Shares every tabletop axis. Ships with a

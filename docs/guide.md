@@ -323,12 +323,9 @@ for the full design.
 
 The endgame for `GAUNTLET_SPEC.md` §7 is gaussian-splatting
 reconstruction of customer scenes from real-robot camera dumps
-straight into a renderable eval backend. Shipping the renderer
-itself needs `torch` + CUDA + a multi-gigabyte training pipeline,
-which violates spec §6 — so this release lands the *input pipeline*
-and the *renderer extension point* only. A plugin (or a future
-in-tree RFC) implements an actual renderer against the
-`RealSimRenderer` Protocol without touching the schema or the CLI:
+straight into a renderable eval backend. The core install ships the
+*input pipeline* and the `RealSimRenderer` extension point; renderers
+are plugins behind it:
 
 ```bash
 uv run gauntlet realsim ingest <frames-dir> \
@@ -344,9 +341,30 @@ symlinks via `--symlink`). The manifest carries `Pose` (4x4
 row-major rigid transforms, NeRFStudio / COLMAP `transforms.json`
 convention), `CameraIntrinsics` (pinhole + optional distortion,
 shared by id), and `CameraFrame` rows. `info` prints a one-screen
-manifest summary. The renderer itself is **deferred** — `RealSimRenderer`
-is a `typing.Protocol`, and `register_renderer` / `get_renderer` are a
-module-local registry for plugin renderers. See
+manifest summary. `RealSimRenderer` is a `typing.Protocol`, and
+`register_renderer` / `get_renderer` are a module-local registry. Two
+renderers ship:
+
+- `nearest-frame` — returns the training frame closest to the
+  requested pose. Zero dependencies; a lookup, not a reconstruction.
+- `gsplat` — fits a small set of 3D gaussians to the scene's frames on
+  first use and rasterises any viewpoint
+  (`pip install 'gauntlet-robotics[realsim-gsplat]'`). Uses gsplat's
+  CUDA rasterizer when it works and a pure-PyTorch rasterizer of the
+  same model otherwise (CPU or GPU). The default fit is a
+  **smoke-test reconstructor** — 4096 gaussians, L1 loss, no
+  densification — good for checking that poses and intrinsics are
+  consistent, not for judging reconstruction quality. On a synthetic
+  8-view scene it lifts held-out PSNR from 6 to 15 dB in about 25 s
+  on a laptop GPU. Override `_fit_gaussians` to load trained splats.
+  Poses are read as NeRFStudio / OpenGL camera-to-world by default
+  (`camera_convention="opencv"` for COLMAP-style poses).
+
+```bash
+uv run gauntlet realsim render <scene-dir> --renderer gsplat --out view.png
+```
+
+See
 [`docs/phase3-rfc-021-real-to-sim-stub.md`](./phase3-rfc-021-real-to-sim-stub.md)
 for the full design (pose representation, validation rules, plugin
 seam).

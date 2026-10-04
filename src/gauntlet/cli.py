@@ -3197,6 +3197,7 @@ def realsim_render(
         list_renderers,
         load_scene,
     )
+    from gauntlet.realsim.renderers.gsplat import GaussianSplatRenderer
     from gauntlet.realsim.renderers.nearest_frame import NearestFrameRenderer
 
     try:
@@ -3217,11 +3218,13 @@ def realsim_render(
     except RendererRegistryError as exc:
         raise _fail(f"{exc}\nAvailable: {', '.join(list_renderers()) or '(none)'}") from exc
 
-    # The nearest-frame renderer needs scene_root to resolve frame paths.
+    # File-backed renderers need scene_root to resolve frame paths.
     # The zero-arg factory in the registry defaults scene_root to cwd;
     # rebuild the instance here so it can find the frames.
     if isinstance(renderer, NearestFrameRenderer):
         renderer = NearestFrameRenderer(scene_root=scene_dir)
+    elif isinstance(renderer, GaussianSplatRenderer):
+        renderer = GaussianSplatRenderer(scene_root=scene_dir)
 
     frame = scene.frames[frame_index]
     intrinsics = scene.intrinsics[frame.intrinsics_id]

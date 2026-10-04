@@ -22,7 +22,7 @@ Pick the next backlog item by topology, not by ID. Items in the same category ma
 
 Carryover items that did not make the v0.2.0 cut. Sized like the rest of the backlog.
 
-### B-45: Tabletop push-task variant
+### B-45: Tabletop push-task variant — shipped (`env: tabletop-push`)
 
 - **What:** `TabletopPushEnv` subclass (or env-factory flag on `TabletopEnv`) that disables the grasp mechanism. Success: cube XY pushed into the target zone via planar contacts only — different failure modes than pick-place (overshoot, slip, dead-zone). Register as `env: tabletop-push`. Reuse the seven perturbation axes verbatim.
 - **Why:** Single-task evaluation is the largest gap in the v0.2.0 surface vs published benchmarks (RoboEval, LIBERO, RoboCasa). Push is the canonical second task — same kinematics, qualitatively different failure modes. Two-task coverage starts to tell us whether a policy regression is task-specific or general.
@@ -30,7 +30,7 @@ Carryover items that did not make the v0.2.0 cut. Sized like the rest of the bac
 - **Disjoint with:** `env/tabletop.py` (subclass), `env/registry.py` (one new entry), `examples/suites/tabletop-push-smoke.yaml`. Conflicts with B-09 (TabletopStackEnv) only in the per-step gripper-snap surface — pull the snap logic out into a helper if both are active.
 - **Anti-feature?** Two near-identical envs encourage copy-paste drift on the perturbation axes. The mitigation is to keep the env a thin subclass / factory flag on `TabletopEnv`, not a fork.
 
-### B-46: gsplat default training loop
+### B-46: gsplat default training loop — shipped (smoke-test fit + PyTorch fallback rasterizer)
 
 - **What:** Implement `GaussianSplatRenderer._fit_gaussians` for the in-tree default — 4096 uniform-init gaussians, Adam against L1 photometric loss on training frames, `max_train_steps` budget. Plus `_rasterise` against the trained model. Today the plugin scaffold ships with `NotImplementedError` and the in-tree subclass extension point is the only path that lands end-to-end.
 - **Why:** Closes the Phase 3 renderer story end-to-end (not just registry-wired). Lets the reference benchmark exercise a real reconstructor.
